@@ -10,7 +10,7 @@ const logColors = {
 
 export default function LogViewer() {
   const { logs, gameRunning, launchState } = useLaunch()
-  const [visible, setVisible] = useState(true)
+  const [visible, setVisible] = useState(false)
   const logsEndRef = useRef(null)
 
   useEffect(() => {
