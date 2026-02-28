@@ -10,9 +10,7 @@ export default function LoginSection() {
   const handleLogin = async () => {
     try {
       setLoggingIn(true);
-      showStatus("Abriendo ventana de Microsoft...", "info");
       await login();
-      showStatus("Autenticacion exitosa!", "success");
     } catch (err) {
       console.error("Login error:", err);
       showStatus(err.desc || err.message || "Error al iniciar sesion", "error");

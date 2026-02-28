@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
-import { showStatus } from '../common/StatusMessage'
 
 export default function UserProfile({ onOpenSettings }) {
   const { account, logout } = useAuth()
@@ -24,7 +23,6 @@ export default function UserProfile({ onOpenSettings }) {
   const handleLogout = async () => {
     setMenuOpen(false)
     await logout()
-    showStatus('Sesion cerrada', 'info')
   }
 
   return (

@@ -2,27 +2,26 @@ import { useState, useEffect, useRef } from 'react'
 
 let setStatusGlobal = null
 
-export function showStatus(message, type = 'info') {
+export function showStatus(message, type = 'error') {
   if (setStatusGlobal) {
     setStatusGlobal({ message, type })
   }
 }
 
-const typeClasses = {
-  info: 'bg-blue-500/30',
-  success: 'bg-green-500/30',
-  error: 'bg-red-500/30',
-}
-
 export default function StatusMessage() {
   const [status, setStatus] = useState(null)
+  const [visible, setVisible] = useState(false)
   const timerRef = useRef(null)
 
   useEffect(() => {
     setStatusGlobal = (data) => {
       if (timerRef.current) clearTimeout(timerRef.current)
       setStatus(data)
-      timerRef.current = setTimeout(() => setStatus(null), 5000)
+      setVisible(true)
+      timerRef.current = setTimeout(() => {
+        setVisible(false)
+        setTimeout(() => setStatus(null), 300)
+      }, 5000)
     }
 
     return () => {
@@ -34,8 +33,17 @@ export default function StatusMessage() {
   if (!status) return null
 
   return (
-    <div className={`mt-5 p-2.5 rounded text-sm ${typeClasses[status.type]}`}>
-      {status.message}
+    <div
+      className={`flex items-center gap-3 px-4 py-3 rounded-lg bg-[rgba(20,20,22,0.95)] backdrop-blur-[20px] border border-red-500/30 shadow-[0_8px_32px_rgba(0,0,0,0.4)] transition-opacity duration-300 ${
+        visible ? 'opacity-100' : 'opacity-0'
+      }`}
+    >
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="shrink-0">
+        <circle cx="8" cy="8" r="7" stroke="#ef4444" strokeWidth="1.5" strokeOpacity="0.7" />
+        <path d="M8 4.5V9" stroke="#ef4444" strokeWidth="1.5" strokeLinecap="round" />
+        <circle cx="8" cy="11.5" r="0.75" fill="#ef4444" />
+      </svg>
+      <span className="text-sm text-white/80">{status.message}</span>
     </div>
   )
 }

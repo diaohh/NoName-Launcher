@@ -13,9 +13,7 @@ export default function PlayButton() {
 
   const handlePlay = async () => {
     try {
-      showStatus('Iniciando Minecraft...', 'info')
       await launch()
-      showStatus('Minecraft iniciado!', 'success')
     } catch (err) {
       console.error('Launch error:', err)
       showStatus(err.message || 'Error al iniciar Minecraft', 'error')
@@ -41,7 +39,7 @@ export default function PlayButton() {
 
   return (
     <div
-      className={`absolute bottom-[80px] transition-all duration-500 ease-[cubic-bezier(0.175,0.885,0.32,1.275)] ${
+      className={`absolute bottom-[120px] transition-all duration-500 ease-[cubic-bezier(0.175,0.885,0.32,1.275)] ${
         isVisible
           ? 'opacity-100 translate-y-0 pointer-events-auto'
           : 'opacity-0 translate-y-[20px] pointer-events-none'

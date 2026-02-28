@@ -23,10 +23,12 @@ function AppContent() {
 
   if (!account) {
     return (
-      <>
+      <div className="relative w-screen h-screen">
         <LoginSection />
-        <StatusMessage />
-      </>
+        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-40 min-w-[300px]">
+          <StatusMessage />
+        </div>
+      </div>
     )
   }
 
