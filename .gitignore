@@ -1,0 +1,39 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+.DS_Store
+
+# Dependency directories
+node_modules/
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Optional npm cache directory
+.npm
+
+# dotenv environment variables file
+.env
+.env.test
+
+# Vite
+.vite/
+
+# electron-vite output
+out/
+
+# electron-builder output
+dist/
+
+# Launcher specific
+launcher-data/
+CLAUDE.md
+distribution.json
+test.html
