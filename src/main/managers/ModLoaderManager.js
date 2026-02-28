@@ -18,6 +18,22 @@ class ModLoaderManager {
         return 'vanilla'
     }
 
+    static _getForgeBuildNumber(forgeModule) {
+        // Direct field from Firestore (preferred)
+        if (forgeModule.rawModule.forgeVersion) return forgeModule.rawModule.forgeVersion
+        // Maven format: net.minecraftforge:forge:1.20.1-47.2.0
+        const mavenId = forgeModule.rawModule.id || ''
+        const version = mavenId.split(':').pop()
+        const build = version.split('-').slice(1).join('-')
+        return build || null
+    }
+
+    static _getFabricVersion(fabricModule) {
+        if (fabricModule.rawModule.fabricVersion) return fabricModule.rawModule.fabricVersion
+        const mavenId = fabricModule.rawModule.id || ''
+        return mavenId.split(':').pop() || null
+    }
+
     static isModLoaderInstalled(server) {
         const loaderType = this.detectModLoader(server)
         if (loaderType === 'vanilla') return true
@@ -29,8 +45,9 @@ class ModLoaderManager {
             const forgeModule = server.modules.find(m => m.rawModule.type === 'ForgeHosted' || m.rawModule.type === 'Forge')
             if (!forgeModule) return false
 
-            const forgeVersion = forgeModule.rawModule.id.split(':').pop()
-            const forgeBuildNumber = forgeVersion.split('-').slice(1).join('-')
+            const forgeBuildNumber = this._getForgeBuildNumber(forgeModule)
+            if (!forgeBuildNumber) return false
+
             const forgeVersionString = `${minecraftVersion}-forge-${forgeBuildNumber}`
             const forgeJsonPath = path.join(commonDir, 'versions', forgeVersionString, `${forgeVersionString}.json`)
             return fs.existsSync(forgeJsonPath)
@@ -40,7 +57,9 @@ class ModLoaderManager {
             const fabricModule = server.modules.find(m => m.rawModule.type === 'Fabric')
             if (!fabricModule) return false
 
-            const fabricVersion = fabricModule.rawModule.id.split(':').pop()
+            const fabricVersion = this._getFabricVersion(fabricModule)
+            if (!fabricVersion) return false
+
             const fabricJsonPath = path.join(commonDir, 'versions', `fabric-loader-${fabricVersion}-${minecraftVersion}`, `fabric-loader-${fabricVersion}-${minecraftVersion}.json`)
             return fs.existsSync(fabricJsonPath)
         }
@@ -69,9 +88,15 @@ class ModLoaderManager {
             )
             if (!forgeModule) throw new Error('Forge module not found in server configuration')
 
-            const forgeVersion = forgeModule.rawModule.id.split(':').pop()
+            const forgeBuildNumber = this._getForgeBuildNumber(forgeModule)
+            if (!forgeBuildNumber) throw new Error('Forge version not specified. Add forgeVersion field to the Forge module in Firestore.')
+            const minecraftVersion = server.rawServer.minecraftVersion
             const commonDir = ConfigManager.getCommonDirectory()
-            const forgeInstallerPath = path.join(commonDir, 'forge', `${forgeVersion}.jar`)
+
+            if (!forgeModule.rawModule.artifact || !forgeModule.rawModule.artifact.url) {
+                throw new Error('Forge module missing artifact.url in Firestore')
+            }
+            const forgeInstallerPath = path.join(commonDir, 'forge', path.basename(forgeModule.rawModule.artifact.url))
 
             if (!fs.existsSync(forgeInstallerPath)) {
                 throw new Error(`Forge installer not found at: ${forgeInstallerPath}`)
@@ -79,7 +104,6 @@ class ModLoaderManager {
 
             if (progressCallback) progressCallback(20, 100, 'Ejecutando instalador de Forge...')
 
-            const minecraftVersion = server.rawServer.minecraftVersion
             fs.ensureDirSync(path.join(commonDir, 'versions'))
             fs.ensureDirSync(path.join(commonDir, 'libraries'))
 
@@ -133,7 +157,8 @@ class ModLoaderManager {
             const fabricModule = server.modules.find(m => m.rawModule.type === 'Fabric')
             if (!fabricModule) throw new Error('Fabric module not found')
 
-            const fabricVersion = fabricModule.rawModule.id.split(':').pop()
+            const fabricVersion = this._getFabricVersion(fabricModule)
+            if (!fabricVersion) throw new Error('Fabric version not specified. Add fabricVersion field to the Fabric module in Firestore.')
             const minecraftVersion = server.rawServer.minecraftVersion
             const commonDir = ConfigManager.getCommonDirectory()
             const fabricPath = path.join(commonDir, 'fabric', `fabric-loader-${fabricVersion}-${minecraftVersion}.jar`)
@@ -156,15 +181,16 @@ class ModLoaderManager {
         if (loaderType === 'forge') {
             const forgeModule = server.modules.find(m => m.rawModule.type === 'ForgeHosted' || m.rawModule.type === 'Forge')
             if (forgeModule) {
-                const forgeBuildNumber = forgeModule.rawModule.id.split(':').pop().split('-').slice(1).join('-')
-                return `${minecraftVersion}-forge-${forgeBuildNumber}`
+                const forgeBuildNumber = this._getForgeBuildNumber(forgeModule)
+                if (forgeBuildNumber) return `${minecraftVersion}-forge-${forgeBuildNumber}`
             }
         }
 
         if (loaderType === 'fabric') {
             const fabricModule = server.modules.find(m => m.rawModule.type === 'Fabric')
             if (fabricModule) {
-                return `fabric-loader-${fabricModule.rawModule.id.split(':').pop()}-${minecraftVersion}`
+                const fabricVersion = this._getFabricVersion(fabricModule)
+                if (fabricVersion) return `fabric-loader-${fabricVersion}-${minecraftVersion}`
             }
         }
 

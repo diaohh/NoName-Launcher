@@ -116,7 +116,7 @@ class DistributionManager {
 
                 let filePath
                 if (module.type === 'ForgeHosted' || module.type === 'Forge') {
-                    filePath = path.join(ConfigManager.getCommonDirectory(), 'forge', `${module.id.split(':').pop()}.jar`)
+                    filePath = path.join(ConfigManager.getCommonDirectory(), 'forge', path.basename(module.artifact.url))
                 } else if (module.type === 'ForgeMod' || module.type === 'LiteMod') {
                     filePath = path.join(instanceDir, 'mods', path.basename(module.artifact.url))
                 } else if (module.type === 'File') {
