@@ -26,6 +26,7 @@ export function LaunchProvider({ children }) {
         case 'modloader':
         case 'download':
         case 'java':
+        case 'java_discover':
         case 'java_download':
         case 'java_extract':
         case 'launch':
