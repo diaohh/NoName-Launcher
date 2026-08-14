@@ -1,13 +1,15 @@
 import { DistributionAPI } from 'helios-core/common'
+import { downloadQueue, getExpectedDownloadSize, HashAlgo } from 'helios-core/dl'
 import ConfigManager from './ConfigManager'
 import Logger from '../utils/Logger'
+import { validateLocalFile } from '../utils/FileUtils'
 import path from 'path'
 import fs from 'fs-extra'
-import crypto from 'crypto'
-import got from 'got'
 import AdmZip from 'adm-zip'
 
 const logger = Logger.getLogger('DistributionManager')
+
+const toMB = (bytes) => (bytes / 1024 / 1024).toFixed(1)
 
 class DistributionManager {
 
@@ -133,12 +135,8 @@ class DistributionManager {
                 const stats = fs.statSync(filePath)
                 if (stats.isDirectory()) continue
 
-                if (module.artifact.MD5) {
-                    const fileBuffer = fs.readFileSync(filePath)
-                    const hash = crypto.createHash('md5').update(fileBuffer).digest('hex')
-                    if (hash !== module.artifact.MD5) {
-                        invalidFiles.push({ module, filePath })
-                    }
+                if (!await validateLocalFile(filePath, HashAlgo.MD5, module.artifact.MD5)) {
+                    invalidFiles.push({ module, filePath })
                 }
             }
 
@@ -154,41 +152,49 @@ class DistributionManager {
         try {
             if (invalidFiles.length === 0) return true
 
-            let downloaded = 0
+            const downloads = invalidFiles.map(({ module, filePath }, index) => {
+                const isZip = module.artifact.url.toLowerCase().endsWith('.zip')
+                return {
+                    // downloadQueue tracks progress per id, so it must be unique.
+                    id: `${module.id || module.name}#${index}`,
+                    hash: module.artifact.MD5 || '',
+                    algo: HashAlgo.MD5,
+                    size: module.artifact.size || 0,
+                    url: module.artifact.url,
+                    path: isZip ? `${filePath}.download` : filePath,
+                    module,
+                    filePath,
+                    isZip
+                }
+            })
 
-            for (const { module, filePath } of invalidFiles) {
-                downloaded++
+            const totalSize = getExpectedDownloadSize(downloads)
+
+            await downloadQueue(downloads, (received) => {
                 if (progressCallback) {
-                    progressCallback(downloaded, invalidFiles.length, `Descargando ${module.name}...`)
+                    const progress = totalSize > 0
+                        ? `${toMB(received)} MB / ${toMB(totalSize)} MB`
+                        : `${toMB(received)} MB`
+                    progressCallback(received, totalSize, `Descargando archivos del servidor... ${progress}`)
+                }
+            })
+
+            for (const download of downloads) {
+                if (!await validateLocalFile(download.path, download.algo, download.hash)) {
+                    throw new Error(`El archivo ${download.module.name} no coincide con el checksum esperado`)
                 }
 
-                const isZip = module.artifact.url.toLowerCase().endsWith('.zip')
-                const downloadPath = isZip ? filePath + '.download' : filePath
-
-                fs.ensureDirSync(path.dirname(downloadPath))
-
-                const downloadStream = got.stream(module.artifact.url)
-                const fileWriterStream = fs.createWriteStream(downloadPath)
-
-                await new Promise((resolve, reject) => {
-                    downloadStream.pipe(fileWriterStream)
-                    fileWriterStream.on('finish', resolve)
-                    fileWriterStream.on('error', reject)
-                    downloadStream.on('error', reject)
-                })
-
-                if (isZip) {
+                if (download.isZip) {
                     if (progressCallback) {
-                        progressCallback(downloaded, invalidFiles.length, `Extrayendo ${module.name}...`)
+                        progressCallback(totalSize, totalSize, `Extrayendo ${download.module.name}...`)
                     }
-                    fs.ensureDirSync(filePath)
-                    const zip = new AdmZip(downloadPath)
-                    zip.extractAllTo(filePath, true)
-                    fs.removeSync(downloadPath)
+                    fs.ensureDirSync(download.filePath)
+                    new AdmZip(download.path).extractAllTo(download.filePath, true)
+                    fs.removeSync(download.path)
                 }
             }
 
-            logger.info('All files downloaded successfully')
+            logger.info(`Downloaded ${downloads.length} server files successfully`)
             return true
         } catch (err) {
             logger.error('File download failed:', err)

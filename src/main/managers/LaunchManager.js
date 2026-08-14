@@ -2,16 +2,18 @@ import child_process from 'child_process'
 import path from 'path'
 import fs from 'fs-extra'
 import { validateSelectedJvm, latestOpenJDK, extractJdk, javaExecFromRoot, ensureJavaDirIsRoot, discoverBestJvmInstallation } from 'helios-core/java'
-import { downloadFile } from 'helios-core/dl'
-import got from 'got'
+import { downloadFile, downloadQueue, getExpectedDownloadSize, HashAlgo } from 'helios-core/dl'
 import ConfigManager from './ConfigManager'
 import AuthManager from './AuthManager'
 import DistributionManager from './DistributionManager'
 import ModLoaderManager from './ModLoaderManager'
 import MinecraftDownloadManager from './MinecraftDownloadManager'
 import Logger from '../utils/Logger'
+import { validateLocalFile } from '../utils/FileUtils'
 
 const logger = Logger.getLogger('LaunchManager')
+
+const toMB = (bytes) => (bytes / 1024 / 1024).toFixed(1)
 
 // Minecraft 1.17 introduced the `arguments` manifest format and stopped shipping
 // natives as library classifiers. Older releases would need a separate code path.
@@ -149,38 +151,50 @@ class LaunchManager {
             }
 
             const versionData = await fs.readJson(versionJsonPath)
-            const libraries = versionData.libraries || []
-            let downloaded = 0
+            const pending = []
 
-            for (const lib of libraries) {
-                if (!lib.downloads || !lib.downloads.artifact) continue
+            for (const lib of versionData.libraries || []) {
+                const artifact = lib.downloads?.artifact
+                if (!artifact?.path) continue
 
-                const artifact = lib.downloads.artifact
                 const libPath = path.join(librariesDir, artifact.path)
 
-                if (fs.existsSync(libPath)) {
-                    downloaded++
-                    if (progressCallback) progressCallback(downloaded, libraries.length, `Verificado: ${lib.name}`)
+                if (await validateLocalFile(libPath, HashAlgo.SHA1, artifact.sha1)) continue
+
+                // Loader libraries generated locally by the installer have no URL.
+                if (!artifact.url) {
+                    logger.warn(`Library ${lib.name} has no download URL and is missing locally`)
                     continue
                 }
 
-                fs.ensureDirSync(path.dirname(libPath))
+                pending.push({
+                    id: lib.name,
+                    hash: artifact.sha1,
+                    algo: HashAlgo.SHA1,
+                    size: artifact.size || 0,
+                    url: artifact.url,
+                    path: libPath
+                })
+            }
 
-                try {
-                    const downloadStream = got.stream(artifact.url)
-                    const fileWriterStream = fs.createWriteStream(libPath)
-                    await new Promise((resolve, reject) => {
-                        downloadStream.pipe(fileWriterStream)
-                        fileWriterStream.on('finish', resolve)
-                        fileWriterStream.on('error', reject)
-                        downloadStream.on('error', reject)
-                    })
-                } catch (err) {
-                    logger.warn(`Failed to download ${lib.name}:`, err.message)
+            if (pending.length === 0) return
+
+            const totalSize = getExpectedDownloadSize(pending)
+            logger.info(`Downloading ${pending.length} mod loader libraries`)
+
+            await downloadQueue(pending, (received) => {
+                if (progressCallback) {
+                    progressCallback(received, totalSize, `Descargando librerias... ${toMB(received)} MB / ${toMB(totalSize)} MB`)
                 }
+            })
 
-                downloaded++
-                if (progressCallback) progressCallback(downloaded, libraries.length, `Descargando: ${lib.name}`)
+            const failed = []
+            for (const asset of pending) {
+                if (!await validateLocalFile(asset.path, asset.algo, asset.hash)) failed.push(asset.id)
+            }
+
+            if (failed.length > 0) {
+                throw new Error(`No se pudieron descargar ${failed.length} librerias: ${failed.slice(0, 3).join(', ')}`)
             }
         } catch (err) {
             logger.error('Failed to download mod loader libraries:', err)
