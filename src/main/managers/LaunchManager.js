@@ -13,9 +13,26 @@ import Logger from '../utils/Logger'
 
 const logger = Logger.getLogger('LaunchManager')
 
+// Minecraft 1.17 introduced the `arguments` manifest format and stopped shipping
+// natives as library classifiers. Older releases would need a separate code path.
+const MIN_SUPPORTED_MINOR = 17
+
 class LaunchManager {
 
     static gameProcess = null
+
+    static assertSupportedVersion(minecraftVersion) {
+        const [major, minor] = minecraftVersion.split('.').map(part => parseInt(part))
+
+        if (major === 1 && minor < MIN_SUPPORTED_MINOR) {
+            const error = new Error(
+                `Minecraft ${minecraftVersion} no es compatible con este launcher. ` +
+                `Solo se admiten versiones 1.${MIN_SUPPORTED_MINOR} o superiores.`
+            )
+            error.code = 'UNSUPPORTED_MC_VERSION'
+            throw error
+        }
+    }
 
     static getRequiredJavaVersion(minecraftVersion) {
         const versionParts = minecraftVersion.split('.')
@@ -171,31 +188,43 @@ class LaunchManager {
         }
     }
 
-    static async loadVersionManifest(minecraftVersion) {
-        const commonDir = ConfigManager.getCommonDirectory()
-        const versionJsonPath = path.join(commonDir, 'versions', minecraftVersion, `${minecraftVersion}.json`)
-
+    static async readVersionJson(versionId) {
+        const versionJsonPath = path.join(ConfigManager.getCommonDirectory(), 'versions', versionId, `${versionId}.json`)
         if (!fs.existsSync(versionJsonPath)) throw new Error(`Version manifest not found: ${versionJsonPath}`)
+        return await fs.readJson(versionJsonPath)
+    }
 
-        const versionData = await fs.readJson(versionJsonPath)
+    /**
+     * Resolves a version manifest, merging it with its `inheritsFrom` parent when
+     * the version belongs to a mod loader.
+     *
+     * @returns {{ versionData: object, vanillaVersion: string }} The merged manifest
+     * and the vanilla version id, which is what the client jar and assets are keyed by.
+     */
+    static async loadVersionManifest(versionId) {
+        const versionData = await this.readVersionJson(versionId)
 
-        if (versionData.inheritsFrom) {
-            const parentJsonPath = path.join(commonDir, 'versions', versionData.inheritsFrom, `${versionData.inheritsFrom}.json`)
-            if (!fs.existsSync(parentJsonPath)) throw new Error(`Parent version manifest not found: ${parentJsonPath}`)
+        if (!versionData.inheritsFrom) {
+            return { versionData, vanillaVersion: versionId }
+        }
 
-            const parentData = await fs.readJson(parentJsonPath)
-            return {
-                ...parentData,
-                ...versionData,
-                libraries: [...(parentData.libraries || []), ...(versionData.libraries || [])],
-                arguments: {
-                    game: [...(parentData.arguments?.game || []), ...(versionData.arguments?.game || [])],
-                    jvm: [...(parentData.arguments?.jvm || []), ...(versionData.arguments?.jvm || [])]
-                }
+        const parentData = await this.readVersionJson(versionData.inheritsFrom)
+        const merged = {
+            ...parentData,
+            ...versionData,
+            libraries: [...(parentData.libraries || []), ...(versionData.libraries || [])]
+        }
+
+        // Only build `arguments` when at least one manifest declares it. Creating an
+        // empty object here would shadow the legacy `minecraftArguments` branch.
+        if (parentData.arguments || versionData.arguments) {
+            merged.arguments = {
+                game: [...(parentData.arguments?.game || []), ...(versionData.arguments?.game || [])],
+                jvm: [...(parentData.arguments?.jvm || []), ...(versionData.arguments?.jvm || [])]
             }
         }
 
-        return versionData
+        return { versionData: merged, vanillaVersion: versionData.inheritsFrom }
     }
 
     static processArgTemplate(arg, argContext) {
@@ -226,8 +255,27 @@ class LaunchManager {
         return true
     }
 
-    static async buildLaunchCommand(javaPath, account, minecraftVersion, server) {
-        const versionData = await this.loadVersionManifest(minecraftVersion)
+    static appendArguments(args, argList, argContext) {
+        for (const arg of argList) {
+            if (!this.processArgumentRules(arg)) continue
+            const argValue = typeof arg === 'string' ? arg : (arg.value || [])
+            for (const value of (Array.isArray(argValue) ? argValue : [argValue])) {
+                args.push(this.processArgTemplate(value, argContext))
+            }
+        }
+    }
+
+    static async buildLaunchCommand(account, versionId, server) {
+        const { versionData, vanillaVersion } = await this.loadVersionManifest(versionId)
+
+        if (!versionData.arguments) {
+            const error = new Error(
+                `El manifiesto de ${versionId} usa el formato antiguo (minecraftArguments), que no es compatible con este launcher.`
+            )
+            error.code = 'UNSUPPORTED_MANIFEST'
+            throw error
+        }
+
         const commonDir = ConfigManager.getCommonDirectory()
         const gameDir = server ? path.join(ConfigManager.getInstanceDirectory(), server.rawServer.id) : ConfigManager.getInstanceDirectory()
         const assetsDir = path.join(commonDir, 'assets')
@@ -241,17 +289,19 @@ class LaunchManager {
             if (libPath) libraries.push(path.join(librariesDir, libPath))
         }
 
-        const clientJar = path.join(commonDir, 'versions', minecraftVersion, `${minecraftVersion}.jar`)
+        // The client jar always belongs to the vanilla version, even when launching a
+        // mod loader profile such as `1.20.1-forge-47.2.0`.
+        const clientJar = path.join(commonDir, 'versions', vanillaVersion, `${vanillaVersion}.jar`)
         libraries.push(clientJar)
 
         const classpath = libraries.join(process.platform === 'win32' ? ';' : ':')
 
         const argContext = {
             auth_player_name: account.displayName,
-            version_name: minecraftVersion,
+            version_name: versionId,
             game_directory: gameDir,
             assets_root: assetsDir,
-            assets_index_name: versionData.assetIndex?.id || versionData.assets || minecraftVersion,
+            assets_index_name: versionData.assetIndex?.id || versionData.assets || vanillaVersion,
             auth_uuid: account.uuid,
             auth_access_token: account.accessToken,
             user_type: 'msa',
@@ -270,34 +320,12 @@ class LaunchManager {
         const minRAM = server?.rawServer?.java?.minRam || ConfigManager.getMinRAM()
         const args = ['-Xmx' + maxRAM, '-Xms' + minRAM]
 
-        if (versionData.arguments?.jvm) {
-            for (const arg of versionData.arguments.jvm) {
-                if (!this.processArgumentRules(arg)) continue
-                const argValue = typeof arg === 'string' ? arg : (arg.value || [])
-                for (const a of (Array.isArray(argValue) ? argValue : [argValue])) {
-                    args.push(this.processArgTemplate(a, argContext))
-                }
-            }
-        } else {
-            args.push(`-Djava.library.path=${nativesDir}`, `-Dminecraft.launcher.brand=${argContext.launcher_name}`, `-Dminecraft.launcher.version=${argContext.launcher_version}`, '-cp', classpath)
-        }
+        this.appendArguments(args, versionData.arguments.jvm || [], argContext)
 
         args.push('-XX:+UnlockExperimentalVMOptions', '-XX:+UseG1GC', '-XX:G1NewSizePercent=20', '-XX:G1ReservePercent=20', '-XX:MaxGCPauseMillis=50', '-XX:G1HeapRegionSize=32M')
         args.push(versionData.mainClass)
 
-        if (versionData.arguments?.game) {
-            for (const arg of versionData.arguments.game) {
-                if (!this.processArgumentRules(arg)) continue
-                const argValue = typeof arg === 'string' ? arg : (arg.value || [])
-                for (const a of (Array.isArray(argValue) ? argValue : [argValue])) {
-                    args.push(this.processArgTemplate(a, argContext))
-                }
-            }
-        } else if (versionData.minecraftArguments) {
-            for (const arg of versionData.minecraftArguments.split(' ')) {
-                args.push(this.processArgTemplate(arg, argContext))
-            }
-        }
+        this.appendArguments(args, versionData.arguments.game || [], argContext)
 
         if (ConfigManager.getFullscreen()) {
             args.push('--fullscreen')
@@ -326,6 +354,8 @@ class LaunchManager {
 
             const server = DistributionManager.getSelectedServer()
             if (!server) throw new Error('No server selected')
+
+            this.assertSupportedVersion(server.rawServer.minecraftVersion)
 
             logger.info('Launching server:', server.rawServer.name)
 
@@ -358,6 +388,8 @@ class LaunchManager {
             const javaPath = await this.ensureJava(requiredJavaVersion, progressCallback)
 
             const loaderType = ModLoaderManager.detectModLoader(server)
+            const versionString = ModLoaderManager.getVersionString(server)
+
             if (loaderType !== 'vanilla') {
                 if (!ModLoaderManager.isModLoaderInstalled(server)) {
                     if (progressCallback) progressCallback({ type: 'modloader', message: `Instalando ${loaderType}...` })
@@ -366,7 +398,6 @@ class LaunchManager {
                     })
                 }
 
-                const versionString = ModLoaderManager.getVersionString(server)
                 if (progressCallback) progressCallback({ type: 'download', message: `Descargando librerias de ${loaderType}...` })
                 await this.downloadModLoaderLibraries(versionString, (current, total, message) => {
                     if (progressCallback) progressCallback({ type: 'download', message: message || `Descargando librerias de ${loaderType}...`, current, total })
@@ -375,8 +406,7 @@ class LaunchManager {
 
             if (progressCallback) progressCallback({ type: 'launch', message: 'Construyendo comando de lanzamiento...' })
 
-            const versionString = ModLoaderManager.getVersionString(server)
-            const args = await this.buildLaunchCommand(javaPath, account, versionString, server)
+            const args = await this.buildLaunchCommand(account, versionString, server)
 
             if (progressCallback) progressCallback({ type: 'launch', message: 'Iniciando Minecraft...' })
 
