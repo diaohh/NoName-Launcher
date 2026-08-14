@@ -183,6 +183,18 @@ class LaunchManager {
         return null
     }
 
+    /**
+     * Identity of a library ignoring its version, so different versions of the same
+     * artifact collide. Natives keep their classifier: `lwjgl:natives-windows` and
+     * `lwjgl` are different entries on the classpath.
+     */
+    static libraryKey(lib, artifact) {
+        if (!lib.name) return artifact.relativePath
+
+        const [group, artifactId, , classifier] = lib.name.split(':')
+        return classifier ? `${group}:${artifactId}:${classifier}` : `${group}:${artifactId}`
+    }
+
     static async downloadModLoaderLibraries(versionString, progressCallback) {
         try {
             const commonDir = ConfigManager.getCommonDirectory()
@@ -342,12 +354,19 @@ class LaunchManager {
         const librariesDir = path.join(commonDir, 'libraries')
         const nativesDir = path.join(gameDir, 'natives')
 
-        const libraries = []
+        // Vanilla libraries come first in the merged manifest and the loader's come
+        // after, so a later entry for the same artifact overrides the earlier one.
+        // Without this the classpath would carry two versions of asm, guava or log4j
+        // and the vanilla one would win.
+        const librariesByArtifact = new Map()
         for (const lib of versionData.libraries) {
             if (lib.rules && !this.processArgumentRules(lib)) continue
             const artifact = this.resolveLibraryArtifact(lib)
-            if (artifact) libraries.push(path.join(librariesDir, artifact.relativePath))
+            if (!artifact) continue
+            librariesByArtifact.set(this.libraryKey(lib, artifact), path.join(librariesDir, artifact.relativePath))
         }
+
+        const libraries = [...librariesByArtifact.values()]
 
         // The client jar always belongs to the vanilla version, even when launching a
         // mod loader profile such as `1.20.1-forge-47.2.0`.
