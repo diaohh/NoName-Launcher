@@ -23,7 +23,16 @@ class MinecraftDownloadManager {
                 progressCallback(5, 'validation', 'Validando archivos...')
             }
 
-            const dlObjects = await mojangProcessor.validate(async () => {})
+            const totalStages = mojangProcessor.totalStages()
+            let completedStages = 0
+
+            const dlObjects = await mojangProcessor.validate(async () => {
+                completedStages++
+                if (progressCallback) {
+                    const stagePercent = 5 + Math.floor((completedStages / totalStages) * 5)
+                    progressCallback(stagePercent, 'validation', `Validando archivos... (${completedStages}/${totalStages})`)
+                }
+            })
 
             const allDownloads = [
                 ...dlObjects.assets,
