@@ -266,7 +266,9 @@ class LaunchManager {
             classpath_separator: process.platform === 'win32' ? ';' : ':'
         }
 
-        const args = ['-Xmx' + ConfigManager.getMaxRAM(), '-Xms' + ConfigManager.getMinRAM()]
+        const maxRAM = server?.rawServer?.java?.maxRam || ConfigManager.getMaxRAM()
+        const minRAM = server?.rawServer?.java?.minRam || ConfigManager.getMinRAM()
+        const args = ['-Xmx' + maxRAM, '-Xms' + minRAM]
 
         if (versionData.arguments?.jvm) {
             for (const arg of versionData.arguments.jvm) {
