@@ -26,6 +26,11 @@ export function useServers(accountUsername) {
   }, [accountUsername])
 
   const selectServer = async (id) => {
+    if (selectedServer?.id === id) {
+      setSelectedServer(null)
+      return
+    }
+
     const modpack = servers.find(s => s.id === id)
     if (!modpack) return
 
