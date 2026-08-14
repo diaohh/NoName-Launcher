@@ -1,7 +1,7 @@
 import child_process from 'child_process'
 import path from 'path'
 import fs from 'fs-extra'
-import { validateSelectedJvm, latestOpenJDK, extractJdk } from 'helios-core/java'
+import { validateSelectedJvm, latestOpenJDK, extractJdk, javaExecFromRoot, ensureJavaDirIsRoot, discoverBestJvmInstallation } from 'helios-core/java'
 import { downloadFile } from 'helios-core/dl'
 import got from 'got'
 import ConfigManager from './ConfigManager'
@@ -35,12 +35,14 @@ class LaunchManager {
         if (!javaPath) return null
 
         try {
-            const vResult = await validateSelectedJvm(javaPath, requiredVersion)
-            if (vResult.valid) {
-                logger.info('Java validation successful:', javaPath)
+            const javaRoot = ensureJavaDirIsRoot(javaPath)
+            const semverRange = `>=${requiredVersion}`
+            const vResult = await validateSelectedJvm(javaRoot, semverRange)
+            if (vResult != null) {
+                logger.info(`Java validation successful: ${javaPath} (${vResult.semverStr})`)
                 return javaPath
             }
-            logger.warn('Java validation failed:', vResult.error)
+            logger.warn('Java validation failed: no suitable JVM found')
             return null
         } catch (err) {
             logger.error('Java validation error:', err)
@@ -50,6 +52,21 @@ class LaunchManager {
 
     static async downloadJava(version = 21, progressCallback) {
         try {
+            const semverRange = `>=${version}`
+            const dataDir = ConfigManager.getLauncherDirectory()
+
+            if (progressCallback) progressCallback({ type: 'java_discover', message: `Buscando Java ${version} en el sistema...` })
+            const existingJvm = await discoverBestJvmInstallation(dataDir, semverRange)
+            if (existingJvm != null) {
+                logger.info(`Found existing Java: ${existingJvm.path} (${existingJvm.semverStr})`)
+                const execPath = javaExecFromRoot(existingJvm.path)
+                if (fs.existsSync(execPath)) {
+                    ConfigManager.setJavaExecutable(execPath)
+                    ConfigManager.save()
+                    return execPath
+                }
+            }
+
             logger.info(`Downloading Java ${version}...`)
             if (progressCallback) progressCallback({ type: 'java_download', message: `Descargando Java ${version}...` })
 
@@ -77,23 +94,16 @@ class LaunchManager {
             const stats = await fs.stat(javaDownloadPath)
             if (stats.size < 1000000) throw new Error('Downloaded file is too small, likely an error')
 
-            if (progressCallback) progressCallback({ type: 'java_extract', message: 'Extracting Java...' })
-            await extractJdk(javaDownloadPath, javaDir)
+            if (progressCallback) progressCallback({ type: 'java_extract', message: 'Extrayendo Java...' })
+            const javaExecutable = await extractJdk(javaDownloadPath)
 
-            const extractedDirs = await fs.readdir(javaDir)
-            const jdkDir = extractedDirs.find(dir => dir.startsWith('jdk-'))
-            if (!jdkDir) throw new Error('JDK directory not found after extraction')
-
-            const javaBin = process.platform === 'win32' ? 'javaw.exe' : 'java'
-            const javaExecutable = path.join(javaDir, jdkDir, 'bin', javaBin)
-
-            if (fs.existsSync(javaExecutable)) {
+            if (javaExecutable && fs.existsSync(javaExecutable)) {
                 ConfigManager.setJavaExecutable(javaExecutable)
                 ConfigManager.save()
                 await fs.remove(javaDownloadPath)
                 return javaExecutable
             }
-            throw new Error(`Java executable not found at ${javaExecutable}`)
+            throw new Error('Java executable not found after extraction')
         } catch (err) {
             logger.error('Java download/install failed:', err)
             throw err
