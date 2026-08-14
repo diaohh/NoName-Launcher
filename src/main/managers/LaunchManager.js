@@ -10,6 +10,7 @@ import ModLoaderManager from './ModLoaderManager'
 import MinecraftDownloadManager from './MinecraftDownloadManager'
 import Logger from '../utils/Logger'
 import { validateLocalFile } from '../utils/FileUtils'
+import { mavenToRelativePath, mavenToUrl } from '../utils/MavenUtils'
 
 const logger = Logger.getLogger('LaunchManager')
 
@@ -154,6 +155,34 @@ class LaunchManager {
         throw new Error(`No valid Java ${requiredVersion} installation found and auto-download is disabled.`)
     }
 
+    /**
+     * Normalizes the two library formats found in version manifests: Mojang/Forge
+     * declare `downloads.artifact`, Fabric declares a Maven `name` plus a repository
+     * `url`. Returns null when the library carries no downloadable artifact.
+     */
+    static resolveLibraryArtifact(lib) {
+        const artifact = lib.downloads?.artifact
+        if (artifact?.path) {
+            return {
+                relativePath: artifact.path,
+                url: artifact.url || null,
+                sha1: artifact.sha1 || null,
+                size: artifact.size || 0
+            }
+        }
+
+        if (lib.name && lib.url) {
+            return {
+                relativePath: mavenToRelativePath(lib.name),
+                url: mavenToUrl(lib.url, lib.name),
+                sha1: lib.sha1 || null,
+                size: lib.size || 0
+            }
+        }
+
+        return null
+    }
+
     static async downloadModLoaderLibraries(versionString, progressCallback) {
         try {
             const commonDir = ConfigManager.getCommonDirectory()
@@ -169,10 +198,12 @@ class LaunchManager {
             const pending = []
 
             for (const lib of versionData.libraries || []) {
-                const artifact = lib.downloads?.artifact
-                if (!artifact?.path) continue
+                if (lib.rules && !this.processArgumentRules(lib)) continue
 
-                const libPath = path.join(librariesDir, artifact.path)
+                const artifact = this.resolveLibraryArtifact(lib)
+                if (!artifact) continue
+
+                const libPath = path.join(librariesDir, artifact.relativePath)
 
                 if (await validateLocalFile(libPath, HashAlgo.SHA1, artifact.sha1)) continue
 
@@ -186,7 +217,7 @@ class LaunchManager {
                     id: lib.name,
                     hash: artifact.sha1,
                     algo: HashAlgo.SHA1,
-                    size: artifact.size || 0,
+                    size: artifact.size,
                     url: artifact.url,
                     path: libPath
                 })
@@ -314,8 +345,8 @@ class LaunchManager {
         const libraries = []
         for (const lib of versionData.libraries) {
             if (lib.rules && !this.processArgumentRules(lib)) continue
-            const libPath = lib.downloads?.artifact?.path
-            if (libPath) libraries.push(path.join(librariesDir, libPath))
+            const artifact = this.resolveLibraryArtifact(lib)
+            if (artifact) libraries.push(path.join(librariesDir, artifact.relativePath))
         }
 
         // The client jar always belongs to the vanilla version, even when launching a

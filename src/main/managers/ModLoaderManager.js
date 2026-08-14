@@ -7,6 +7,8 @@ import Logger from '../utils/Logger'
 
 const logger = Logger.getLogger('ModLoaderManager')
 
+const FABRIC_META_URL = 'https://meta.fabricmc.net'
+
 class ModLoaderManager {
 
     static detectModLoader(server) {
@@ -161,22 +163,42 @@ class ModLoaderManager {
         }
     }
 
+    /**
+     * Fabric has no installer jar: the loader profile is published by Fabric Meta and
+     * only needs to be written into the versions directory. Its libraries are then
+     * resolved by the regular mod loader library download step.
+     */
     static async installFabric(server, progressCallback) {
         try {
             if (progressCallback) progressCallback(0, 100, 'Preparando instalacion de Fabric...')
 
             const fabricModule = server.modules.find(m => m.rawModule.type === 'Fabric')
-            if (!fabricModule) throw new Error('Fabric module not found')
+            if (!fabricModule) throw new Error('Fabric module not found in server configuration')
 
             const fabricVersion = this._getFabricVersion(fabricModule)
             if (!fabricVersion) throw new Error('Fabric version not specified. Add fabricVersion field to the Fabric module in Firestore.')
+
             const minecraftVersion = server.rawServer.minecraftVersion
-            const commonDir = ConfigManager.getCommonDirectory()
-            const fabricPath = path.join(commonDir, 'fabric', `fabric-loader-${fabricVersion}-${minecraftVersion}.jar`)
+            const profileUrl = `${FABRIC_META_URL}/v2/versions/loader/${minecraftVersion}/${fabricVersion}/profile/json`
 
-            if (!fs.existsSync(fabricPath)) throw new Error(`Fabric artifact not found at: ${fabricPath}`)
+            if (progressCallback) progressCallback(30, 100, 'Descargando perfil de Fabric...')
+            logger.info('Fetching Fabric profile:', profileUrl)
 
-            if (progressCallback) progressCallback(50, 100, 'Instalando Fabric...')
+            const response = await fetch(profileUrl)
+            if (!response.ok) {
+                throw new Error(`Fabric Meta respondio ${response.status} para Fabric ${fabricVersion} / Minecraft ${minecraftVersion}`)
+            }
+
+            const profile = await response.json()
+            const versionId = profile.id || this.getVersionString(server)
+
+            if (progressCallback) progressCallback(70, 100, 'Guardando perfil de Fabric...')
+
+            const versionDir = path.join(ConfigManager.getCommonDirectory(), 'versions', versionId)
+            await fs.ensureDir(versionDir)
+            await fs.writeJson(path.join(versionDir, `${versionId}.json`), profile, { spaces: 2 })
+
+            logger.info(`Fabric ${fabricVersion} profile installed for Minecraft ${minecraftVersion}`)
             if (progressCallback) progressCallback(100, 100, 'Fabric instalado correctamente')
             return true
         } catch (err) {
