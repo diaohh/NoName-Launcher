@@ -299,6 +299,10 @@ class LaunchManager {
             }
         }
 
+        if (ConfigManager.getFullscreen()) {
+            args.push('--fullscreen')
+        }
+
         return args
     }
 

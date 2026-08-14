@@ -38,7 +38,7 @@ export default function GameSection({ settings, onUpdate }) {
 
   return (
     <div className="space-y-6">
-      <div>
+      <div className={settings.fullscreen ? 'opacity-40 pointer-events-none' : ''}>
         <label className="block text-sm text-white/60 mb-2">Resolucion</label>
         <div className="flex items-center gap-2 mb-3">
           <input
@@ -46,6 +46,7 @@ export default function GameSection({ settings, onUpdate }) {
             value={settings.gameWidth}
             onChange={handleWidthChange}
             min={640}
+            disabled={settings.fullscreen}
             className="w-24 bg-white/5 border border-white/10 rounded px-3 py-2 text-sm text-white focus:border-accent-green focus:outline-none transition-colors duration-200 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
           />
           <span className="text-white/40 text-sm">x</span>
@@ -54,6 +55,7 @@ export default function GameSection({ settings, onUpdate }) {
             value={settings.gameHeight}
             onChange={handleHeightChange}
             min={480}
+            disabled={settings.fullscreen}
             className="w-24 bg-white/5 border border-white/10 rounded px-3 py-2 text-sm text-white focus:border-accent-green focus:outline-none transition-colors duration-200 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
           />
         </div>
@@ -62,6 +64,7 @@ export default function GameSection({ settings, onUpdate }) {
             <button
               key={p.label}
               onClick={() => handlePreset(p)}
+              disabled={settings.fullscreen}
               className={`rounded-md px-3 py-1.5 text-xs transition-all duration-200 cursor-pointer border ${
                 isActivePreset(p)
                   ? 'border-accent-green text-accent-green bg-card-hover'
