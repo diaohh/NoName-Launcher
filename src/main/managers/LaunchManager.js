@@ -36,32 +36,38 @@ class LaunchManager {
         }
     }
 
-    static getRequiredJavaVersion(minecraftVersion) {
-        const versionParts = minecraftVersion.split('.')
-        const minor = parseInt(versionParts[1])
+    /**
+     * The Mojang version manifest declares the exact Java major it was built for.
+     * The table is only a fallback for manifests that omit it.
+     */
+    static getRequiredJavaVersion(minecraftVersion, versionJson) {
+        const declared = versionJson?.javaVersion?.majorVersion
+        if (declared) return declared
 
-        if (parseInt(versionParts[0]) === 1) {
-            if (minor >= 21) return 21
-            if (minor >= 18) return 17
-            if (minor === 17) return 16
-            return 8
-        }
-        return 21
+        const [, minor, patch] = minecraftVersion.split('.').map(part => parseInt(part) || 0)
+        if (minor > 20 || (minor === 20 && patch >= 5)) return 21
+        return 17
     }
 
-    static async validateJava(requiredVersion = 21) {
+    /**
+     * Bounded range: a modpack built for Java 17 must not be launched on Java 21.
+     */
+    static javaSemverRange(majorVersion) {
+        return `${majorVersion}.x`
+    }
+
+    static async validateJava(requiredVersion) {
         const javaPath = ConfigManager.getJavaExecutable()
         if (!javaPath) return null
 
         try {
             const javaRoot = ensureJavaDirIsRoot(javaPath)
-            const semverRange = `>=${requiredVersion}`
-            const vResult = await validateSelectedJvm(javaRoot, semverRange)
+            const vResult = await validateSelectedJvm(javaRoot, this.javaSemverRange(requiredVersion))
             if (vResult != null) {
                 logger.info(`Java validation successful: ${javaPath} (${vResult.semverStr})`)
                 return javaPath
             }
-            logger.warn('Java validation failed: no suitable JVM found')
+            logger.warn(`Java validation failed: ${javaPath} does not satisfy Java ${requiredVersion}`)
             return null
         } catch (err) {
             logger.error('Java validation error:', err)
@@ -69,11 +75,12 @@ class LaunchManager {
         }
     }
 
-    static async downloadJava(version = 21, progressCallback) {
-        try {
-            const semverRange = `>=${version}`
-            const dataDir = ConfigManager.getLauncherDirectory()
+    static async downloadJava(version, progressCallback) {
+        const semverRange = this.javaSemverRange(version)
+        const dataDir = ConfigManager.getLauncherDirectory()
+        let archivePath = null
 
+        try {
             if (progressCallback) progressCallback({ type: 'java_discover', message: `Buscando Java ${version} en el sistema...` })
             const existingJvm = await discoverBestJvmInstallation(dataDir, semverRange)
             if (existingJvm != null) {
@@ -89,47 +96,55 @@ class LaunchManager {
             logger.info(`Downloading Java ${version}...`)
             if (progressCallback) progressCallback({ type: 'java_download', message: `Descargando Java ${version}...` })
 
-            const javaDir = path.join(ConfigManager.getCommonDirectory(), 'java')
-            const javaData = await latestOpenJDK(version, javaDir, null)
-            if (!javaData || !javaData.url) throw new Error('Failed to get Java download information')
+            // The asset path points at the launcher runtime dir, which is exactly where
+            // discoverBestJvmInstallation looks on the next launch.
+            const javaData = await latestOpenJDK(version, dataDir)
+            if (!javaData || !javaData.url) throw new Error(`No hay una distribucion de Java ${version} disponible para esta plataforma`)
 
-            const fileExtension = process.platform === 'win32' ? '.zip' : '.tar.gz'
-            const javaDownloadPath = path.join(javaDir, `java-download${fileExtension}`)
-            await fs.ensureDir(javaDir)
+            archivePath = javaData.path
+            await fs.ensureDir(path.dirname(archivePath))
 
-            let lastPercent = 0
-            await downloadFile(javaData.url, javaDownloadPath, (received, total) => {
-                const percent = Math.floor((received / total) * 100)
-                if (percent >= lastPercent + 5 || percent === 100) {
-                    lastPercent = percent
-                    const mbReceived = (received / 1024 / 1024).toFixed(1)
-                    const mbTotal = (total / 1024 / 1024).toFixed(1)
-                    if (progressCallback) {
-                        progressCallback({ type: 'java_download', message: `Descargando Java... ${mbReceived}MB / ${mbTotal}MB`, current: received, total })
-                    }
+            await downloadFile(javaData.url, archivePath, ({ transferred, total }) => {
+                if (progressCallback) {
+                    progressCallback({
+                        type: 'java_download',
+                        message: `Descargando Java ${version}... ${toMB(transferred)} MB / ${toMB(total || javaData.size)} MB`,
+                        current: transferred,
+                        total: total || javaData.size
+                    })
                 }
             })
 
-            const stats = await fs.stat(javaDownloadPath)
-            if (stats.size < 1000000) throw new Error('Downloaded file is too small, likely an error')
+            if (!await validateLocalFile(archivePath, javaData.algo || HashAlgo.SHA256, javaData.hash)) {
+                throw new Error('La descarga de Java no coincide con el checksum oficial')
+            }
 
             if (progressCallback) progressCallback({ type: 'java_extract', message: 'Extrayendo Java...' })
-            const javaExecutable = await extractJdk(javaDownloadPath)
+            const javaExecutable = await extractJdk(archivePath)
 
-            if (javaExecutable && fs.existsSync(javaExecutable)) {
-                ConfigManager.setJavaExecutable(javaExecutable)
-                ConfigManager.save()
-                await fs.remove(javaDownloadPath)
-                return javaExecutable
+            if (!javaExecutable || !fs.existsSync(javaExecutable)) {
+                throw new Error('No se encontro el ejecutable de Java tras la extraccion')
             }
-            throw new Error('Java executable not found after extraction')
+
+            const installed = await validateSelectedJvm(ensureJavaDirIsRoot(javaExecutable), semverRange)
+            if (installed == null) {
+                throw new Error(`El Java instalado no satisface la version requerida (${version})`)
+            }
+
+            ConfigManager.setJavaExecutable(javaExecutable)
+            ConfigManager.save()
+            logger.info(`Java ${installed.semverStr} installed at ${javaExecutable}`)
+            return javaExecutable
         } catch (err) {
             logger.error('Java download/install failed:', err)
             throw err
+        } finally {
+            // Never leave a partial or already extracted archive behind.
+            if (archivePath) await fs.remove(archivePath).catch(() => {})
         }
     }
 
-    static async ensureJava(requiredVersion = 21, progressCallback) {
+    static async ensureJava(requiredVersion, progressCallback) {
         const validJava = await this.validateJava(requiredVersion)
         if (validJava) return validJava
 
@@ -389,7 +404,7 @@ class LaunchManager {
             if (progressCallback) progressCallback({ type: 'download', message: 'Preparando descarga de Minecraft...' })
 
             const minecraftVersion = server.rawServer.minecraftVersion
-            await MinecraftDownloadManager.downloadMinecraft(minecraftVersion, (percent, phase, message) => {
+            const vanillaManifest = await MinecraftDownloadManager.downloadMinecraft(minecraftVersion, (percent, phase, message) => {
                 if (progressCallback) {
                     progressCallback({ type: 'download', message, phase: MinecraftDownloadManager.getPhaseDisplayName(phase), current: percent, total: 100 })
                 }
@@ -398,7 +413,7 @@ class LaunchManager {
             // Java must be available before the mod loader step: the Forge installer runs on a JVM.
             if (progressCallback) progressCallback({ type: 'java', message: 'Validando Java...' })
 
-            const requiredJavaVersion = this.getRequiredJavaVersion(minecraftVersion)
+            const requiredJavaVersion = this.getRequiredJavaVersion(minecraftVersion, vanillaManifest)
             const javaPath = await this.ensureJava(requiredJavaVersion, progressCallback)
 
             const loaderType = ModLoaderManager.detectModLoader(server)

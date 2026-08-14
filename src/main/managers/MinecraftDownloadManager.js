@@ -6,6 +6,12 @@ const logger = Logger.getLogger('MinecraftDownloadManager')
 
 class MinecraftDownloadManager {
 
+    /**
+     * Downloads the vanilla client, libraries and assets for a version.
+     *
+     * @returns {Promise<object>} The Mojang version manifest, which carries the
+     * required Java major version among other launch metadata.
+     */
     static async downloadMinecraft(minecraftVersion, progressCallback) {
         try {
             logger.info('Starting Minecraft download for version:', minecraftVersion)
@@ -34,6 +40,8 @@ class MinecraftDownloadManager {
                 }
             })
 
+            const versionJson = await mojangProcessor.getVersionJson()
+
             const allDownloads = [
                 ...dlObjects.assets,
                 ...dlObjects.libraries,
@@ -49,7 +57,7 @@ class MinecraftDownloadManager {
                 if (progressCallback) {
                     progressCallback(100, 'complete', 'Archivos listos')
                 }
-                return true
+                return versionJson
             }
 
             if (progressCallback) {
@@ -72,7 +80,7 @@ class MinecraftDownloadManager {
                 progressCallback(100, 'complete', 'Descarga completada')
             }
 
-            return true
+            return versionJson
         } catch (err) {
             logger.error('Minecraft download failed:', err)
             throw err
