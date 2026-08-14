@@ -10,7 +10,9 @@ extraResources:
   - from: distribution.json
     to: distribution.json
 win:
-  target: nsis
+  target:
+    - nsis
+    - portable
   icon: resources/icon.png
 nsis:
   oneClick: false
