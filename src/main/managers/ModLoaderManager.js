@@ -28,6 +28,14 @@ class ModLoaderManager {
         return build || null
     }
 
+    /**
+     * helios-core resolves javaw.exe on Windows, which has no console attached.
+     * The Forge installer writes its progress to stdout, so use java.exe instead.
+     */
+    static _consoleJavaExec(javaPath) {
+        return process.platform === 'win32' ? javaPath.replace(/javaw\.exe$/i, 'java.exe') : javaPath
+    }
+
     static _getFabricVersion(fabricModule) {
         if (fabricModule.rawModule.fabricVersion) return fabricModule.rawModule.fabricVersion
         const mavenId = fabricModule.rawModule.id || ''
@@ -67,19 +75,19 @@ class ModLoaderManager {
         return false
     }
 
-    static async installModLoader(server, progressCallback) {
+    static async installModLoader(server, javaPath, progressCallback) {
         const loaderType = this.detectModLoader(server)
         logger.info(`Installing mod loader: ${loaderType}`)
 
         switch (loaderType) {
-            case 'forge': return await this.installForge(server, progressCallback)
+            case 'forge': return await this.installForge(server, javaPath, progressCallback)
             case 'fabric': return await this.installFabric(server, progressCallback)
             case 'vanilla': return null
             default: throw new Error(`Unsupported mod loader: ${loaderType}`)
         }
     }
 
-    static async installForge(server, progressCallback) {
+    static async installForge(server, javaPath, progressCallback) {
         try {
             if (progressCallback) progressCallback(0, 100, 'Preparando instalacion de Forge...')
 
@@ -127,11 +135,14 @@ class ModLoaderManager {
                 }, { spaces: 2 })
             }
 
-            const javaPath = ConfigManager.getJavaExecutable() || 'java'
-            const installCommand = [javaPath, '-jar', `"${forgeInstallerPath}"`, '--installClient', `"${commonDir}"`].join(' ')
+            if (!javaPath) throw new Error('Java executable is required to run the Forge installer')
 
             await new Promise((resolve, reject) => {
-                const proc = child_process.exec(installCommand, { cwd: commonDir, maxBuffer: 10 * 1024 * 1024 })
+                const proc = child_process.execFile(
+                    this._consoleJavaExec(javaPath),
+                    ['-jar', forgeInstallerPath, '--installClient', commonDir],
+                    { cwd: commonDir, maxBuffer: 10 * 1024 * 1024 }
+                )
 
                 proc.stdout.on('data', (data) => {
                     logger.info('[Forge Installer]', data.toString().trim())

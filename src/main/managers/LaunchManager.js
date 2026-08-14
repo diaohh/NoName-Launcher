@@ -342,16 +342,6 @@ class LaunchManager {
                 })
             }
 
-            const loaderType = ModLoaderManager.detectModLoader(server)
-            if (loaderType !== 'vanilla') {
-                if (!ModLoaderManager.isModLoaderInstalled(server)) {
-                    if (progressCallback) progressCallback({ type: 'modloader', message: `Instalando ${loaderType}...` })
-                    await ModLoaderManager.installModLoader(server, (current, total, msg) => {
-                        if (progressCallback) progressCallback({ type: 'modloader', message: msg, current, total })
-                    })
-                }
-            }
-
             if (progressCallback) progressCallback({ type: 'download', message: 'Preparando descarga de Minecraft...' })
 
             const minecraftVersion = server.rawServer.minecraftVersion
@@ -361,18 +351,27 @@ class LaunchManager {
                 }
             })
 
+            // Java must be available before the mod loader step: the Forge installer runs on a JVM.
+            if (progressCallback) progressCallback({ type: 'java', message: 'Validando Java...' })
+
+            const requiredJavaVersion = this.getRequiredJavaVersion(minecraftVersion)
+            const javaPath = await this.ensureJava(requiredJavaVersion, progressCallback)
+
+            const loaderType = ModLoaderManager.detectModLoader(server)
             if (loaderType !== 'vanilla') {
+                if (!ModLoaderManager.isModLoaderInstalled(server)) {
+                    if (progressCallback) progressCallback({ type: 'modloader', message: `Instalando ${loaderType}...` })
+                    await ModLoaderManager.installModLoader(server, javaPath, (current, total, msg) => {
+                        if (progressCallback) progressCallback({ type: 'modloader', message: msg, current, total })
+                    })
+                }
+
                 const versionString = ModLoaderManager.getVersionString(server)
                 if (progressCallback) progressCallback({ type: 'download', message: `Descargando librerias de ${loaderType}...` })
                 await this.downloadModLoaderLibraries(versionString, (current, total, message) => {
                     if (progressCallback) progressCallback({ type: 'download', message: message || `Descargando librerias de ${loaderType}...`, current, total })
                 })
             }
-
-            if (progressCallback) progressCallback({ type: 'java', message: 'Validando Java...' })
-
-            const requiredJavaVersion = this.getRequiredJavaVersion(minecraftVersion)
-            const javaPath = await this.ensureJava(requiredJavaVersion, progressCallback)
 
             if (progressCallback) progressCallback({ type: 'launch', message: 'Construyendo comando de lanzamiento...' })
 
