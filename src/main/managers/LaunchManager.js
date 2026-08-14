@@ -206,12 +206,21 @@ class LaunchManager {
     static processArgumentRules(arg) {
         if (typeof arg === 'string') return true
         if (arg.rules) {
+            const activeFeatures = {
+                has_custom_resolution: true
+            }
             for (const rule of arg.rules) {
                 if (rule.os) {
                     const osName = process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'osx' : 'linux'
                     if (rule.os.name && rule.os.name !== osName) return rule.action === 'disallow'
                 }
-                if (rule.features) return rule.action === 'disallow'
+                if (rule.features) {
+                    const featureMatch = Object.entries(rule.features).every(
+                        ([key, value]) => activeFeatures[key] === value
+                    )
+                    if (rule.action === 'allow') return featureMatch
+                    return !featureMatch
+                }
             }
         }
         return true
