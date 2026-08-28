@@ -1,255 +1,245 @@
-import { DistributionAPI } from 'helios-core/common'
 import { downloadQueue, getExpectedDownloadSize, HashAlgo } from 'helios-core/dl'
 import ConfigManager from './ConfigManager'
+import ManifestManager from './ManifestManager'
 import Logger from '../utils/Logger'
-import { validateLocalFile } from '../utils/FileUtils'
+import { hashFile, validateLocalFile } from '../utils/FileUtils'
+import { compileIgnore, resolvePolicy, strictRoots } from '../utils/PackPolicy'
 import path from 'path'
 import fs from 'fs-extra'
-import AdmZip from 'adm-zip'
 
 const logger = Logger.getLogger('DistributionManager')
 
 const toMB = (bytes) => (bytes / 1024 / 1024).toFixed(1)
 
+const STATE_FILE = '.nnl-state.json'
+const STATE_VERSION = 1
+
+/**
+ * Keeps a modpack instance in sync with its published manifest.
+ *
+ * The manifest is the only source of truth for what the instance should contain.
+ * Firestore holds the pointer to it and the modpack's display data.
+ */
 class DistributionManager {
 
-    static distribution = null
     static selectedServer = null
-    static distroAPI = null
-
-    static async loadDistribution(force = false) {
-        try {
-            const distroUrl = process.env.DISTRIBUTION_URL || ConfigManager.getDistributionURL()
-
-            if (!distroUrl) {
-                throw new Error('No distribution URL configured')
-            }
-
-            logger.info('Loading distribution from:', distroUrl)
-
-            const launcherDir = ConfigManager.getLauncherDirectory()
-            const commonDir = ConfigManager.getCommonDirectory()
-            const instanceDir = ConfigManager.getInstanceDirectory()
-            const devMode = process.env.DISTRIBUTION_DEV_MODE === 'true'
-
-            this.distroAPI = new DistributionAPI(
-                launcherDir, commonDir, instanceDir, distroUrl, devMode
-            )
-
-            this.distribution = await this.distroAPI.getDistribution()
-
-            if (!this.distribution) {
-                throw new Error('Failed to load distribution')
-            }
-
-            logger.info('Distribution loaded successfully')
-            logger.info('Available servers:', this.distribution.servers.length)
-
-            this.selectedServer = this.distribution.getMainServer()
-
-            if (this.selectedServer) {
-                logger.info('Default server selected:', this.selectedServer.rawServer.name)
-            }
-
-            return this.distribution
-        } catch (err) {
-            logger.error('Failed to load distribution:', err)
-            throw err
-        }
-    }
-
-    static getDistribution() { return this.distribution }
-    static getServers() { return this.distribution ? this.distribution.servers : [] }
-    static getSelectedServer() { return this.selectedServer }
-
-    static setSelectedServer(serverId) {
-        const server = this.distribution.getServerById(serverId)
-        if (!server) {
-            logger.error('Server not found:', serverId)
-            return false
-        }
-
-        this.selectedServer = server
-        logger.info('Server selected:', server.rawServer.name)
-        ConfigManager.setSelectedServer(serverId)
-        ConfigManager.save()
-        return true
-    }
-
-    static getServerInfo(server) {
-        if (!server) server = this.selectedServer
-        if (!server) return null
-
-        const raw = server.rawServer
-        return {
-            id: raw.id,
-            name: raw.name,
-            description: raw.description,
-            icon: raw.icon,
-            banner: raw.banner || null,
-            version: raw.version,
-            minecraftVersion: raw.minecraftVersion,
-            address: raw.address,
-            mainServer: raw.mainServer
-        }
-    }
-
-    static async validateDistribution(server, progressCallback) {
-        try {
-            if (!server) server = this.selectedServer
-            if (!server) throw new Error('No server selected')
-
-            logger.info('Validating distribution for server:', server.rawServer.name)
-
-            const modules = this.getServerModules(server)
-            const instanceDir = path.join(ConfigManager.getInstanceDirectory(), server.rawServer.id)
-
-            const invalidFiles = []
-            let validated = 0
-
-            for (const module of modules) {
-                validated++
-                if (progressCallback) {
-                    progressCallback(validated, modules.length, `Validando ${module.name}...`)
-                }
-
-                if (module.type === 'VersionManifest') continue
-                if (!module.artifact || !module.artifact.url) continue
-
-                let filePath
-                if (module.type === 'ForgeHosted' || module.type === 'Forge') {
-                    filePath = path.join(ConfigManager.getCommonDirectory(), 'forge', path.basename(module.artifact.url))
-                } else if (module.type === 'ForgeMod' || module.type === 'LiteMod') {
-                    filePath = path.join(instanceDir, 'mods', path.basename(module.artifact.url))
-                } else if (module.type === 'File') {
-                    filePath = path.join(instanceDir, module.artifact.path || path.basename(module.artifact.url))
-                } else {
-                    filePath = path.join(instanceDir, path.basename(module.artifact.url))
-                }
-
-                if (!fs.existsSync(filePath)) {
-                    invalidFiles.push({ module, filePath })
-                    continue
-                }
-
-                const stats = fs.statSync(filePath)
-                if (stats.isDirectory()) continue
-
-                if (!await validateLocalFile(filePath, HashAlgo.MD5, module.artifact.MD5)) {
-                    invalidFiles.push({ module, filePath })
-                }
-            }
-
-            logger.info(`Validation complete. ${invalidFiles.length} files need download`)
-            return invalidFiles
-        } catch (err) {
-            logger.error('Distribution validation failed:', err)
-            throw err
-        }
-    }
-
-    static async downloadServerFiles(invalidFiles, progressCallback) {
-        try {
-            if (invalidFiles.length === 0) return true
-
-            const downloads = invalidFiles.map(({ module, filePath }, index) => {
-                const isZip = module.artifact.url.toLowerCase().endsWith('.zip')
-                return {
-                    // downloadQueue tracks progress per id, so it must be unique.
-                    id: `${module.id || module.name}#${index}`,
-                    hash: module.artifact.MD5 || '',
-                    algo: HashAlgo.MD5,
-                    size: module.artifact.size || 0,
-                    url: module.artifact.url,
-                    path: isZip ? `${filePath}.download` : filePath,
-                    module,
-                    filePath,
-                    isZip
-                }
-            })
-
-            const totalSize = getExpectedDownloadSize(downloads)
-
-            await downloadQueue(downloads, (received) => {
-                if (progressCallback) {
-                    const progress = totalSize > 0
-                        ? `${toMB(received)} MB / ${toMB(totalSize)} MB`
-                        : `${toMB(received)} MB`
-                    progressCallback(received, totalSize, `Descargando archivos del servidor... ${progress}`)
-                }
-            })
-
-            for (const download of downloads) {
-                if (!await validateLocalFile(download.path, download.algo, download.hash)) {
-                    throw new Error(`El archivo ${download.module.name} no coincide con el checksum esperado`)
-                }
-
-                if (download.isZip) {
-                    if (progressCallback) {
-                        progressCallback(totalSize, totalSize, `Extrayendo ${download.module.name}...`)
-                    }
-                    fs.ensureDirSync(download.filePath)
-                    new AdmZip(download.path).extractAllTo(download.filePath, true)
-                    fs.removeSync(download.path)
-                }
-            }
-
-            logger.info(`Downloaded ${downloads.length} server files successfully`)
-            return true
-        } catch (err) {
-            logger.error('File download failed:', err)
-            throw err
-        }
-    }
 
     /**
-     * Set server data from Firestore (renderer sends complete modpack + modules)
-     * Creates an adapter compatible with LaunchManager and ModLoaderManager
+     * Stores the modpack document sent by the renderer. `modules` no longer exists:
+     * everything about files and the mod loader now comes from the manifest.
      */
     static setServerData(serverData) {
-        this.selectedServer = {
-            rawServer: serverData,
-            modules: (serverData.modules || []).map(m => ({ rawModule: m }))
-        }
+        this.selectedServer = { rawServer: serverData }
         logger.info('Server data set from Firestore:', serverData.name)
         ConfigManager.setSelectedServer(serverData.id)
         ConfigManager.save()
         return true
     }
 
-    static getMinecraftVersion(server) {
-        if (!server) server = this.selectedServer
-        return server ? server.rawServer.minecraftVersion : null
+    static getSelectedServer() { return this.selectedServer }
+
+    static getInstanceDir(server) {
+        return path.join(ConfigManager.getInstanceDirectory(), server.rawServer.id)
     }
 
-    static getServerModules(server) {
-        if (!server) server = this.selectedServer
-        return server ? (server.rawServer.modules || []) : []
-    }
+    // ------------------------------------------------------------------- state
 
-    static requiresForge(server) {
-        if (!server) server = this.selectedServer
-        if (!server) return false
-        return this.getServerModules(server).some(m => m.type === 'ForgeHosted' || m.type === 'Forge')
-    }
-
-    static getForgeVersion(server) {
-        if (!server) server = this.selectedServer
-        if (!server) return null
-        const modules = this.getServerModules(server)
-        const forgeModule = modules.find(m => m.type === 'ForgeHosted' || m.type === 'Forge')
-        if (!forgeModule) return null
-        return forgeModule.id.split(':').pop()
-    }
-
-    static async refresh() {
-        logger.info('Refreshing distribution...')
-        if (this.distroAPI) {
-            this.distribution = await this.distroAPI.refreshDistributionOrFallback()
-            this.selectedServer = this.distribution.getMainServer()
-            return this.distribution
+    /**
+     * Records what the launcher itself wrote, so an unchanged instance can be
+     * verified by size and mtime instead of re-hashing hundreds of megabytes.
+     */
+    static readState(instanceDir) {
+        const statePath = path.join(instanceDir, STATE_FILE)
+        try {
+            const state = fs.readJsonSync(statePath)
+            if (state.version !== STATE_VERSION) return {}
+            return state.files || {}
+        } catch {
+            return {}
         }
-        return await this.loadDistribution(true)
+    }
+
+    static writeState(instanceDir, files) {
+        const statePath = path.join(instanceDir, STATE_FILE)
+        try {
+            fs.ensureDirSync(instanceDir)
+            fs.writeJsonSync(statePath, { version: STATE_VERSION, files })
+        } catch (err) {
+            // The state file is an optimization: losing it costs a re-hash, not correctness.
+            logger.warn('Could not write instance state:', err.message)
+        }
+    }
+
+    static stateEntry(filePath, hash) {
+        const stats = fs.statSync(filePath)
+        return { hash, size: stats.size, mtimeMs: stats.mtimeMs }
+    }
+
+    // -------------------------------------------------------------------- plan
+
+    /**
+     * Compares the instance against the manifest.
+     *
+     * @returns {Promise<{toDownload: Array, toDelete: Array, state: object}>}
+     */
+    static async planSync(server, manifest, progressCallback) {
+        const instanceDir = this.getInstanceDir(server)
+        const state = this.readState(instanceDir)
+        const nextState = {}
+
+        const toDownload = []
+        let checked = 0
+
+        for (const entry of manifest.files) {
+            checked++
+            if (progressCallback && checked % 10 === 0) {
+                progressCallback(checked, manifest.files.length, `Validando archivos... ${checked}/${manifest.files.length}`)
+            }
+
+            const filePath = path.join(instanceDir, entry.path)
+
+            if (!fs.existsSync(filePath)) {
+                toDownload.push(entry)
+                continue
+            }
+
+            // `seed` files belong to the player once they exist (options.txt, servers.dat).
+            if (entry.policy === 'seed') {
+                nextState[entry.path] = state[entry.path] || null
+                continue
+            }
+
+            const stats = fs.statSync(filePath)
+            if (stats.isDirectory()) {
+                toDownload.push(entry)
+                continue
+            }
+
+            const known = state[entry.path]
+            const unchanged = known
+                && known.hash === entry.hash
+                && known.size === stats.size
+                && known.mtimeMs === stats.mtimeMs
+
+            if (unchanged) {
+                nextState[entry.path] = known
+                continue
+            }
+
+            if (await hashFile(filePath, 'sha256') === entry.hash) {
+                nextState[entry.path] = this.stateEntry(filePath, entry.hash)
+                continue
+            }
+
+            toDownload.push(entry)
+        }
+
+        const toDelete = this.findOrphans(manifest, instanceDir)
+
+        logger.info(`Sync plan: ${toDownload.length} to download, ${toDelete.length} to delete`)
+        return { toDownload, toDelete, state: nextState }
+    }
+
+    /**
+     * Files the launcher must remove: anything inside a `strict` path that the manifest
+     * does not declare. Everything else on the player's disk is left alone, and the
+     * manifest's `ignore` globs are honoured here too — otherwise runtime-generated
+     * files such as `*.cache.json` would be deleted and recreated on every launch.
+     */
+    static findOrphans(manifest, instanceDir) {
+        const declared = new Set(manifest.files.map(f => f.path))
+        const isIgnored = compileIgnore(manifest.ignore)
+        const orphans = []
+
+        for (const root of strictRoots(manifest.policies)) {
+            const rootDir = path.join(instanceDir, root)
+            if (!fs.existsSync(rootDir) || !fs.statSync(rootDir).isDirectory()) continue
+
+            for (const relPath of this.walk(rootDir, instanceDir)) {
+                if (declared.has(relPath) || isIgnored(relPath)) continue
+
+                // A file inside a strict root can still be covered by a more specific
+                // rule (a `seed` file living under `config/`, say). Only delete when
+                // the policy that actually applies is strict.
+                const match = resolvePolicy(relPath, manifest.policies)
+                if (match?.policy !== 'strict') continue
+
+                orphans.push(relPath)
+            }
+        }
+
+        return orphans
+    }
+
+    /** Relative POSIX paths of every file under `dir`, expressed against `base`. */
+    static walk(dir, base, out = []) {
+        for (const dirent of fs.readdirSync(dir, { withFileTypes: true })) {
+            const full = path.join(dir, dirent.name)
+            if (dirent.isDirectory()) this.walk(full, base, out)
+            else if (dirent.isFile()) out.push(path.relative(base, full).split(path.sep).join('/'))
+        }
+        return out
+    }
+
+    // ------------------------------------------------------------------- apply
+
+    static async applySync(server, manifest, baseUrl, plan, progressCallback) {
+        const instanceDir = this.getInstanceDir(server)
+        const state = { ...plan.state }
+
+        for (const relPath of plan.toDelete) {
+            const filePath = path.join(instanceDir, relPath)
+            // Never step outside the instance, whatever the manifest claims.
+            if (!filePath.startsWith(instanceDir + path.sep)) {
+                logger.warn(`Refusing to delete outside the instance: ${relPath}`)
+                continue
+            }
+            await fs.remove(filePath)
+            delete state[relPath]
+            logger.info(`Removed orphan: ${relPath}`)
+        }
+
+        if (plan.toDelete.length > 0 && progressCallback) {
+            progressCallback(0, 0, `Eliminando ${plan.toDelete.length} archivos obsoletos...`)
+        }
+
+        if (plan.toDownload.length > 0) {
+            const downloads = plan.toDownload.map(entry => ({
+                id: entry.path,
+                hash: entry.hash,
+                algo: HashAlgo.SHA256,
+                size: entry.size,
+                url: ManifestManager.fileUrl(baseUrl, entry.path),
+                path: path.join(instanceDir, entry.path)
+            }))
+
+            const totalSize = getExpectedDownloadSize(downloads)
+
+            await downloadQueue(downloads, (received) => {
+                if (progressCallback) {
+                    progressCallback(
+                        received,
+                        totalSize,
+                        `Descargando archivos del modpack... ${toMB(received)} MB / ${toMB(totalSize)} MB`
+                    )
+                }
+            })
+
+            for (const download of downloads) {
+                if (!await validateLocalFile(download.path, download.algo, download.hash)) {
+                    throw new Error(`El archivo ${download.id} no coincide con el checksum esperado`)
+                }
+                state[download.id] = this.stateEntry(download.path, download.hash)
+            }
+
+            logger.info(`Downloaded ${downloads.length} modpack files`)
+        }
+
+        for (const key of Object.keys(state)) {
+            if (state[key] == null) delete state[key]
+        }
+
+        this.writeState(instanceDir, state)
     }
 }
 

@@ -21,6 +21,7 @@ export function LaunchProvider({ children }) {
     cleanupRef.current = ipc.launch.onProgress((data) => {
       switch (data.type) {
         case 'auth':
+        case 'manifest':
         case 'validation':
         case 'download_mods':
         case 'modloader':

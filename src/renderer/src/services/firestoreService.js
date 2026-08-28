@@ -10,17 +10,8 @@ import {
 } from 'firebase/firestore'
 
 /**
- * Fetch launcher config from config/launcher document
- */
-export async function getLauncherConfig() {
-  const docRef = doc(db, 'config', 'launcher')
-  const docSnap = await getDoc(docRef)
-  return docSnap.exists() ? docSnap.data() : null
-}
-
-/**
  * Fetch all enabled modpacks, filtered by usersAllowed client-side
- * @param {string|null} username - Current player's UUID for filtering
+ * @param {string|null} username - Current player's username for filtering
  * @returns {Array} Modpacks the user can see
  */
 export async function getModpacks(username) {
@@ -48,18 +39,16 @@ export async function getModpacks(username) {
 }
 
 /**
- * Fetch modules subcollection for a specific modpack
+ * Re-read a single modpack document.
+ *
+ * Called right before launching: the list is fetched once when the launcher opens, so
+ * a player who left it running would otherwise never see a `maintenance` flag raised
+ * afterwards, nor a manifest published in the meantime.
+ *
  * @param {string} modpackId
- * @returns {Array} Module objects with artifact data
+ * @returns {Promise<object|null>}
  */
-export async function getModpackModules(modpackId) {
-  const modulesRef = collection(db, 'modpacks', modpackId, 'modules')
-  const snapshot = await getDocs(modulesRef)
-  const modules = []
-
-  snapshot.forEach((docSnap) => {
-    modules.push({ id: docSnap.id, ...docSnap.data() })
-  })
-
-  return modules
+export async function getModpack(modpackId) {
+  const docSnap = await getDoc(doc(db, 'modpacks', modpackId))
+  return docSnap.exists() ? { id: docSnap.id, ...docSnap.data() } : null
 }

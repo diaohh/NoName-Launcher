@@ -27,10 +27,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   shellOpenPath: (path) => ipcRenderer.invoke('shell:openPath', path),
 
   // Distribution
-  distroLoad: () => ipcRenderer.invoke('distro:load'),
-  distroGetServers: () => ipcRenderer.invoke('distro:getServers'),
-  distroSelectServer: (id) => ipcRenderer.invoke('distro:selectServer', id),
-  distroGetSelected: () => ipcRenderer.invoke('distro:getSelected'),
   distroSetServerData: (data) => ipcRenderer.invoke('distro:setServerData', data),
 
   // Launch

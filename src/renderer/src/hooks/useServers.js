@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react'
-import { getModpacks, getModpackModules } from '../services/firestoreService'
+import { useState, useEffect } from 'react'
+import { getModpacks, getModpack } from '../services/firestoreService'
 import { ipc } from '../services/ipcClient'
 
 export function useServers(accountUsername) {
@@ -7,7 +7,6 @@ export function useServers(accountUsername) {
   const [selectedServer, setSelectedServer] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const modulesCache = useRef({})
 
   useEffect(() => {
     async function loadModpacks() {
@@ -35,25 +34,41 @@ export function useServers(accountUsername) {
     if (!modpack) return
 
     try {
-      // Fetch modules from cache or Firestore
-      let modules = modulesCache.current[id]
-      if (!modules) {
-        modules = await getModpackModules(id)
-        modulesCache.current[id] = modules
-      }
-
-      // Build complete server data with modules
-      const serverData = { ...modpack, modules }
-
-      // Send to main process for launch compatibility
-      await ipc.distro.setServerData(serverData)
-
-      setSelectedServer(serverData)
+      await ipc.distro.setServerData(modpack)
+      setSelectedServer(modpack)
     } catch (err) {
       console.error('Failed to select modpack:', err)
       setError(err.message)
     }
   }
 
-  return { servers, selectedServer, selectServer, loading, error }
+  /**
+   * Re-reads the modpack right before launching and hands the fresh copy to the main
+   * process. Reading it only when the list loads would let a player who kept the
+   * launcher open walk straight past a maintenance flag raised in the meantime.
+   *
+   * @returns {Promise<{ok: boolean, message?: string}>}
+   */
+  const prepareLaunch = async (id) => {
+    const fresh = await getModpack(id)
+
+    if (!fresh) {
+      return { ok: false, message: 'El modpack ya no esta disponible.' }
+    }
+
+    if (fresh.maintenance) {
+      return {
+        ok: false,
+        message: fresh.maintenanceMessage || 'El modpack esta en mantenimiento. Intentalo de nuevo en unos minutos.'
+      }
+    }
+
+    await ipc.distro.setServerData(fresh)
+    setSelectedServer(fresh)
+    setServers(prev => prev.map(s => (s.id === id ? fresh : s)))
+
+    return { ok: true }
+  }
+
+  return { servers, selectedServer, selectServer, prepareLaunch, loading, error }
 }

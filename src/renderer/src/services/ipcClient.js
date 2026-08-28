@@ -23,10 +23,6 @@ export const ipc = {
     openPath: (path) => window.electronAPI.shellOpenPath(path)
   },
   distro: {
-    load: () => window.electronAPI.distroLoad(),
-    getServers: () => window.electronAPI.distroGetServers(),
-    selectServer: (id) => window.electronAPI.distroSelectServer(id),
-    getSelected: () => window.electronAPI.distroGetSelected(),
     setServerData: (data) => window.electronAPI.distroSetServerData(data)
   },
   launch: {

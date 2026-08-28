@@ -80,10 +80,12 @@ A custom Minecraft launcher built with Electron, React, and Tailwind CSS. Featur
 4. **Set up Firestore**
 
    ```
-   config/launcher            — Launcher global config
-   modpacks/{id}              — Modpack definitions
-   modpacks/{id}/modules/{id} — Module artifacts (loader, mods, configs)
+   modpacks/{id} — Modpack definitions
    ```
+
+   Firestore holds only the catalogue and a pointer. The files themselves, the mod loader
+   and the per-path policies live in a manifest published to the CDN — see
+   [docs/manifest.md](docs/manifest.md).
 
    **Modpack document**
 
@@ -91,25 +93,21 @@ A custom Minecraft launcher built with Electron, React, and Tailwind CSS. Featur
    |-------|------|-------------|
    | `name` | string | Display name |
    | `description` | string | Shown under the title on the home screen |
-   | `minecraftVersion` | string | Vanilla version, e.g. `1.20.1` (must be ≥ 1.17) |
+   | `minecraftVersion` | string | **Display only.** The manifest is authoritative for launching |
    | `icon` / `banner` | string (URL) | Sidebar icon and background image |
    | `isPublic` | boolean | Must be `true` to be queryable |
    | `enabled` | boolean | Toggle modpack visibility |
    | `usersAllowed` | string[] | Minecraft **usernames** allowed to see the modpack |
    | `order` | number | Display order in the sidebar |
    | `java.minRam` / `java.maxRam` | string | Optional, e.g. `4G` — overrides launcher defaults |
+   | `maintenance` | boolean | Blocks launching while a modpack update is being uploaded |
+   | `maintenanceMessage` | string | Optional text shown to the player instead of launching |
+   | `manifest.url` | string | `https://<cdn>/<packId>/manifest.json` |
+   | `manifest.hash` | string | sha256 of that file; the launcher refuses a mismatch |
+   | `manifest.version` | string | Pack version, informational |
 
-   **Module document**
-
-   | Field | Type | Description |
-   |-------|------|-------------|
-   | `name` | string | Shown during validation/download |
-   | `type` | string | `ForgeHosted` \| `Forge` \| `Fabric` \| `ForgeMod` \| `File` |
-   | `artifact.url` | string | Download URL (`.zip` files are extracted after download) |
-   | `artifact.MD5` | string | Optional checksum; when present the file is re-downloaded if it does not match |
-   | `artifact.path` | string | Optional relative path inside the instance (for `File` modules) |
-   | `forgeVersion` | string | Forge build, e.g. `47.2.0` — required on the Forge module |
-   | `fabricVersion` | string | Fabric loader version, e.g. `0.15.7` — required on the Fabric module |
+   `manifest.hash` is the only field that changes when a modpack is updated, which makes
+   publishing atomic: nothing is visible to players until it is flipped.
 
    > `usersAllowed` is filtered client-side for convenience. Real access control must be enforced with Firestore Security Rules.
 
@@ -117,10 +115,12 @@ A custom Minecraft launcher built with Electron, React, and Tailwind CSS. Featur
 
 ```
 Validate account (refresh Microsoft/Minecraft tokens if needed)
-  → Validate modpack files (MD5) and download what is missing
+  → Re-read the modpack document (maintenance flag, current manifest pointer)
+  → Fetch the manifest and verify it against the hash in Firestore
+  → Sync the instance: download what is missing or changed, delete orphans in `strict` paths
   → Download the vanilla client, libraries and assets (helios-core)
   → Resolve the required Java version from the version manifest, then reuse or download a JVM
-  → Install the mod loader (Forge installer / Fabric Meta profile)
+  → Install the mod loader (Fabric Meta profile / Forge installer)
   → Download loader libraries
   → Build the launch command and spawn the game
 ```

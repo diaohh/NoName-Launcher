@@ -6,13 +6,21 @@ import { showStatus } from '../common/StatusMessage'
 export default function PlayButton() {
   const { launchState, gameRunning, launch, resetState } = useLaunch()
   const { logout } = useAuth()
-  const { selectedServer } = useServers()
+  const { selectedServer, prepareLaunch } = useServers()
 
   const isDisabled = launchState !== 'idle' && launchState !== 'error'
   const isVisible = !!selectedServer
 
   const handlePlay = async () => {
     try {
+      // Re-read the modpack first: it may have gone into maintenance, or published a
+      // new manifest, since the launcher was opened.
+      const ready = await prepareLaunch(selectedServer.id)
+      if (!ready.ok) {
+        showStatus(ready.message, 'error')
+        return
+      }
+
       await launch()
     } catch (err) {
       console.error('Launch error:', err)

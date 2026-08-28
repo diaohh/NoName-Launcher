@@ -6,6 +6,7 @@ import { downloadFile, downloadQueue, getExpectedDownloadSize, HashAlgo } from '
 import ConfigManager from './ConfigManager'
 import AuthManager from './AuthManager'
 import DistributionManager from './DistributionManager'
+import ManifestManager from './ManifestManager'
 import ModLoaderManager from './ModLoaderManager'
 import MinecraftDownloadManager from './MinecraftDownloadManager'
 import Logger from '../utils/Logger'
@@ -434,26 +435,48 @@ class LaunchManager {
             const server = DistributionManager.getSelectedServer()
             if (!server) throw new Error('No server selected')
 
-            this.assertSupportedVersion(server.rawServer.minecraftVersion)
+            // The renderer re-reads the modpack document right before launching, so this
+            // is the current value, not whatever was cached when the list was loaded.
+            if (server.rawServer.maintenance) {
+                const error = new Error(
+                    server.rawServer.maintenanceMessage
+                    || 'El modpack esta en mantenimiento. Intentalo de nuevo en unos minutos.'
+                )
+                error.code = 'MODPACK_MAINTENANCE'
+                throw error
+            }
 
             logger.info('Launching server:', server.rawServer.name)
 
-            if (progressCallback) progressCallback({ type: 'validation', message: 'Validando archivos del servidor...' })
+            if (progressCallback) progressCallback({ type: 'manifest', message: 'Descargando manifest del modpack...' })
+            const { manifest, baseUrl } = await ManifestManager.fetch(server.rawServer.manifest)
 
-            const invalidFiles = await DistributionManager.validateDistribution(server, (current, total, msg) => {
+            // The manifest is authoritative for launching; the Firestore field of the
+            // same name exists only so the sidebar can show a version without fetching it.
+            const minecraftVersion = manifest.minecraft.version
+            this.assertSupportedVersion(minecraftVersion)
+
+            if (progressCallback) progressCallback({ type: 'validation', message: 'Validando archivos del modpack...' })
+
+            const plan = await DistributionManager.planSync(server, manifest, (current, total, msg) => {
                 if (progressCallback) progressCallback({ type: 'validation', message: msg, current, total })
             })
 
-            if (invalidFiles.length > 0) {
-                if (progressCallback) progressCallback({ type: 'download_mods', message: `Descargando ${invalidFiles.length} archivos del servidor...` })
-                await DistributionManager.downloadServerFiles(invalidFiles, (current, total, msg) => {
-                    if (progressCallback) progressCallback({ type: 'download_mods', message: msg, current, total })
-                })
+            if (plan.toDownload.length > 0 || plan.toDelete.length > 0) {
+                if (progressCallback) {
+                    progressCallback({
+                        type: 'download_mods',
+                        message: `Actualizando modpack: ${plan.toDownload.length} archivos nuevos, ${plan.toDelete.length} obsoletos...`
+                    })
+                }
             }
+
+            await DistributionManager.applySync(server, manifest, baseUrl, plan, (current, total, msg) => {
+                if (progressCallback) progressCallback({ type: 'download_mods', message: msg, current, total })
+            })
 
             if (progressCallback) progressCallback({ type: 'download', message: 'Preparando descarga de Minecraft...' })
 
-            const minecraftVersion = server.rawServer.minecraftVersion
             const vanillaManifest = await MinecraftDownloadManager.downloadMinecraft(minecraftVersion, (percent, phase, message) => {
                 if (progressCallback) {
                     progressCallback({ type: 'download', message, phase: MinecraftDownloadManager.getPhaseDisplayName(phase), current: percent, total: 100 })
@@ -466,13 +489,15 @@ class LaunchManager {
             const requiredJavaVersion = this.getRequiredJavaVersion(minecraftVersion, vanillaManifest)
             const javaPath = await this.ensureJava(requiredJavaVersion, progressCallback)
 
-            const loaderType = ModLoaderManager.detectModLoader(server)
-            const versionString = ModLoaderManager.getVersionString(server)
+            const loader = manifest.loader
+            const loaderType = ModLoaderManager.detectModLoader(loader)
+            const versionString = ModLoaderManager.getVersionString(loader, minecraftVersion)
+            const instanceDir = path.join(ConfigManager.getInstanceDirectory(), server.rawServer.id)
 
             if (loaderType !== 'vanilla') {
-                if (!ModLoaderManager.isModLoaderInstalled(server)) {
+                if (!ModLoaderManager.isModLoaderInstalled(loader, minecraftVersion)) {
                     if (progressCallback) progressCallback({ type: 'modloader', message: `Instalando ${loaderType}...` })
-                    await ModLoaderManager.installModLoader(server, javaPath, (current, total, msg) => {
+                    await ModLoaderManager.installModLoader(loader, minecraftVersion, javaPath, instanceDir, (current, total, msg) => {
                         if (progressCallback) progressCallback({ type: 'modloader', message: msg, current, total })
                     })
                 }
@@ -489,7 +514,6 @@ class LaunchManager {
 
             if (progressCallback) progressCallback({ type: 'launch', message: 'Iniciando Minecraft...' })
 
-            const instanceDir = path.join(ConfigManager.getInstanceDirectory(), server.rawServer.id)
             await fs.ensureDir(instanceDir)
             await fs.ensureDir(path.join(instanceDir, 'natives'))
 

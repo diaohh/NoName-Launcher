@@ -24,10 +24,6 @@ export const Channels = {
   SHELL_OPEN_PATH: 'shell:openPath',
 
   // Distribution
-  DISTRO_LOAD: 'distro:load',
-  DISTRO_GET_SERVERS: 'distro:getServers',
-  DISTRO_SELECT_SERVER: 'distro:selectServer',
-  DISTRO_GET_SELECTED: 'distro:getSelected',
   DISTRO_SET_SERVER_DATA: 'distro:setServerData',
 
   // Launch
