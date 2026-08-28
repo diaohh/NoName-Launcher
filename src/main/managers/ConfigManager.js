@@ -52,8 +52,7 @@ class ConfigManager {
                     autoDownload: true
                 },
                 launcher: {
-                    dataDirectory: this.getLauncherDirectory(),
-                    distroURL: process.env.DISTRIBUTION_URL || null
+                    dataDirectory: this.getLauncherDirectory()
                 }
             },
             selectedAccount: null,
@@ -125,7 +124,6 @@ class ConfigManager {
     static getJavaExecutable() { return this.config.settings.java.executable }
     static getJavaAutoDownload() { return this.config.settings.java.autoDownload }
     static getDataDirectory() { return this.config.settings.launcher.dataDirectory }
-    static getDistributionURL() { return this.config.settings.launcher.distroURL }
     static getSelectedServer() { return this.config.selectedServer }
     static getSelectedAccount() { return this.config.selectedAccount }
     static getAuthenticationDatabase() { return this.config.authenticationDatabase }
@@ -142,7 +140,6 @@ class ConfigManager {
     static setJavaExecutable(executable) { this.config.settings.java.executable = executable }
     static setJavaAutoDownload(autoDownload) { this.config.settings.java.autoDownload = autoDownload }
     static setDataDirectory(directory) { this.config.settings.launcher.dataDirectory = directory }
-    static setDistributionURL(url) { this.config.settings.launcher.distroURL = url }
     static setSelectedServer(serverId) { this.config.selectedServer = serverId }
     static setSelectedAccount(uuid) { this.config.selectedAccount = uuid }
 
