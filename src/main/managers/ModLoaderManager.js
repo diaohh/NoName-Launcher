@@ -4,6 +4,7 @@ import child_process from 'child_process'
 import crypto from 'crypto'
 import ConfigManager from './ConfigManager'
 import Logger from '../utils/Logger'
+import { ERROR_CODE } from '../../shared/errorCodes'
 
 const logger = Logger.getLogger('ModLoaderManager')
 
@@ -49,7 +50,7 @@ class ModLoaderManager {
             case 'vanilla': return null
             default: {
                 const error = new Error(`El mod loader "${loaderType}" no esta soportado por este launcher`)
-                error.code = 'UNSUPPORTED_MODLOADER'
+                error.code = ERROR_CODE.UNSUPPORTED_MODLOADER
                 throw error
             }
         }
@@ -115,7 +116,7 @@ class ModLoaderManager {
                     'El manifest declara Forge pero no publica el instalador (loader.installer.path). ' +
                     'Forge todavia no esta soportado por el generador de manifests.'
                 )
-                error.code = 'UNSUPPORTED_MODLOADER'
+                error.code = ERROR_CODE.UNSUPPORTED_MODLOADER
                 throw error
             }
 
@@ -143,7 +144,15 @@ class ModLoaderManager {
                     if (progressCallback) progressCallback(50, 100, 'Instalando Forge...')
                 })
                 proc.stderr.on('data', (data) => logger.warn('[Forge Installer Error]', data.toString().trim()))
-                proc.on('close', (code) => code === 0 ? resolve() : reject(new Error(`Forge installer exited with code ${code}`)))
+                proc.on('close', (code) => {
+                    if (code === 0) {
+                        resolve()
+                        return
+                    }
+                    const error = new Error(`El instalador de Forge ha fallado (codigo ${code}). Revisa los logs.`)
+                    error.code = ERROR_CODE.MODLOADER_FAILED
+                    reject(error)
+                })
                 proc.on('error', (err) => reject(err))
             })
 

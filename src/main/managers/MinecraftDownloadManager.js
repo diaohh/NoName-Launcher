@@ -1,6 +1,7 @@
 import { MojangIndexProcessor, downloadQueue, getExpectedDownloadSize } from 'helios-core/dl'
 import ConfigManager from './ConfigManager'
 import Logger from '../utils/Logger'
+import { ERROR_CODE } from '../../shared/errorCodes'
 
 const logger = Logger.getLogger('MinecraftDownloadManager')
 
@@ -82,8 +83,17 @@ class MinecraftDownloadManager {
 
             return versionJson
         } catch (err) {
+            // MojangIndexProcessor reports in English and its messages reach the player
+            // untouched. The original stays as the cause and in the log.
             logger.error('Minecraft download failed:', err)
-            throw err
+
+            const error = new Error(
+                `No se han podido descargar los archivos de Minecraft ${minecraftVersion}. ` +
+                'Comprueba tu conexion e intentalo de nuevo.'
+            )
+            error.code = ERROR_CODE.MC_DOWNLOAD_FAILED
+            error.cause = err
+            throw error
         }
     }
 

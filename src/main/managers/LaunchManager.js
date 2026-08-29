@@ -152,10 +152,27 @@ class LaunchManager {
         const validJava = await this.validateJava(requiredVersion)
         if (validJava) return validJava
 
-        if (ConfigManager.getJavaAutoDownload()) {
-            return await this.downloadJava(requiredVersion, progressCallback)
+        if (!ConfigManager.getJavaAutoDownload()) {
+            const error = new Error(
+                `No hay una instalacion valida de Java ${requiredVersion} y la descarga automatica ` +
+                `esta desactivada. Activala en Ajustes o selecciona un Java ${requiredVersion} manualmente.`
+            )
+            error.code = ERROR_CODE.JAVA_UNAVAILABLE
+            throw error
         }
-        throw new Error(`No valid Java ${requiredVersion} installation found and auto-download is disabled.`)
+
+        try {
+            return await this.downloadJava(requiredVersion, progressCallback)
+        } catch (err) {
+            // helios-core's JavaGuard reports in English. The original is kept as the
+            // cause and is already in the log; the player gets a message they can read.
+            if (err.code === ERROR_CODE.JAVA_UNAVAILABLE) throw err
+
+            const error = new Error(`No se ha podido preparar Java ${requiredVersion}. Revisa los logs.`)
+            error.code = ERROR_CODE.JAVA_UNAVAILABLE
+            error.cause = err
+            throw error
+        }
     }
 
     /**
@@ -265,7 +282,12 @@ class LaunchManager {
 
     static async readVersionJson(versionId) {
         const versionJsonPath = path.join(ConfigManager.getCommonDirectory(), 'versions', versionId, `${versionId}.json`)
-        if (!fs.existsSync(versionJsonPath)) throw new Error(`Version manifest not found: ${versionJsonPath}`)
+        if (!fs.existsSync(versionJsonPath)) {
+            const error = new Error(`Falta el manifiesto de la version ${versionId}. Vuelve a lanzar para descargarlo.`)
+            error.code = ERROR_CODE.MANIFEST_INVALID
+            logger.error(`Version manifest not found: ${versionJsonPath}`)
+            throw error
+        }
         return await fs.readJson(versionJsonPath)
     }
 
