@@ -1,14 +1,20 @@
 import { createContext, useState, useEffect, useContext, useCallback, useRef } from 'react'
 import { ipc } from '../services/ipcClient'
+import { phasePercent } from '../services/launchPhases'
 
 const LaunchContext = createContext()
 
+const IDLE_PROGRESS = { phase: '', message: '', current: 0, total: 0, percent: null }
+
 export function LaunchProvider({ children }) {
   const [launchState, setLaunchState] = useState('idle')
-  const [progress, setProgress] = useState({ phase: '', message: '', current: 0, total: 0 })
+  const [progress, setProgress] = useState(IDLE_PROGRESS)
   const [logs, setLogs] = useState([])
   const [gameRunning, setGameRunning] = useState(false)
+  const [lastError, setLastError] = useState(null)
   const cleanupRef = useRef(null)
+  // The bar must never retreat, whatever order the events arrive in.
+  const maxPercentRef = useRef(0)
 
   const addLog = useCallback((message, type) => {
     setLogs(prev => {
@@ -26,6 +32,7 @@ export function LaunchProvider({ children }) {
         case 'download_mods':
         case 'modloader':
         case 'download':
+        case 'download_libraries':
         case 'java':
         case 'java_discover':
         case 'java_download':
@@ -34,11 +41,20 @@ export function LaunchProvider({ children }) {
           setProgress(prev => {
             const newPhase = data.phase || data.type
             const phaseChanged = newPhase !== prev.phase
+            const current = phaseChanged ? (data.current ?? 0) : (data.current ?? prev.current)
+            const total = phaseChanged ? (data.total ?? 0) : (data.total ?? prev.total)
+
+            const percent = phasePercent(data.type, current, total)
+            if (percent != null) {
+              maxPercentRef.current = Math.max(maxPercentRef.current, percent)
+            }
+
             return {
               phase: newPhase,
               message: data.message,
-              current: phaseChanged ? (data.current ?? 0) : (data.current ?? prev.current),
-              total: phaseChanged ? (data.total ?? 0) : (data.total ?? prev.total)
+              current,
+              total,
+              percent: percent == null ? prev.percent : maxPercentRef.current
             }
           })
           break
@@ -60,6 +76,7 @@ export function LaunchProvider({ children }) {
           break
         case 'error':
           addLog(data.error, 'error')
+          setLastError({ code: data.code, message: data.error })
           setLaunchState('error')
           break
       }
@@ -73,10 +90,12 @@ export function LaunchProvider({ children }) {
   const launch = async () => {
     setLaunchState('preparing')
     setLogs([])
-    setProgress({ phase: '', message: 'Iniciando...', current: 0, total: 0 })
+    setLastError(null)
+    maxPercentRef.current = 0
+    setProgress({ ...IDLE_PROGRESS, message: 'Iniciando...' })
     try {
       await ipc.launch.game()
-      setProgress({ phase: 'Completado', message: 'Minecraft iniciado!', current: 100, total: 100 })
+      setProgress({ phase: 'Completado', message: 'Minecraft iniciado!', current: 100, total: 100, percent: 100 })
     } catch (err) {
       setLaunchState('error')
       throw err
@@ -85,11 +104,13 @@ export function LaunchProvider({ children }) {
 
   const resetState = () => {
     setLaunchState('idle')
-    setProgress({ phase: '', message: '', current: 0, total: 0 })
+    setLastError(null)
+    maxPercentRef.current = 0
+    setProgress(IDLE_PROGRESS)
   }
 
   return (
-    <LaunchContext.Provider value={{ launchState, progress, logs, gameRunning, launch, resetState }}>
+    <LaunchContext.Provider value={{ launchState, progress, logs, gameRunning, lastError, launch, resetState }}>
       {children}
     </LaunchContext.Provider>
   )

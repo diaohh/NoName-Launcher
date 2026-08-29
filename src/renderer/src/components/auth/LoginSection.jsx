@@ -1,23 +1,24 @@
-import { useState } from "react";
-import { useAuth } from "../../contexts/AuthContext";
-import { showStatus } from "../common/StatusMessage";
-import minecraftIcon from "../../assets/imgs/minecraft_icon.png";
+import { useState } from "react"
+import { useAuth } from "../../contexts/AuthContext"
+import { useStatus } from "../../contexts/StatusContext"
+import minecraftIcon from "../../assets/imgs/minecraft_icon.png"
 
 export default function LoginSection() {
-  const { login } = useAuth();
-  const [loggingIn, setLoggingIn] = useState(false);
+  const { login } = useAuth()
+  const { showStatus } = useStatus()
+  const [loggingIn, setLoggingIn] = useState(false)
 
   const handleLogin = async () => {
     try {
-      setLoggingIn(true);
-      await login();
+      setLoggingIn(true)
+      await login()
     } catch (err) {
-      console.error("Login error:", err);
-      showStatus(err.desc || err.message || "Error al iniciar sesion", "error");
+      console.error("Login error:", err)
+      showStatus(err.message || "Error al iniciar sesion", "error")
     } finally {
-      setLoggingIn(false);
+      setLoggingIn(false)
     }
-  };
+  }
 
   return (
     <div className="auth-bg w-screen h-screen flex items-center justify-center overflow-hidden font-inter relative">
@@ -44,8 +45,8 @@ export default function LoginSection() {
       </div>
 
       <p className="absolute bottom-10 w-full text-center text-[0.6rem] text-white/10 uppercase tracking-[2px] font-inter">
-        NoName Launcher · Build 0.2.1-IND
+        NoName Launcher · Build {__APP_VERSION__}
       </p>
     </div>
-  );
+  )
 }

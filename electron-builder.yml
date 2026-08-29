@@ -6,9 +6,6 @@ directories:
 files:
   - out/**/*
   - "!out/**/*.map"
-extraResources:
-  - from: distribution.json
-    to: distribution.json
 win:
   target:
     - nsis

@@ -109,7 +109,13 @@ A custom Minecraft launcher built with Electron, React, and Tailwind CSS. Featur
    `manifest.hash` is the only field that changes when a modpack is updated, which makes
    publishing atomic: nothing is visible to players until it is flipped.
 
-   > `usersAllowed` is filtered client-side for convenience. Real access control must be enforced with Firestore Security Rules.
+   > **`usersAllowed` is not access control.** It is filtered client-side, so anyone with
+   > the bundle can read the whole catalogue. Enforcing it in Security Rules is not
+   > possible as things stand: the launcher does not authenticate against Firebase, so
+   > `request.auth` is always `null` and there is no identity to match a username
+   > against. Closing this needs either a Cloud Function that mints a custom token from
+   > a verified Minecraft profile, or a data model where private packs are simply not
+   > publicly readable. See the stand-by entry in `TODO.md`.
 
 ## How a Launch Works
 
@@ -129,14 +135,22 @@ Everything runs in the main process and reports progress to the renderer over a 
 
 ## Data Directories
 
-Everything lives under `%APPDATA%/.nonamelauncher` on Windows (`~/Library/Application Support/.nonamelauncher` on macOS, `~/.local/share/.nonamelauncher` on Linux):
+The launcher root is `%APPDATA%/.nonamelauncher` on Windows (`~/Library/Application Support/.nonamelauncher` on macOS, `~/.local/share/.nonamelauncher` on Linux):
 
 ```
 config.json          Launcher settings + account database
+```
+
+Everything bulky lives under the **data directory**, which defaults to that same root and can be moved from Settings → Launcher:
+
+```
 common/              Shared data: assets, libraries, versions, forge, fabric
-common/runtime/      JVMs downloaded by the launcher
+runtime/             JVMs downloaded by the launcher
+manifests/           Verified pack manifests, keyed by sha256
 instances/<id>/      Per-modpack game directory (mods, config, saves, natives)
 ```
+
+`config.json` always stays in the launcher root — it is what records where the data directory is. Changing the setting affects new downloads only; existing files are not moved.
 
 ## Development
 

@@ -1,12 +1,14 @@
 import { useLaunch } from '../../contexts/LaunchContext'
 import { useAuth } from '../../contexts/AuthContext'
 import { useServers } from '../../contexts/ServersContext'
-import { showStatus } from '../common/StatusMessage'
+import { useStatus } from '../../contexts/StatusContext'
+import { isTerminalAuthCode } from '../../../../shared/errorCodes'
 
 export default function PlayButton() {
   const { launchState, gameRunning, launch, resetState } = useLaunch()
   const { logout } = useAuth()
   const { selectedServer, prepareLaunch } = useServers()
+  const { showStatus } = useStatus()
 
   const isDisabled = launchState !== 'idle' && launchState !== 'error'
   const isVisible = !!selectedServer
@@ -26,12 +28,10 @@ export default function PlayButton() {
       console.error('Launch error:', err)
       showStatus(err.message || 'Error al iniciar Minecraft', 'error')
 
-      if (err.message && (
-        err.message.includes('Session expired') ||
-        err.message.includes('No account selected')
-      )) {
+      // Only a terminal auth code means the credentials are gone for good. A network
+      // failure carries a code too, and must leave the player logged in.
+      if (isTerminalAuthCode(err.code)) {
         await logout()
-        showStatus('Tu sesion ha expirado. Por favor, inicia sesion nuevamente.', 'error')
       }
 
       resetState()

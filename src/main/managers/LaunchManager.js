@@ -1,6 +1,7 @@
 import child_process from 'child_process'
 import path from 'path'
 import fs from 'fs-extra'
+import { app } from 'electron'
 import { validateSelectedJvm, latestOpenJDK, extractJdk, javaExecFromRoot, ensureJavaDirIsRoot, discoverBestJvmInstallation } from 'helios-core/java'
 import { downloadFile, downloadQueue, getExpectedDownloadSize, HashAlgo } from 'helios-core/dl'
 import ConfigManager from './ConfigManager'
@@ -12,6 +13,7 @@ import MinecraftDownloadManager from './MinecraftDownloadManager'
 import Logger from '../utils/Logger'
 import { validateLocalFile } from '../utils/FileUtils'
 import { mavenToRelativePath, mavenToUrl } from '../utils/MavenUtils'
+import { ERROR_CODE } from '../../shared/errorCodes'
 
 const logger = Logger.getLogger('LaunchManager')
 
@@ -21,6 +23,16 @@ const toMB = (bytes) => (bytes / 1024 / 1024).toFixed(1)
 // natives as library classifiers. Older releases would need a separate code path.
 const MIN_SUPPORTED_MINOR = 17
 
+/**
+ * One progress shape for the whole launch flow: every callback in the chain takes a
+ * single object, `{ current, total, message }`.
+ *
+ * The managers underneath report only their own numbers — they have no idea which launch
+ * phase they are being run for. LaunchManager is the one layer that knows, so it is the
+ * one that adds `type`, and `type` is what LaunchContext switches on. Mixing
+ * `(current, total, msg)` with `{ type, message }` in the same chain is what this
+ * replaces.
+ */
 class LaunchManager {
 
     static gameProcess = null
@@ -33,7 +45,7 @@ class LaunchManager {
                 `Minecraft ${minecraftVersion} no es compatible con este launcher. ` +
                 `Solo se admiten versiones 1.${MIN_SUPPORTED_MINOR} o superiores.`
             )
-            error.code = 'UNSUPPORTED_MC_VERSION'
+            error.code = ERROR_CODE.UNSUPPORTED_MC_VERSION
             throw error
         }
     }
@@ -79,7 +91,10 @@ class LaunchManager {
 
     static async downloadJava(version, progressCallback) {
         const semverRange = this.javaSemverRange(version)
-        const dataDir = ConfigManager.getLauncherDirectory()
+        // helios puts downloaded JDKs under `<dataDir>/runtime/<arch>` and rediscovers
+        // them there, so they follow the configured data directory like every other
+        // bulky artifact.
+        const dataDir = ConfigManager.getDataDirectory()
         let archivePath = null
 
         try {
@@ -150,10 +165,27 @@ class LaunchManager {
         const validJava = await this.validateJava(requiredVersion)
         if (validJava) return validJava
 
-        if (ConfigManager.getJavaAutoDownload()) {
-            return await this.downloadJava(requiredVersion, progressCallback)
+        if (!ConfigManager.getJavaAutoDownload()) {
+            const error = new Error(
+                `No hay una instalacion valida de Java ${requiredVersion} y la descarga automatica ` +
+                `esta desactivada. Activala en Ajustes o selecciona un Java ${requiredVersion} manualmente.`
+            )
+            error.code = ERROR_CODE.JAVA_UNAVAILABLE
+            throw error
         }
-        throw new Error(`No valid Java ${requiredVersion} installation found and auto-download is disabled.`)
+
+        try {
+            return await this.downloadJava(requiredVersion, progressCallback)
+        } catch (err) {
+            // helios-core's JavaGuard reports in English. The original is kept as the
+            // cause and is already in the log; the player gets a message they can read.
+            if (err.code === ERROR_CODE.JAVA_UNAVAILABLE) throw err
+
+            const error = new Error(`No se ha podido preparar Java ${requiredVersion}. Revisa los logs.`)
+            error.code = ERROR_CODE.JAVA_UNAVAILABLE
+            error.cause = err
+            throw error
+        }
     }
 
     /**
@@ -243,7 +275,12 @@ class LaunchManager {
 
             await downloadQueue(pending, (received) => {
                 if (progressCallback) {
-                    progressCallback(received, totalSize, `Descargando librerias... ${toMB(received)} MB / ${toMB(totalSize)} MB`)
+                    progressCallback({
+                        type: 'download_libraries',
+                        current: received,
+                        total: totalSize,
+                        message: `Descargando librerias... ${toMB(received)} MB / ${toMB(totalSize)} MB`
+                    })
                 }
             })
 
@@ -263,7 +300,12 @@ class LaunchManager {
 
     static async readVersionJson(versionId) {
         const versionJsonPath = path.join(ConfigManager.getCommonDirectory(), 'versions', versionId, `${versionId}.json`)
-        if (!fs.existsSync(versionJsonPath)) throw new Error(`Version manifest not found: ${versionJsonPath}`)
+        if (!fs.existsSync(versionJsonPath)) {
+            const error = new Error(`Falta el manifiesto de la version ${versionId}. Vuelve a lanzar para descargarlo.`)
+            error.code = ERROR_CODE.MANIFEST_INVALID
+            logger.error(`Version manifest not found: ${versionJsonPath}`)
+            throw error
+        }
         return await fs.readJson(versionJsonPath)
     }
 
@@ -345,7 +387,7 @@ class LaunchManager {
             const error = new Error(
                 `El manifiesto de ${versionId} usa el formato antiguo (minecraftArguments), que no es compatible con este launcher.`
             )
-            error.code = 'UNSUPPORTED_MANIFEST'
+            error.code = ERROR_CODE.UNSUPPORTED_MANIFEST
             throw error
         }
 
@@ -389,8 +431,10 @@ class LaunchManager {
             resolution_width: ConfigManager.getGameWidth().toString(),
             resolution_height: ConfigManager.getGameHeight().toString(),
             natives_directory: nativesDir,
-            launcher_name: 'NoNameLauncher',
-            launcher_version: '1.0.0',
+            // Both come from package.json: `app.getName()` resolves to productName and
+            // `app.getVersion()` to version, so the launcher has one identity, not three.
+            launcher_name: app.getName(),
+            launcher_version: app.getVersion(),
             classpath,
             library_directory: librariesDir,
             classpath_separator: process.platform === 'win32' ? ';' : ':'
@@ -418,22 +462,33 @@ class LaunchManager {
         try {
             if (progressCallback) progressCallback({ type: 'auth', message: 'Validando cuenta...' })
 
-            const isValid = await AuthManager.validateSelectedMicrosoftAccount()
-            if (!isValid) {
-                const error = new Error('Session expired. Please login again.')
-                error.code = 'AUTH_SESSION_EXPIRED'
+            const validation = await AuthManager.validateSelectedMicrosoftAccount()
+            if (!validation.ok) {
+                // The renderer decides whether to bounce the player to the login screen
+                // from `code`, not from this text, so a recoverable failure can keep its
+                // own message: a network blip must not read like a dead session.
+                const error = new Error(
+                    AuthManager.isTerminalError(validation.code)
+                        ? 'Tu sesion ha caducado. Vuelve a iniciar sesion.'
+                        : validation.message
+                )
+                error.code = validation.code
                 throw error
             }
 
             const account = AuthManager.getSelectedAccount()
             if (!account) {
-                const error = new Error('No account selected. Please login.')
-                error.code = 'AUTH_NO_ACCOUNT'
+                const error = new Error('No hay ninguna cuenta iniciada. Inicia sesion con Microsoft.')
+                error.code = ERROR_CODE.AUTH_NO_ACCOUNT
                 throw error
             }
 
             const server = DistributionManager.getSelectedServer()
-            if (!server) throw new Error('No server selected')
+            if (!server) {
+                const error = new Error('No hay ningun modpack seleccionado.')
+                error.code = ERROR_CODE.LAUNCH_NO_SERVER
+                throw error
+            }
 
             // The renderer re-reads the modpack document right before launching, so this
             // is the current value, not whatever was cached when the list was loaded.
@@ -442,7 +497,7 @@ class LaunchManager {
                     server.rawServer.maintenanceMessage
                     || 'El modpack esta en mantenimiento. Intentalo de nuevo en unos minutos.'
                 )
-                error.code = 'MODPACK_MAINTENANCE'
+                error.code = ERROR_CODE.MODPACK_MAINTENANCE
                 throw error
             }
 
@@ -458,8 +513,8 @@ class LaunchManager {
 
             if (progressCallback) progressCallback({ type: 'validation', message: 'Validando archivos del modpack...' })
 
-            const plan = await DistributionManager.planSync(server, manifest, (current, total, msg) => {
-                if (progressCallback) progressCallback({ type: 'validation', message: msg, current, total })
+            const plan = await DistributionManager.planSync(server, manifest, (progress) => {
+                if (progressCallback) progressCallback({ type: 'validation', ...progress })
             })
 
             if (plan.toDownload.length > 0 || plan.toDelete.length > 0) {
@@ -471,15 +526,19 @@ class LaunchManager {
                 }
             }
 
-            await DistributionManager.applySync(server, manifest, baseUrl, plan, (current, total, msg) => {
-                if (progressCallback) progressCallback({ type: 'download_mods', message: msg, current, total })
+            await DistributionManager.applySync(server, manifest, baseUrl, plan, (progress) => {
+                if (progressCallback) progressCallback({ type: 'download_mods', ...progress })
             })
 
             if (progressCallback) progressCallback({ type: 'download', message: 'Preparando descarga de Minecraft...' })
 
-            const vanillaManifest = await MinecraftDownloadManager.downloadMinecraft(minecraftVersion, (percent, phase, message) => {
+            const vanillaManifest = await MinecraftDownloadManager.downloadMinecraft(minecraftVersion, (progress) => {
                 if (progressCallback) {
-                    progressCallback({ type: 'download', message, phase: MinecraftDownloadManager.getPhaseDisplayName(phase), current: percent, total: 100 })
+                    progressCallback({
+                        ...progress,
+                        type: 'download',
+                        phase: MinecraftDownloadManager.getPhaseDisplayName(progress.phase)
+                    })
                 }
             })
 
@@ -497,15 +556,16 @@ class LaunchManager {
             if (loaderType !== 'vanilla') {
                 if (!ModLoaderManager.isModLoaderInstalled(loader, minecraftVersion)) {
                     if (progressCallback) progressCallback({ type: 'modloader', message: `Instalando ${loaderType}...` })
-                    await ModLoaderManager.installModLoader(loader, minecraftVersion, javaPath, instanceDir, (current, total, msg) => {
-                        if (progressCallback) progressCallback({ type: 'modloader', message: msg, current, total })
+                    await ModLoaderManager.installModLoader(loader, minecraftVersion, javaPath, instanceDir, (progress) => {
+                        if (progressCallback) progressCallback({ type: 'modloader', ...progress })
                     })
                 }
 
-                if (progressCallback) progressCallback({ type: 'download', message: `Descargando librerias de ${loaderType}...` })
-                await this.downloadModLoaderLibraries(versionString, (current, total, message) => {
-                    if (progressCallback) progressCallback({ type: 'download', message: message || `Descargando librerias de ${loaderType}...`, current, total })
-                })
+                // Its own phase, not `download`: the vanilla download already used that
+                // one earlier in the flow, and a phase that appears twice makes the
+                // progress bar run backwards.
+                if (progressCallback) progressCallback({ type: 'download_libraries', message: `Descargando librerias de ${loaderType}...` })
+                await this.downloadModLoaderLibraries(versionString, progressCallback)
             }
 
             if (progressCallback) progressCallback({ type: 'launch', message: 'Construyendo comando de lanzamiento...' })
@@ -542,13 +602,17 @@ class LaunchManager {
 
             this.gameProcess.on('error', (err) => {
                 this.gameProcess = null
-                if (progressCallback) progressCallback({ type: 'error', error: err.message })
+                if (progressCallback) {
+                    progressCallback({ type: 'error', error: err.message, code: err.code || ERROR_CODE.UNKNOWN })
+                }
             })
 
             return { pid: this.gameProcess.pid }
         } catch (err) {
             logger.error('Launch failed:', err)
-            if (progressCallback) progressCallback({ type: 'error', error: err.message })
+            if (progressCallback) {
+                progressCallback({ type: 'error', error: err.message, code: err.code || ERROR_CODE.UNKNOWN })
+            }
             throw err
         }
     }

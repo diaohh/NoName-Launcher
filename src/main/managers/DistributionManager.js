@@ -80,6 +80,8 @@ class DistributionManager {
     /**
      * Compares the instance against the manifest.
      *
+     * @param progressCallback Receives `{ current, total, message }`; the launch `type`
+     * is added by LaunchManager, which is the layer that knows it.
      * @returns {Promise<{toDownload: Array, toDelete: Array, state: object}>}
      */
     static async planSync(server, manifest, progressCallback) {
@@ -93,7 +95,11 @@ class DistributionManager {
         for (const entry of manifest.files) {
             checked++
             if (progressCallback && checked % 10 === 0) {
-                progressCallback(checked, manifest.files.length, `Validando archivos... ${checked}/${manifest.files.length}`)
+                progressCallback({
+                    current: checked,
+                    total: manifest.files.length,
+                    message: `Validando archivos... ${checked}/${manifest.files.length}`
+                })
             }
 
             const filePath = path.join(instanceDir, entry.path)
@@ -200,7 +206,7 @@ class DistributionManager {
         }
 
         if (plan.toDelete.length > 0 && progressCallback) {
-            progressCallback(0, 0, `Eliminando ${plan.toDelete.length} archivos obsoletos...`)
+            progressCallback({ message: `Eliminando ${plan.toDelete.length} archivos obsoletos...` })
         }
 
         if (plan.toDownload.length > 0) {
@@ -217,11 +223,11 @@ class DistributionManager {
 
             await downloadQueue(downloads, (received) => {
                 if (progressCallback) {
-                    progressCallback(
-                        received,
-                        totalSize,
-                        `Descargando archivos del modpack... ${toMB(received)} MB / ${toMB(totalSize)} MB`
-                    )
+                    progressCallback({
+                        current: received,
+                        total: totalSize,
+                        message: `Descargando archivos del modpack... ${toMB(received)} MB / ${toMB(totalSize)} MB`
+                    })
                 }
             })
 

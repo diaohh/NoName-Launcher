@@ -36,7 +36,7 @@ class ManifestManager {
     }
 
     static cachePath(hash) {
-        return path.join(ConfigManager.getLauncherDirectory(), 'manifests', `${hash}.json`)
+        return path.join(ConfigManager.getDataDirectory(), 'manifests', `${hash}.json`)
     }
 
     static assertShape(manifest) {

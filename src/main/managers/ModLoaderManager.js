@@ -4,6 +4,7 @@ import child_process from 'child_process'
 import crypto from 'crypto'
 import ConfigManager from './ConfigManager'
 import Logger from '../utils/Logger'
+import { ERROR_CODE } from '../../shared/errorCodes'
 
 const logger = Logger.getLogger('ModLoaderManager')
 
@@ -49,7 +50,7 @@ class ModLoaderManager {
             case 'vanilla': return null
             default: {
                 const error = new Error(`El mod loader "${loaderType}" no esta soportado por este launcher`)
-                error.code = 'UNSUPPORTED_MODLOADER'
+                error.code = ERROR_CODE.UNSUPPORTED_MODLOADER
                 throw error
             }
         }
@@ -62,13 +63,13 @@ class ModLoaderManager {
      */
     static async installFabric(loader, minecraftVersion, progressCallback) {
         try {
-            if (progressCallback) progressCallback(0, 100, 'Preparando instalacion de Fabric...')
+            if (progressCallback) progressCallback({ current: 0, total: 100, message: 'Preparando instalacion de Fabric...' })
 
             if (!loader.version) throw new Error('El manifest no declara la version de Fabric (loader.version)')
 
             const profileUrl = `${FABRIC_META_URL}/v2/versions/loader/${minecraftVersion}/${loader.version}/profile/json`
 
-            if (progressCallback) progressCallback(30, 100, 'Descargando perfil de Fabric...')
+            if (progressCallback) progressCallback({ current: 30, total: 100, message: 'Descargando perfil de Fabric...' })
             logger.info('Fetching Fabric profile:', profileUrl)
 
             const response = await fetch(profileUrl)
@@ -79,14 +80,14 @@ class ModLoaderManager {
             const profile = await response.json()
             const versionId = profile.id || this.getVersionString(loader, minecraftVersion)
 
-            if (progressCallback) progressCallback(70, 100, 'Guardando perfil de Fabric...')
+            if (progressCallback) progressCallback({ current: 70, total: 100, message: 'Guardando perfil de Fabric...' })
 
             const versionDir = path.join(ConfigManager.getCommonDirectory(), 'versions', versionId)
             await fs.ensureDir(versionDir)
             await fs.writeJson(path.join(versionDir, `${versionId}.json`), profile, { spaces: 2 })
 
             logger.info(`Fabric ${loader.version} profile installed for Minecraft ${minecraftVersion}`)
-            if (progressCallback) progressCallback(100, 100, 'Fabric instalado correctamente')
+            if (progressCallback) progressCallback({ current: 100, total: 100, message: 'Fabric instalado correctamente' })
             return true
         } catch (err) {
             logger.error('Fabric installation failed:', err)
@@ -104,7 +105,7 @@ class ModLoaderManager {
      */
     static async installForge(loader, minecraftVersion, javaPath, instanceDir, progressCallback) {
         try {
-            if (progressCallback) progressCallback(0, 100, 'Preparando instalacion de Forge...')
+            if (progressCallback) progressCallback({ current: 0, total: 100, message: 'Preparando instalacion de Forge...' })
 
             if (!loader.version) throw new Error('El manifest no declara la version de Forge (loader.version)')
             if (!javaPath) throw new Error('Se necesita Java para ejecutar el instalador de Forge')
@@ -115,7 +116,7 @@ class ModLoaderManager {
                     'El manifest declara Forge pero no publica el instalador (loader.installer.path). ' +
                     'Forge todavia no esta soportado por el generador de manifests.'
                 )
-                error.code = 'UNSUPPORTED_MODLOADER'
+                error.code = ERROR_CODE.UNSUPPORTED_MODLOADER
                 throw error
             }
 
@@ -129,7 +130,7 @@ class ModLoaderManager {
             fs.ensureDirSync(path.join(commonDir, 'libraries'))
             this.ensureLauncherProfiles(commonDir, minecraftVersion)
 
-            if (progressCallback) progressCallback(20, 100, 'Ejecutando instalador de Forge...')
+            if (progressCallback) progressCallback({ current: 20, total: 100, message: 'Ejecutando instalador de Forge...' })
 
             await new Promise((resolve, reject) => {
                 const proc = child_process.execFile(
@@ -140,14 +141,22 @@ class ModLoaderManager {
 
                 proc.stdout.on('data', (data) => {
                     logger.info('[Forge Installer]', data.toString().trim())
-                    if (progressCallback) progressCallback(50, 100, 'Instalando Forge...')
+                    if (progressCallback) progressCallback({ current: 50, total: 100, message: 'Instalando Forge...' })
                 })
                 proc.stderr.on('data', (data) => logger.warn('[Forge Installer Error]', data.toString().trim()))
-                proc.on('close', (code) => code === 0 ? resolve() : reject(new Error(`Forge installer exited with code ${code}`)))
+                proc.on('close', (code) => {
+                    if (code === 0) {
+                        resolve()
+                        return
+                    }
+                    const error = new Error(`El instalador de Forge ha fallado (codigo ${code}). Revisa los logs.`)
+                    error.code = ERROR_CODE.MODLOADER_FAILED
+                    reject(error)
+                })
                 proc.on('error', (err) => reject(err))
             })
 
-            if (progressCallback) progressCallback(100, 100, 'Forge instalado correctamente')
+            if (progressCallback) progressCallback({ current: 100, total: 100, message: 'Forge instalado correctamente' })
             return true
         } catch (err) {
             logger.error('Forge installation failed:', err)
