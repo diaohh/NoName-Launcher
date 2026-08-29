@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { useAuth } from "../../contexts/AuthContext";
-import { showStatus } from "../common/StatusMessage";
+import { useStatus } from "../../contexts/StatusContext";
 import minecraftIcon from "../../assets/imgs/minecraft_icon.png";
 
 export default function LoginSection() {
   const { login } = useAuth();
+  const { showStatus } = useStatus();
   const [loggingIn, setLoggingIn] = useState(false);
 
   const handleLogin = async () => {

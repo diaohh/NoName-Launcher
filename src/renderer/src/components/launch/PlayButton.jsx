@@ -1,13 +1,14 @@
 import { useLaunch } from '../../contexts/LaunchContext'
 import { useAuth } from '../../contexts/AuthContext'
 import { useServers } from '../../contexts/ServersContext'
-import { showStatus } from '../common/StatusMessage'
+import { useStatus } from '../../contexts/StatusContext'
 import { isTerminalAuthCode } from '../../../../shared/errorCodes'
 
 export default function PlayButton() {
   const { launchState, gameRunning, launch, resetState } = useLaunch()
   const { logout } = useAuth()
   const { selectedServer, prepareLaunch } = useServers()
+  const { showStatus } = useStatus()
 
   const isDisabled = launchState !== 'idle' && launchState !== 'error'
   const isVisible = !!selectedServer

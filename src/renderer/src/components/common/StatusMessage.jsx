@@ -1,34 +1,7 @@
-import { useState, useEffect, useRef } from 'react'
-
-let setStatusGlobal = null
-
-export function showStatus(message, type = 'error') {
-  if (setStatusGlobal) {
-    setStatusGlobal({ message, type })
-  }
-}
+import { useStatus } from '../../contexts/StatusContext'
 
 export default function StatusMessage() {
-  const [status, setStatus] = useState(null)
-  const [visible, setVisible] = useState(false)
-  const timerRef = useRef(null)
-
-  useEffect(() => {
-    setStatusGlobal = (data) => {
-      if (timerRef.current) clearTimeout(timerRef.current)
-      setStatus(data)
-      setVisible(true)
-      timerRef.current = setTimeout(() => {
-        setVisible(false)
-        setTimeout(() => setStatus(null), 300)
-      }, 5000)
-    }
-
-    return () => {
-      setStatusGlobal = null
-      if (timerRef.current) clearTimeout(timerRef.current)
-    }
-  }, [])
+  const { status, visible } = useStatus()
 
   if (!status) return null
 

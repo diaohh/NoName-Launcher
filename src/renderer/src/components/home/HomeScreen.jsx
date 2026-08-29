@@ -5,7 +5,6 @@ import ServerSidebar from './ServerSidebar'
 import UserProfile from './UserProfile'
 import PlayButton from '../launch/PlayButton'
 import LaunchOverlay from './LaunchOverlay'
-import StatusMessage from '../common/StatusMessage'
 import SettingsScreen from '../settings/SettingsScreen'
 
 export default function HomeScreen() {
@@ -40,10 +39,6 @@ export default function HomeScreen() {
         <PlayButton />
 
         <LaunchOverlay />
-
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-40 min-w-[300px]">
-          <StatusMessage />
-        </div>
       </main>
     </div>
   )
