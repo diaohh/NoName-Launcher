@@ -1,7 +1,7 @@
 {
   "name": "nonamelauncher",
   "productName": "NoNameLauncher",
-  "version": "2.0.0",
+  "version": "0.3.0",
   "description": "Minecraft Launcher con Microsoft Auth",
   "main": "./out/main/index.js",
   "author": "diaoh",

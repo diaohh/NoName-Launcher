@@ -44,7 +44,7 @@ export default function LoginSection() {
       </div>
 
       <p className="absolute bottom-10 w-full text-center text-[0.6rem] text-white/10 uppercase tracking-[2px] font-inter">
-        NoName Launcher · Build 0.2.1-IND
+        NoName Launcher · Build {__APP_VERSION__}
       </p>
     </div>
   );

@@ -1,6 +1,7 @@
 import child_process from 'child_process'
 import path from 'path'
 import fs from 'fs-extra'
+import { app } from 'electron'
 import { validateSelectedJvm, latestOpenJDK, extractJdk, javaExecFromRoot, ensureJavaDirIsRoot, discoverBestJvmInstallation } from 'helios-core/java'
 import { downloadFile, downloadQueue, getExpectedDownloadSize, HashAlgo } from 'helios-core/dl'
 import ConfigManager from './ConfigManager'
@@ -389,8 +390,10 @@ class LaunchManager {
             resolution_width: ConfigManager.getGameWidth().toString(),
             resolution_height: ConfigManager.getGameHeight().toString(),
             natives_directory: nativesDir,
-            launcher_name: 'NoNameLauncher',
-            launcher_version: '1.0.0',
+            // Both come from package.json: `app.getName()` resolves to productName and
+            // `app.getVersion()` to version, so the launcher has one identity, not three.
+            launcher_name: app.getName(),
+            launcher_version: app.getVersion(),
             classpath,
             library_directory: librariesDir,
             classpath_separator: process.platform === 'win32' ? ';' : ':'
