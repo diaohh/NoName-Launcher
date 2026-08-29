@@ -1,13 +1,22 @@
 import { ipc } from '../../services/ipcClient'
+import { useStatus } from '../../contexts/StatusContext'
 
 export default function LauncherSection({ settings, onUpdate }) {
+  const { showStatus } = useStatus()
+
   const handlePickFolder = async () => {
     const result = await ipc.dialog.openFolder({
       title: 'Seleccionar directorio de datos'
     })
-    if (result) {
-      onUpdate('dataDirectory', result)
-      ipc.config.setDataDirectory(result)
+    if (!result) return
+
+    try {
+      // The main process answers with the directory it actually adopted, so the input
+      // never shows a path the launcher is not really using.
+      const applied = await ipc.config.setDataDirectory(result)
+      onUpdate('dataDirectory', applied)
+    } catch (err) {
+      showStatus(err.message || 'No se ha podido cambiar el directorio de datos', 'error')
     }
   }
 
@@ -33,7 +42,9 @@ export default function LauncherSection({ settings, onUpdate }) {
             Buscar
           </button>
         </div>
-        <p className="text-xs text-white/30 mt-1.5">Los archivos existentes no se moveran</p>
+        <p className="text-xs text-white/30 mt-1.5">
+          Se aplica a las proximas descargas. Los archivos existentes no se moveran
+        </p>
       </div>
 
       <button

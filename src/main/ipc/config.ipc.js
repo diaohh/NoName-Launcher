@@ -2,6 +2,8 @@ import { dialog, shell } from 'electron'
 import { Channels } from './channels'
 import { handle } from './result'
 import ConfigManager from '../managers/ConfigManager'
+import LaunchManager from '../managers/LaunchManager'
+import { ERROR_CODE } from '../../shared/errorCodes'
 
 export function registerConfigIPC(mainWindow) {
   handle(Channels.CONFIG_GET_SETTINGS, async () => {
@@ -11,7 +13,10 @@ export function registerConfigIPC(mainWindow) {
       gameWidth: ConfigManager.getGameWidth(),
       gameHeight: ConfigManager.getGameHeight(),
       fullscreen: ConfigManager.getFullscreen(),
-      dataDirectory: ConfigManager.getDataDirectory()
+      // The effective directory, which is not always the stored one: an unusable path
+      // falls back to the default. `defaultDataDirectory` lets the UI tell them apart.
+      dataDirectory: ConfigManager.getDataDirectory(),
+      defaultDataDirectory: ConfigManager.getLauncherDirectory()
     }
   })
 
@@ -41,8 +46,17 @@ export function registerConfigIPC(mainWindow) {
   })
 
   handle(Channels.CONFIG_SET_DATA_DIRECTORY, async (_event, dir) => {
+    // Moving the root out from under a running game would leave it with open handles
+    // into a directory the launcher no longer considers its own.
+    if (LaunchManager.gameProcess != null) {
+      const error = new Error('Cierra Minecraft antes de cambiar el directorio de datos.')
+      error.code = ERROR_CODE.CONFIG_GAME_RUNNING
+      throw error
+    }
+
     ConfigManager.setDataDirectory(dir)
     ConfigManager.save()
+    return ConfigManager.getDataDirectory()
   })
 
   handle(Channels.DIALOG_OPEN_FILE, async (_event, options) => {

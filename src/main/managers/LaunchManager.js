@@ -81,7 +81,10 @@ class LaunchManager {
 
     static async downloadJava(version, progressCallback) {
         const semverRange = this.javaSemverRange(version)
-        const dataDir = ConfigManager.getLauncherDirectory()
+        // helios puts downloaded JDKs under `<dataDir>/runtime/<arch>` and rediscovers
+        // them there, so they follow the configured data directory like every other
+        // bulky artifact.
+        const dataDir = ConfigManager.getDataDirectory()
         let archivePath = null
 
         try {

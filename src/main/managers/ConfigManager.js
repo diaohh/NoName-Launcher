@@ -3,6 +3,7 @@ import path from 'path'
 import os from 'os'
 import { safeStorage } from 'electron'
 import Logger from '../utils/Logger'
+import { ERROR_CODE } from '../../shared/errorCodes'
 
 const logger = Logger.getLogger('ConfigManager')
 
@@ -16,7 +17,15 @@ class ConfigManager {
     static config = null
     static configPath = null
     static launcherDir = null
+    static dataDir = null
 
+    /**
+     * The launcher's own root, and the one thing the player cannot move.
+     *
+     * `config.json` lives here, and `load()` needs the path before there is any
+     * configuration to read a preference from — so this must never depend on a setting.
+     * Everything bulky (see `getDataDirectory`) hangs off the data directory instead.
+     */
     static getLauncherDirectory() {
         if (this.launcherDir) {
             return this.launcherDir
@@ -36,12 +45,50 @@ class ConfigManager {
         return this.launcherDir
     }
 
+    /**
+     * Where the game data goes: `common/`, `instances/`, the manifest cache and the JVMs
+     * the launcher downloads. This is what the "Directorio de datos" setting governs.
+     *
+     * A stored path that cannot be used right now — an external drive that is unplugged,
+     * a folder that lost its permissions — falls back to the launcher directory with a
+     * warning and **does not** rewrite the config: the drive may well be back next time.
+     */
+    static getDataDirectory() {
+        if (this.dataDir) {
+            return this.dataDir
+        }
+
+        const configured = this.config?.settings?.launcher?.dataDirectory
+
+        if (configured && !this.isUsableDataDirectory(configured)) {
+            logger.warn(`The configured data directory is unusable, falling back to the default: ${configured}`)
+        } else if (configured) {
+            this.dataDir = configured
+            return this.dataDir
+        }
+
+        this.dataDir = this.getLauncherDirectory()
+        return this.dataDir
+    }
+
+    /** True when the directory exists (or can be created) and can be written to. */
+    static isUsableDataDirectory(directory) {
+        try {
+            fs.ensureDirSync(directory)
+            fs.accessSync(directory, fs.constants.W_OK)
+            return true
+        } catch (err) {
+            logger.warn(`Data directory rejected (${directory})`, err)
+            return false
+        }
+    }
+
     static getInstanceDirectory() {
-        return path.join(this.getLauncherDirectory(), 'instances')
+        return path.join(this.getDataDirectory(), 'instances')
     }
 
     static getCommonDirectory() {
-        return path.join(this.getLauncherDirectory(), 'common')
+        return path.join(this.getDataDirectory(), 'common')
     }
 
     static getDefaultConfig() {
@@ -60,7 +107,10 @@ class ConfigManager {
                     autoDownload: true
                 },
                 launcher: {
-                    dataDirectory: this.getLauncherDirectory()
+                    // null means "wherever the launcher lives". Storing the absolute path
+                    // would bake today's %APPDATA% into the file and make "is this still
+                    // the default?" a string comparison instead of a fact.
+                    dataDirectory: null
                 }
             },
             selectedAccount: null,
@@ -282,7 +332,6 @@ class ConfigManager {
     static getMaxRAM() { return this.config.settings.java.maxRAM }
     static getJavaExecutable() { return this.config.settings.java.executable }
     static getJavaAutoDownload() { return this.config.settings.java.autoDownload }
-    static getDataDirectory() { return this.config.settings.launcher.dataDirectory }
     static getSelectedServer() { return this.config.selectedServer }
     static getSelectedAccount() { return this.config.selectedAccount }
     static getAuthenticationDatabase() { return this.config.authenticationDatabase }
@@ -298,7 +347,23 @@ class ConfigManager {
     static setMaxRAM(ram) { this.config.settings.java.maxRAM = ram }
     static setJavaExecutable(executable) { this.config.settings.java.executable = executable }
     static setJavaAutoDownload(autoDownload) { this.config.settings.java.autoDownload = autoDownload }
-    static setDataDirectory(directory) { this.config.settings.launcher.dataDirectory = directory }
+    /**
+     * Points the game data at a new directory from the next path lookup onwards.
+     *
+     * Nothing already on disk is moved — the settings screen says so. Passing null
+     * restores the default location.
+     */
+    static setDataDirectory(directory) {
+        if (directory != null && !this.isUsableDataDirectory(directory)) {
+            const error = new Error('No se puede escribir en esa carpeta. Elige otra.')
+            error.code = ERROR_CODE.CONFIG_INVALID_DATA_DIR
+            throw error
+        }
+
+        this.config.settings.launcher.dataDirectory = directory
+        this.dataDir = null
+    }
+
     static setSelectedServer(serverId) { this.config.selectedServer = serverId }
     static setSelectedAccount(uuid) { this.config.selectedAccount = uuid }
 
