@@ -40,11 +40,16 @@ export function registerAuthIPC(mainWindow) {
     }
   })
 
-  // Token monitoring - check every 5 minutes
-  setInterval(() => {
-    const result = AuthManager.monitorTokenExpiration()
-    if (result && result.expired && mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send(Channels.AUTH_TOKEN_EXPIRED, result)
+  // Token monitoring - check every 5 minutes. The check refreshes the tokens when it
+  // can, so it only reports an expiry the refresh could not fix.
+  setInterval(async () => {
+    try {
+      const result = await AuthManager.monitorTokenExpiration()
+      if (result && result.expired && mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(Channels.AUTH_TOKEN_EXPIRED, result)
+      }
+    } catch (err) {
+      console.error('Token monitor failed:', err)
     }
   }, 300000)
 }

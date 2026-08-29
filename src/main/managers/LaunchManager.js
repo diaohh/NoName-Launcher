@@ -418,10 +418,19 @@ class LaunchManager {
         try {
             if (progressCallback) progressCallback({ type: 'auth', message: 'Validando cuenta...' })
 
-            const isValid = await AuthManager.validateSelectedMicrosoftAccount()
-            if (!isValid) {
-                const error = new Error('Session expired. Please login again.')
-                error.code = 'AUTH_SESSION_EXPIRED'
+            const validation = await AuthManager.validateSelectedMicrosoftAccount()
+            if (!validation.ok) {
+                // The dead-session message stays in English on purpose: PlayButton still
+                // detects it by substring, because `error.code` does not survive
+                // `ipcMain.handle` (see the IPC error contract in CLAUDE.md). A
+                // recoverable failure keeps its own message so a network blip does not
+                // bounce the player to the login screen.
+                const error = new Error(
+                    AuthManager.isTerminalError(validation.code)
+                        ? 'Session expired. Please login again.'
+                        : validation.message
+                )
+                error.code = validation.code
                 throw error
             }
 
