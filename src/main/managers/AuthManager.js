@@ -8,12 +8,6 @@ const logger = Logger.getLogger('AuthManager')
 
 const MICROSOFT_CLIENT_ID = process.env.MICROSOFT_CLIENT_ID || 'b7607eac-c8e1-404f-9042-b7f75757daa3'
 
-const AUTH_MODE = {
-    FULL: 0,
-    MS_REFRESH: 1,
-    MC_REFRESH: 2
-}
-
 /** got reports a request that never reached the server with one of these and no response. */
 const TRANSPORT_ERROR_CODES = new Set([
     'ENOTFOUND', 'ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED', 'ECONNABORTED',
@@ -111,38 +105,56 @@ class AuthManager {
         return this.authError(ERROR_CODE.AUTH_UNKNOWN, MESSAGES.UNKNOWN, err)
     }
 
-    static async fullMicrosoftAuthFlow(authCode, authMode = AUTH_MODE.FULL) {
+    /**
+     * Trades a fresh authorization code for a Microsoft token set.
+     *
+     * @returns {Promise<{accessToken: string, refreshToken: string, expiresAt: number}>}
+     */
+    static async exchangeAuthCode(authCode) {
+        return await this.requestMicrosoftTokens(authCode, false)
+    }
+
+    /**
+     * Trades a stored refresh token for a new Microsoft token set. Microsoft rotates the
+     * refresh token, so the caller must persist the one that comes back.
+     */
+    static async exchangeRefreshToken(refreshToken) {
+        return await this.requestMicrosoftTokens(refreshToken, true)
+    }
+
+    static async requestMicrosoftTokens(credential, isRefresh) {
         try {
-            logger.info('Starting Microsoft auth flow, mode:', authMode)
+            const response = await MicrosoftAuth.getAccessToken(credential, isRefresh, MICROSOFT_CLIENT_ID)
 
-            let msAccessToken, msRefreshToken, msExpires
-
-            if (authMode === AUTH_MODE.MC_REFRESH) {
-                msAccessToken = authCode
-                msRefreshToken = null
-                msExpires = null
-                logger.info('Reusing existing MS access token for MC refresh')
-            } else {
-                const accessTokenResponse = await MicrosoftAuth.getAccessToken(
-                    authCode,
-                    authMode === AUTH_MODE.MS_REFRESH,
-                    MICROSOFT_CLIENT_ID
-                )
-
-                if (accessTokenResponse.responseStatus !== RestResponseStatus.SUCCESS) {
-                    throw this.classifyRestError('getAccessToken', accessTokenResponse)
-                }
-
-                msAccessToken = accessTokenResponse.data.access_token
-                msRefreshToken = accessTokenResponse.data.refresh_token
-                msExpires = this.calculateExpiryDate(
-                    new Date().getTime(),
-                    accessTokenResponse.data.expires_in
-                )
-
-                logger.info('Microsoft access token obtained')
+            if (response.responseStatus !== RestResponseStatus.SUCCESS) {
+                throw this.classifyRestError('getAccessToken', response)
             }
 
+            logger.info(`Microsoft access token obtained (${isRefresh ? 'refresh' : 'auth code'})`)
+
+            return {
+                accessToken: response.data.access_token,
+                refreshToken: response.data.refresh_token,
+                expiresAt: this.calculateExpiryDate(new Date().getTime(), response.data.expires_in)
+            }
+        } catch (err) {
+            // Never flatten a classified failure back into UNKNOWN: losing the code here
+            // is what used to turn "no internet" into a logout.
+            throw this.classifyThrown(err)
+        }
+    }
+
+    /**
+     * Walks the Microsoft access token down to a playable Minecraft session:
+     * XBL -> XSTS -> Minecraft token -> profile.
+     *
+     * This is the half that never depends on how the Microsoft token was obtained, which
+     * is why refreshing only the Minecraft token is just calling this on the stored one.
+     *
+     * @returns {Promise<{accessToken, username, uuid, displayName, mcExpires}>}
+     */
+    static async resolveMinecraftSession(msAccessToken) {
+        try {
             const xblResponse = await MicrosoftAuth.getXBLToken(msAccessToken)
             if (xblResponse.responseStatus !== RestResponseStatus.SUCCESS) {
                 throw this.classifyRestError('getXBLToken', xblResponse)
@@ -185,37 +197,32 @@ class AuthManager {
                 username: mcProfile.name,
                 uuid: mcProfile.id,
                 displayName: mcProfile.name,
-                mcExpires,
-                msAccessToken,
-                msRefreshToken,
-                msExpires
+                mcExpires
             }
-
         } catch (err) {
-            // Never flatten a classified failure back into UNKNOWN: losing the code here
-            // is what used to turn "no internet" into a logout.
             throw this.classifyThrown(err)
         }
     }
 
     static async addMicrosoftAccount(authCode) {
-        const authData = await this.fullMicrosoftAuthFlow(authCode, AUTH_MODE.FULL)
+        const microsoft = await this.exchangeAuthCode(authCode)
+        const session = await this.resolveMinecraftSession(microsoft.accessToken)
 
         ConfigManager.addMicrosoftAccount(
-            authData.uuid,
-            authData.accessToken,
-            authData.username,
-            authData.displayName,
-            authData.mcExpires,
-            authData.msAccessToken,
-            authData.msRefreshToken,
-            authData.msExpires
+            session.uuid,
+            session.accessToken,
+            session.username,
+            session.displayName,
+            session.mcExpires,
+            microsoft.accessToken,
+            microsoft.refreshToken,
+            microsoft.expiresAt
         )
 
         ConfigManager.save()
         logger.info('Microsoft account added successfully')
 
-        return authData
+        return session
     }
 
     /**
@@ -268,17 +275,15 @@ class AuthManager {
         }
     }
 
+    /** The Microsoft token is still good, so only the Minecraft half is renewed. */
     static async refreshMCToken(account) {
         logger.info('Attempting to refresh MC token for account:', account.uuid)
-        const authData = await this.fullMicrosoftAuthFlow(
-            account.microsoft.access_token,
-            AUTH_MODE.MC_REFRESH
-        )
+        const session = await this.resolveMinecraftSession(account.microsoft.access_token)
 
         ConfigManager.updateMicrosoftAccount(
             account.uuid,
-            authData.accessToken,
-            authData.mcExpires,
+            session.accessToken,
+            session.mcExpires,
             account.microsoft.access_token,
             account.microsoft.refresh_token,
             account.microsoft.expires_at
@@ -288,20 +293,19 @@ class AuthManager {
         logger.info('MC token refreshed successfully')
     }
 
+    /** Both tokens have expired: renew the Microsoft one, then the Minecraft session. */
     static async refreshMSToken(account) {
         logger.info('Attempting to refresh MS token for account:', account.uuid)
-        const authData = await this.fullMicrosoftAuthFlow(
-            account.microsoft.refresh_token,
-            AUTH_MODE.MS_REFRESH
-        )
+        const microsoft = await this.exchangeRefreshToken(account.microsoft.refresh_token)
+        const session = await this.resolveMinecraftSession(microsoft.accessToken)
 
         ConfigManager.updateMicrosoftAccount(
             account.uuid,
-            authData.accessToken,
-            authData.mcExpires,
-            authData.msAccessToken,
-            authData.msRefreshToken,
-            authData.msExpires
+            session.accessToken,
+            session.mcExpires,
+            microsoft.accessToken,
+            microsoft.refreshToken,
+            microsoft.expiresAt
         )
 
         ConfigManager.save()
