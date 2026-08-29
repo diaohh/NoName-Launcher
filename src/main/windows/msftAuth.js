@@ -10,12 +10,19 @@ const REDIRECT_URI = 'https://login.microsoftonline.com/common/oauth2/nativeclie
  * The sign-in flow legitimately bounces between these hosts. Anything else is either a
  * mistake or an attempt to steer the window somewhere it has no business going, so the
  * navigation is blocked.
+ *
+ * This guards `will-navigate`, which does not fire for redirects — those are the
+ * `did-redirect-navigation` path. So what it really covers is the links on Microsoft's
+ * own pages: sign up, password reset and the like. They have to be here, or the window
+ * becomes a dead end for anyone who cannot get past the password box.
  */
 const ALLOWED_HOSTS = new Set([
     'login.microsoftonline.com',
     'login.microsoft.com',
     'login.live.com',
-    'account.live.com'
+    'account.live.com',
+    'signup.live.com',
+    'passwordreset.microsoftonline.com'
 ])
 
 const OAUTH_ERROR_MESSAGES = {
