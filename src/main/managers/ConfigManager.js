@@ -1,6 +1,7 @@
 import fs from 'fs-extra'
 import path from 'path'
 import os from 'os'
+import { safeStorage } from 'electron'
 import Logger from '../utils/Logger'
 
 const logger = Logger.getLogger('ConfigManager')
@@ -95,13 +96,103 @@ class ConfigManager {
         this.config = this.validateConfig(parsed)
         this.config.version = CONFIG_VERSION
 
+        const rewriteNeeded = this.hydrateSecrets()
+
         if (diskVersion !== CONFIG_VERSION) {
             logger.info(`Migrating config from version ${diskVersion} to ${CONFIG_VERSION}`)
+        }
+
+        if (diskVersion !== CONFIG_VERSION || rewriteNeeded) {
             this.save()
         }
 
         logger.info('Configuration loaded successfully')
         return this.config
+    }
+
+    /**
+     * Brings the stored credentials back into memory.
+     *
+     * A v0 file holds them in the clear; they get encrypted by the save this asks for.
+     * Anything that cannot be decrypted — keyring reset, a different OS user,
+     * safeStorage gone — costs the session and nothing else: the Java settings, the
+     * data directory and the selected modpack all survive.
+     *
+     * @returns true when the file on disk needs to be rewritten.
+     */
+    static hydrateSecrets() {
+        const database = this.config.authenticationDatabase
+        let rewriteNeeded = false
+
+        for (const [uuid, account] of Object.entries(database)) {
+            if (account.secrets == null) {
+                // A v0 account: plaintext on disk, encrypted by the next save.
+                rewriteNeeded = true
+                continue
+            }
+
+            try {
+                database[uuid] = this.decryptAccount(account)
+            } catch (err) {
+                logger.error(`Could not decrypt the credentials of ${uuid}`, err)
+                this.purgeSession(`the credentials of ${uuid} are unreadable`)
+                return true
+            }
+        }
+
+        return rewriteNeeded
+    }
+
+    /**
+     * Drops every credential while leaving the rest of the config untouched. The player
+     * lands back on the login screen; nothing else they configured is lost.
+     */
+    static purgeSession(reason) {
+        logger.warn(`Purging the stored session: ${reason}`)
+        this.config.authenticationDatabase = {}
+        this.config.selectedAccount = null
+    }
+
+    static isEncryptionAvailable() {
+        try {
+            return safeStorage.isEncryptionAvailable()
+        } catch (err) {
+            logger.error('safeStorage is not usable', err)
+            return false
+        }
+    }
+
+    /**
+     * Replaces the three secrets with a single encrypted blob. Everything else —
+     * username, uuid, expiries — stays readable, so config.json remains inspectable and
+     * a decryption failure costs the session rather than the settings.
+     */
+    static encryptAccount(account) {
+        const { accessToken, microsoft, ...rest } = account
+        const { access_token, refresh_token, ...microsoftRest } = microsoft ?? {}
+
+        return {
+            ...rest,
+            microsoft: microsoftRest,
+            secrets: safeStorage
+                .encryptString(JSON.stringify({ accessToken, access_token, refresh_token }))
+                .toString('base64')
+        }
+    }
+
+    static decryptAccount(account) {
+        const { secrets, ...rest } = account
+        const payload = JSON.parse(safeStorage.decryptString(Buffer.from(secrets, 'base64')))
+
+        return {
+            ...rest,
+            accessToken: payload.accessToken,
+            microsoft: {
+                ...rest.microsoft,
+                access_token: payload.access_token,
+                refresh_token: payload.refresh_token
+            }
+        }
     }
 
     /**
@@ -125,13 +216,44 @@ class ConfigManager {
         try {
             fs.writeFileSync(
                 this.configPath,
-                JSON.stringify(this.config, null, 4),
+                JSON.stringify(this.toDiskConfig(), null, 4),
                 'UTF-8'
             )
             logger.info('Configuration saved successfully')
         } catch (err) {
             logger.error('Failed to save config', err)
         }
+    }
+
+    /**
+     * The config as it should be written out, with every credential encrypted.
+     *
+     * Encryption is unavailable on, say, a Linux box with no keyring. Falling back to
+     * plaintext there would quietly undo the whole point, so the session simply is not
+     * persisted: it stays in memory for this run and the player logs in again next
+     * start.
+     */
+    static toDiskConfig() {
+        const config = { ...this.config, authenticationDatabase: {} }
+
+        if (!this.isEncryptionAvailable()) {
+            if (Object.keys(this.config.authenticationDatabase).length > 0) {
+                logger.warn('safeStorage is unavailable, the session will not be persisted')
+            }
+            config.selectedAccount = null
+            return config
+        }
+
+        for (const [uuid, account] of Object.entries(this.config.authenticationDatabase)) {
+            try {
+                config.authenticationDatabase[uuid] = this.encryptAccount(account)
+            } catch (err) {
+                logger.error(`Failed to encrypt the credentials of ${uuid}, leaving them off disk`, err)
+                if (config.selectedAccount === uuid) config.selectedAccount = null
+            }
+        }
+
+        return config
     }
 
     static validateConfig(config) {
