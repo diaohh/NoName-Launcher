@@ -23,6 +23,16 @@ const toMB = (bytes) => (bytes / 1024 / 1024).toFixed(1)
 // natives as library classifiers. Older releases would need a separate code path.
 const MIN_SUPPORTED_MINOR = 17
 
+/**
+ * One progress shape for the whole launch flow: every callback in the chain takes a
+ * single object, `{ current, total, message }`.
+ *
+ * The managers underneath report only their own numbers — they have no idea which launch
+ * phase they are being run for. LaunchManager is the one layer that knows, so it is the
+ * one that adds `type`, and `type` is what LaunchContext switches on. Mixing
+ * `(current, total, msg)` with `{ type, message }` in the same chain is what this
+ * replaces.
+ */
 class LaunchManager {
 
     static gameProcess = null
@@ -265,7 +275,12 @@ class LaunchManager {
 
             await downloadQueue(pending, (received) => {
                 if (progressCallback) {
-                    progressCallback(received, totalSize, `Descargando librerias... ${toMB(received)} MB / ${toMB(totalSize)} MB`)
+                    progressCallback({
+                        type: 'download',
+                        current: received,
+                        total: totalSize,
+                        message: `Descargando librerias... ${toMB(received)} MB / ${toMB(totalSize)} MB`
+                    })
                 }
             })
 
@@ -498,8 +513,8 @@ class LaunchManager {
 
             if (progressCallback) progressCallback({ type: 'validation', message: 'Validando archivos del modpack...' })
 
-            const plan = await DistributionManager.planSync(server, manifest, (current, total, msg) => {
-                if (progressCallback) progressCallback({ type: 'validation', message: msg, current, total })
+            const plan = await DistributionManager.planSync(server, manifest, (progress) => {
+                if (progressCallback) progressCallback({ type: 'validation', ...progress })
             })
 
             if (plan.toDownload.length > 0 || plan.toDelete.length > 0) {
@@ -511,15 +526,19 @@ class LaunchManager {
                 }
             }
 
-            await DistributionManager.applySync(server, manifest, baseUrl, plan, (current, total, msg) => {
-                if (progressCallback) progressCallback({ type: 'download_mods', message: msg, current, total })
+            await DistributionManager.applySync(server, manifest, baseUrl, plan, (progress) => {
+                if (progressCallback) progressCallback({ type: 'download_mods', ...progress })
             })
 
             if (progressCallback) progressCallback({ type: 'download', message: 'Preparando descarga de Minecraft...' })
 
-            const vanillaManifest = await MinecraftDownloadManager.downloadMinecraft(minecraftVersion, (percent, phase, message) => {
+            const vanillaManifest = await MinecraftDownloadManager.downloadMinecraft(minecraftVersion, (progress) => {
                 if (progressCallback) {
-                    progressCallback({ type: 'download', message, phase: MinecraftDownloadManager.getPhaseDisplayName(phase), current: percent, total: 100 })
+                    progressCallback({
+                        ...progress,
+                        type: 'download',
+                        phase: MinecraftDownloadManager.getPhaseDisplayName(progress.phase)
+                    })
                 }
             })
 
@@ -537,15 +556,13 @@ class LaunchManager {
             if (loaderType !== 'vanilla') {
                 if (!ModLoaderManager.isModLoaderInstalled(loader, minecraftVersion)) {
                     if (progressCallback) progressCallback({ type: 'modloader', message: `Instalando ${loaderType}...` })
-                    await ModLoaderManager.installModLoader(loader, minecraftVersion, javaPath, instanceDir, (current, total, msg) => {
-                        if (progressCallback) progressCallback({ type: 'modloader', message: msg, current, total })
+                    await ModLoaderManager.installModLoader(loader, minecraftVersion, javaPath, instanceDir, (progress) => {
+                        if (progressCallback) progressCallback({ type: 'modloader', ...progress })
                     })
                 }
 
                 if (progressCallback) progressCallback({ type: 'download', message: `Descargando librerias de ${loaderType}...` })
-                await this.downloadModLoaderLibraries(versionString, (current, total, message) => {
-                    if (progressCallback) progressCallback({ type: 'download', message: message || `Descargando librerias de ${loaderType}...`, current, total })
-                })
+                await this.downloadModLoaderLibraries(versionString, progressCallback)
             }
 
             if (progressCallback) progressCallback({ type: 'launch', message: 'Construyendo comando de lanzamiento...' })

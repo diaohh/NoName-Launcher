@@ -10,6 +10,9 @@ class MinecraftDownloadManager {
     /**
      * Downloads the vanilla client, libraries and assets for a version.
      *
+     * @param progressCallback Receives `{ current, total, phase, message }`, the one
+     * progress shape used across the launch flow. `phase` is this manager's own
+     * sub-phase; the launch `type` is added by LaunchManager, which owns it.
      * @returns {Promise<object>} The Mojang version manifest, which carries the
      * required Java major version among other launch metadata.
      */
@@ -19,26 +22,24 @@ class MinecraftDownloadManager {
 
             const commonDir = ConfigManager.getCommonDirectory()
 
-            if (progressCallback) {
-                progressCallback(0, 'init', 'Preparando descarga...')
+            const report = (current, phase, message) => {
+                if (progressCallback) progressCallback({ current, total: 100, phase, message })
             }
+
+            report(0, 'init', 'Preparando descarga...')
 
             const mojangProcessor = new MojangIndexProcessor(commonDir, minecraftVersion)
             await mojangProcessor.init()
 
-            if (progressCallback) {
-                progressCallback(5, 'validation', 'Validando archivos...')
-            }
+            report(5, 'validation', 'Validando archivos...')
 
             const totalStages = mojangProcessor.totalStages()
             let completedStages = 0
 
             const dlObjects = await mojangProcessor.validate(async () => {
                 completedStages++
-                if (progressCallback) {
-                    const stagePercent = 5 + Math.floor((completedStages / totalStages) * 5)
-                    progressCallback(stagePercent, 'validation', `Validando archivos... (${completedStages}/${totalStages})`)
-                }
+                const stagePercent = 5 + Math.floor((completedStages / totalStages) * 5)
+                report(stagePercent, 'validation', `Validando archivos... (${completedStages}/${totalStages})`)
             })
 
             const versionJson = await mojangProcessor.getVersionJson()
@@ -55,31 +56,23 @@ class MinecraftDownloadManager {
             logger.info('Total files to download:', allDownloads.length)
 
             if (allDownloads.length === 0) {
-                if (progressCallback) {
-                    progressCallback(100, 'complete', 'Archivos listos')
-                }
+                report(100, 'complete', 'Archivos listos')
                 return versionJson
             }
 
-            if (progressCallback) {
-                progressCallback(10, 'download', 'Descargando archivos...')
-            }
+            report(10, 'download', 'Descargando archivos...')
 
             await downloadQueue(allDownloads, (received) => {
                 const percent = 10 + Math.floor((received / totalSize) * 90)
                 const mbDownloaded = (received / 1024 / 1024).toFixed(1)
                 const mbTotal = (totalSize / 1024 / 1024).toFixed(1)
 
-                if (progressCallback) {
-                    progressCallback(percent, 'download', `Descargando... ${mbDownloaded} MB / ${mbTotal} MB`)
-                }
+                report(percent, 'download', `Descargando... ${mbDownloaded} MB / ${mbTotal} MB`)
             })
 
             logger.info('All downloads completed successfully!')
 
-            if (progressCallback) {
-                progressCallback(100, 'complete', 'Descarga completada')
-            }
+            report(100, 'complete', 'Descarga completada')
 
             return versionJson
         } catch (err) {
