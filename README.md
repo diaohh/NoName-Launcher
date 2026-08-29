@@ -109,7 +109,13 @@ A custom Minecraft launcher built with Electron, React, and Tailwind CSS. Featur
    `manifest.hash` is the only field that changes when a modpack is updated, which makes
    publishing atomic: nothing is visible to players until it is flipped.
 
-   > `usersAllowed` is filtered client-side for convenience. Real access control must be enforced with Firestore Security Rules.
+   > **`usersAllowed` is not access control.** It is filtered client-side, so anyone with
+   > the bundle can read the whole catalogue. Enforcing it in Security Rules is not
+   > possible as things stand: the launcher does not authenticate against Firebase, so
+   > `request.auth` is always `null` and there is no identity to match a username
+   > against. Closing this needs either a Cloud Function that mints a custom token from
+   > a verified Minecraft profile, or a data model where private packs are simply not
+   > publicly readable. See the stand-by entry in `TODO.md`.
 
 ## How a Launch Works
 
