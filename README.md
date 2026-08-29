@@ -135,14 +135,22 @@ Everything runs in the main process and reports progress to the renderer over a 
 
 ## Data Directories
 
-Everything lives under `%APPDATA%/.nonamelauncher` on Windows (`~/Library/Application Support/.nonamelauncher` on macOS, `~/.local/share/.nonamelauncher` on Linux):
+The launcher root is `%APPDATA%/.nonamelauncher` on Windows (`~/Library/Application Support/.nonamelauncher` on macOS, `~/.local/share/.nonamelauncher` on Linux):
 
 ```
 config.json          Launcher settings + account database
+```
+
+Everything bulky lives under the **data directory**, which defaults to that same root and can be moved from Settings → Launcher:
+
+```
 common/              Shared data: assets, libraries, versions, forge, fabric
-common/runtime/      JVMs downloaded by the launcher
+runtime/             JVMs downloaded by the launcher
+manifests/           Verified pack manifests, keyed by sha256
 instances/<id>/      Per-modpack game directory (mods, config, saves, natives)
 ```
+
+`config.json` always stays in the launcher root — it is what records where the data directory is. Changing the setting affects new downloads only; existing files are not moved.
 
 ## Development
 
