@@ -5,6 +5,12 @@ import Logger from '../utils/Logger'
 
 const logger = Logger.getLogger('ConfigManager')
 
+/**
+ * Stamped into config.json so the file can be migrated between launcher releases.
+ * A file without the field predates the stamp and is treated as version 0.
+ */
+const CONFIG_VERSION = 1
+
 class ConfigManager {
     static config = null
     static configPath = null
@@ -39,6 +45,7 @@ class ConfigManager {
 
     static getDefaultConfig() {
         return {
+            version: CONFIG_VERSION,
             settings: {
                 game: {
                     resWidth: 1280,
@@ -68,20 +75,50 @@ class ConfigManager {
             logger.info('Config file not found, creating default...')
             this.config = this.getDefaultConfig()
             this.save()
-        } else {
-            try {
-                const configData = fs.readFileSync(this.configPath, 'UTF-8')
-                this.config = JSON.parse(configData)
-                this.config = this.validateConfig(this.config)
-                logger.info('Configuration loaded successfully')
-            } catch (err) {
-                logger.error('Failed to load config, using defaults', err)
-                this.config = this.getDefaultConfig()
-                this.save()
-            }
+            return this.config
         }
 
+        let parsed
+        try {
+            parsed = JSON.parse(fs.readFileSync(this.configPath, 'UTF-8'))
+        } catch (err) {
+            this.quarantineConfig(err)
+            this.config = this.getDefaultConfig()
+            this.save()
+            return this.config
+        }
+
+        // Read before validateConfig, which merges the defaults in and would stamp the
+        // current version onto a file that never had one.
+        const diskVersion = typeof parsed.version === 'number' ? parsed.version : 0
+
+        this.config = this.validateConfig(parsed)
+        this.config.version = CONFIG_VERSION
+
+        if (diskVersion !== CONFIG_VERSION) {
+            logger.info(`Migrating config from version ${diskVersion} to ${CONFIG_VERSION}`)
+            this.save()
+        }
+
+        logger.info('Configuration loaded successfully')
         return this.config
+    }
+
+    /**
+     * Moves an unreadable config aside instead of overwriting it.
+     *
+     * The account database and every setting live in this one file, so a parse error
+     * must never be the reason a player loses them irrecoverably. The launcher starts
+     * on the defaults, but the original stays on disk right next to it.
+     */
+    static quarantineConfig(err) {
+        const backupPath = `${this.configPath}.corrupt-${Date.now()}`
+        try {
+            fs.moveSync(this.configPath, backupPath)
+            logger.error(`Config unreadable, moved aside to ${backupPath}`, err)
+        } catch (moveErr) {
+            logger.error('Config unreadable and could not be moved aside', moveErr)
+        }
     }
 
     static save() {
