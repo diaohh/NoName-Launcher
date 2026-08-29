@@ -3,11 +3,6 @@ import { Channels } from './channels'
 import ConfigManager from '../managers/ConfigManager'
 
 export function registerConfigIPC(mainWindow) {
-  ipcMain.handle(Channels.CONFIG_LOAD, async () => {
-    ConfigManager.load()
-    return ConfigManager.getConfig()
-  })
-
   ipcMain.handle(Channels.CONFIG_SAVE, async () => {
     ConfigManager.save()
   })

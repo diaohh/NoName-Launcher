@@ -11,8 +11,9 @@ export function registerAuthIPC(mainWindow) {
 
   ipcMain.handle(Channels.AUTH_LOGIN, async (_event, authCode) => {
     const authData = await AuthManager.addMicrosoftAccount(authCode)
+    // The Minecraft access token never crosses into the renderer: it is read from
+    // ConfigManager in the main process when the launch command is built.
     return {
-      accessToken: authData.accessToken,
       username: authData.username,
       uuid: authData.uuid,
       displayName: authData.displayName

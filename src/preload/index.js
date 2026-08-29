@@ -9,7 +9,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   authGetAccount: () => ipcRenderer.invoke('auth:getAccount'),
 
   // Config
-  configLoad: () => ipcRenderer.invoke('config:load'),
   configSave: () => ipcRenderer.invoke('config:save'),
   configGetSettings: () => ipcRenderer.invoke('config:getSettings'),
   configSetJavaExecutable: (path) => ipcRenderer.invoke('config:setJavaExecutable', path),
