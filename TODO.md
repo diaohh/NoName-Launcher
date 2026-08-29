@@ -88,6 +88,10 @@ Pendientes ordenados por prioridad. Los puntos marcados con 🔍 salieron de la 
 
 ## P5 — Mantenimiento y evolucion
 
+- [x] **`helios-distribution-types` faltaba y el launcher no arrancaba desde cero** — resuelto, devuelta a `dependencies`. Se quito en `9f8b112` por "no usada", y lo parecia: nada en `src/` la importa. La necesita `helios-core/common` en runtime (→ `DistributionAPI` → `DistributionFactory`), que es de donde `AuthManager` saca `RestResponseStatus`, y helios-core solo la declara como **devDependency**, asi que la tiene que poner el consumidor
+  - Estuvo oculto desde el 14/08 porque el `node_modules` existente seguia teniendo el paquete en disco; solo aparece en una instalacion limpia
+  - Añadido tambien `pnpm.onlyBuiltDependencies`: pnpm 10 ignora los scripts de postinstall salvo que el paquete este en esa lista, y sin `electron` ahi no se descarga el binario y `pnpm dev` no arranca
+
 - [ ] 🔍 **Electron 37 → 43** — la 37 esta fuera de soporte; se acumulan CVEs de Chromium
 - [ ] 🔍 **`firebase/firestore/lite`** — solo se usan `getDoc`/`getDocs`; el bundle del renderer son ~1.2 MB casi todos de Firebase
 - [ ] 🔍 **Actualizaciones menores** — react 19.2.8, firebase 12.17, electron-builder 26.15
