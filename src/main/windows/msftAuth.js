@@ -136,11 +136,11 @@ export function createMsftAuthWindow() {
             reject(err)
         })
 
-        const authUrl = `https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize?` +
-            `prompt=select_account&` +
+        const authUrl = 'https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize?' +
+            'prompt=select_account&' +
             `client_id=${MICROSOFT_CLIENT_ID}&` +
-            `response_type=code&` +
-            `scope=XboxLive.signin%20offline_access&` +
+            'response_type=code&' +
+            'scope=XboxLive.signin%20offline_access&' +
             `redirect_uri=${REDIRECT_URI}`
 
         window.loadURL(authUrl)

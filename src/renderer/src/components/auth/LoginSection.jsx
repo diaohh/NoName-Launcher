@@ -1,24 +1,24 @@
-import { useState } from "react";
-import { useAuth } from "../../contexts/AuthContext";
-import { useStatus } from "../../contexts/StatusContext";
-import minecraftIcon from "../../assets/imgs/minecraft_icon.png";
+import { useState } from "react"
+import { useAuth } from "../../contexts/AuthContext"
+import { useStatus } from "../../contexts/StatusContext"
+import minecraftIcon from "../../assets/imgs/minecraft_icon.png"
 
 export default function LoginSection() {
-  const { login } = useAuth();
-  const { showStatus } = useStatus();
-  const [loggingIn, setLoggingIn] = useState(false);
+  const { login } = useAuth()
+  const { showStatus } = useStatus()
+  const [loggingIn, setLoggingIn] = useState(false)
 
   const handleLogin = async () => {
     try {
-      setLoggingIn(true);
-      await login();
+      setLoggingIn(true)
+      await login()
     } catch (err) {
-      console.error("Login error:", err);
-      showStatus(err.message || "Error al iniciar sesion", "error");
+      console.error("Login error:", err)
+      showStatus(err.message || "Error al iniciar sesion", "error")
     } finally {
-      setLoggingIn(false);
+      setLoggingIn(false)
     }
-  };
+  }
 
   return (
     <div className="auth-bg w-screen h-screen flex items-center justify-center overflow-hidden font-inter relative">
@@ -48,5 +48,5 @@ export default function LoginSection() {
         NoName Launcher · Build {__APP_VERSION__}
       </p>
     </div>
-  );
+  )
 }

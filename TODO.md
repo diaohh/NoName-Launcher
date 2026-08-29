@@ -53,7 +53,11 @@ Pendientes ordenados por prioridad. Los puntos marcados con 🔍 salieron de la 
 - [x] 🔍 **Separar `fullMicrosoftAuthFlow`** — resuelto. Queda partido en `exchangeAuthCode` / `exchangeRefreshToken` (obtienen el juego de tokens de Microsoft) y `resolveMinecraftSession(msAccessToken)` (XBL → XSTS → token MC → perfil). Los tres llamantes los componen y `AUTH_MODE` desaparece; `refreshMCToken` es literalmente "solo la segunda mitad", que es lo que el flag intentaba decir
 - [x] 🔍 **Warning de `postcss.config.js` en cada build** — resuelto renombrando a `postcss.config.mjs`
   - El item pedia `"type": "module"` en `package.json`, pero eso arrastra bastante mas de lo que parece: el preload **debe** seguir siendo CJS porque la ventana corre con `sandbox: true`, el main pasa a `.mjs` y pierde `__dirname`, y hay que reapuntar el campo `main`. El rename cierra el objetivo real con riesgo cero; la migracion ESM completa queda anotada en P5
-- [ ] 🔍 **Añadir ESLint** — no hay linter pese a que la indentacion ya diverge (4 espacios en `managers`/`utils`/`windows`, 2 en `ipc`, `preload`, `shared`, `main/index.js` y el renderer)
+- [x] 🔍 **Añadir ESLint** — resuelto. `eslint.config.mjs` (flat config) mas `pnpm lint`; el repo queda en **0 errores**
+  - La indentacion **no se unifica**: el linter obliga a cada zona a mantener la que ya usa (4 en `managers`/`utils`/`windows`, 2 en `main/index.js`, `ipc`, `preload`, `shared` y el renderer). Reformatear el arbol entero enterraria el historial de ficheros que siguen en obras; unificarla toca en el barrido de `typescript-eslint` de P5
+  - Dos trampas que costaron tiempo, por si hay que volver: `eslint-plugin-react` con `version: 'detect'` **revienta la ejecucion entera** en ESLint 10 (busca una API de contexto de la 9), por eso la version va fijada; y `@stylistic/indent` reformatea los literales de plantilla con clases de Tailwind dejandolos ilegibles, por eso van en `ignoredNodes`
+  - `react-refresh/only-export-components` queda apagada: los cuatro contexts exportan a proposito el provider y su hook desde el mismo fichero
+  - Queda **1 warning real** sin tocar: `DynamicBackground.jsx:16` tiene un `useEffect` al que le falta `currentBg` en las dependencias. Es señal, no ruido, y se mira aparte
 
 ## P4 — Funcionalidades faltantes
 
