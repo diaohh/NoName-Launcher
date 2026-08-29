@@ -54,7 +54,14 @@ export function createMsftAuthWindow() {
             if (settled) return
             settled = true
             settle(value)
-            if (!window.isDestroyed()) window.close()
+
+            // Never close the window from inside a navigation event. `did-redirect-navigation`
+            // fires while the redirect is still in flight, and destroying the webContents at
+            // that point crashes the process outright (access violation). Deferring the close
+            // by a tick lets Electron finish with the event first.
+            setImmediate(() => {
+                if (!window.isDestroyed()) window.close()
+            })
         }
 
         const isAllowed = (uri) => {
