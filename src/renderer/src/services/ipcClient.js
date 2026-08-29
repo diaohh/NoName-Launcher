@@ -1,33 +1,56 @@
+import { ERROR_CODE } from '../../../shared/errorCodes'
+
+/**
+ * Wraps a preload method so it speaks Errors again.
+ *
+ * Every `ipcMain.handle` answers with the envelope built by `main/ipc/result.js`
+ * (`{ ok, code, message }`) because a thrown Error loses `error.code` on its way across
+ * the boundary and reaches the renderer as a string prefixed with
+ * `Error invoking remote method '<channel>'`. Rebuilding the Error here keeps every
+ * existing `try/catch` working while giving callers a `code` to branch on.
+ */
+const invoke = (method) => async (...args) => {
+  const result = await window.electronAPI[method](...args)
+
+  if (result?.ok === false) {
+    const error = new Error(result.message)
+    error.code = result.code || ERROR_CODE.UNKNOWN
+    throw error
+  }
+
+  return result?.data
+}
+
 export const ipc = {
   auth: {
-    msftLogin: () => window.electronAPI.msftLogin(),
-    login: (code) => window.electronAPI.authLogin(code),
-    logout: (uuid) => window.electronAPI.authLogout(uuid),
-    validate: () => window.electronAPI.authValidate(),
-    getAccount: () => window.electronAPI.authGetAccount()
+    msftLogin: invoke('msftLogin'),
+    login: invoke('authLogin'),
+    logout: invoke('authLogout'),
+    validate: invoke('authValidate'),
+    getAccount: invoke('authGetAccount')
   },
   config: {
-    getSettings: () => window.electronAPI.configGetSettings(),
-    setJavaExecutable: (path) => window.electronAPI.configSetJavaExecutable(path),
-    setJavaAutoDownload: (val) => window.electronAPI.configSetJavaAutoDownload(val),
-    setGameWidth: (w) => window.electronAPI.configSetGameWidth(w),
-    setGameHeight: (h) => window.electronAPI.configSetGameHeight(h),
-    setFullscreen: (val) => window.electronAPI.configSetFullscreen(val),
-    setDataDirectory: (dir) => window.electronAPI.configSetDataDirectory(dir)
+    getSettings: invoke('configGetSettings'),
+    setJavaExecutable: invoke('configSetJavaExecutable'),
+    setJavaAutoDownload: invoke('configSetJavaAutoDownload'),
+    setGameWidth: invoke('configSetGameWidth'),
+    setGameHeight: invoke('configSetGameHeight'),
+    setFullscreen: invoke('configSetFullscreen'),
+    setDataDirectory: invoke('configSetDataDirectory')
   },
   dialog: {
-    openFile: (options) => window.electronAPI.dialogOpenFile(options),
-    openFolder: (options) => window.electronAPI.dialogOpenFolder(options)
+    openFile: invoke('dialogOpenFile'),
+    openFolder: invoke('dialogOpenFolder')
   },
   shell: {
-    openPath: (path) => window.electronAPI.shellOpenPath(path)
+    openPath: invoke('shellOpenPath')
   },
   distro: {
-    setServerData: (data) => window.electronAPI.distroSetServerData(data)
+    setServerData: invoke('distroSetServerData')
   },
   launch: {
-    game: () => window.electronAPI.launchGame(),
-    kill: () => window.electronAPI.launchKill(),
+    game: invoke('launchGame'),
+    kill: invoke('launchKill'),
     onProgress: (cb) => window.electronAPI.onLaunchProgress(cb)
   },
   events: {

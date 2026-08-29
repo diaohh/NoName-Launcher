@@ -13,6 +13,7 @@ import MinecraftDownloadManager from './MinecraftDownloadManager'
 import Logger from '../utils/Logger'
 import { validateLocalFile } from '../utils/FileUtils'
 import { mavenToRelativePath, mavenToUrl } from '../utils/MavenUtils'
+import { ERROR_CODE } from '../../shared/errorCodes'
 
 const logger = Logger.getLogger('LaunchManager')
 
@@ -34,7 +35,7 @@ class LaunchManager {
                 `Minecraft ${minecraftVersion} no es compatible con este launcher. ` +
                 `Solo se admiten versiones 1.${MIN_SUPPORTED_MINOR} o superiores.`
             )
-            error.code = 'UNSUPPORTED_MC_VERSION'
+            error.code = ERROR_CODE.UNSUPPORTED_MC_VERSION
             throw error
         }
     }
@@ -346,7 +347,7 @@ class LaunchManager {
             const error = new Error(
                 `El manifiesto de ${versionId} usa el formato antiguo (minecraftArguments), que no es compatible con este launcher.`
             )
-            error.code = 'UNSUPPORTED_MANIFEST'
+            error.code = ERROR_CODE.UNSUPPORTED_MANIFEST
             throw error
         }
 
@@ -423,14 +424,12 @@ class LaunchManager {
 
             const validation = await AuthManager.validateSelectedMicrosoftAccount()
             if (!validation.ok) {
-                // The dead-session message stays in English on purpose: PlayButton still
-                // detects it by substring, because `error.code` does not survive
-                // `ipcMain.handle` (see the IPC error contract in CLAUDE.md). A
-                // recoverable failure keeps its own message so a network blip does not
-                // bounce the player to the login screen.
+                // The renderer decides whether to bounce the player to the login screen
+                // from `code`, not from this text, so a recoverable failure can keep its
+                // own message: a network blip must not read like a dead session.
                 const error = new Error(
                     AuthManager.isTerminalError(validation.code)
-                        ? 'Session expired. Please login again.'
+                        ? 'Tu sesion ha caducado. Vuelve a iniciar sesion.'
                         : validation.message
                 )
                 error.code = validation.code
@@ -439,13 +438,17 @@ class LaunchManager {
 
             const account = AuthManager.getSelectedAccount()
             if (!account) {
-                const error = new Error('No account selected. Please login.')
-                error.code = 'AUTH_NO_ACCOUNT'
+                const error = new Error('No hay ninguna cuenta iniciada. Inicia sesion con Microsoft.')
+                error.code = ERROR_CODE.AUTH_NO_ACCOUNT
                 throw error
             }
 
             const server = DistributionManager.getSelectedServer()
-            if (!server) throw new Error('No server selected')
+            if (!server) {
+                const error = new Error('No hay ningun modpack seleccionado.')
+                error.code = ERROR_CODE.LAUNCH_NO_SERVER
+                throw error
+            }
 
             // The renderer re-reads the modpack document right before launching, so this
             // is the current value, not whatever was cached when the list was loaded.
@@ -454,7 +457,7 @@ class LaunchManager {
                     server.rawServer.maintenanceMessage
                     || 'El modpack esta en mantenimiento. Intentalo de nuevo en unos minutos.'
                 )
-                error.code = 'MODPACK_MAINTENANCE'
+                error.code = ERROR_CODE.MODPACK_MAINTENANCE
                 throw error
             }
 
@@ -554,13 +557,17 @@ class LaunchManager {
 
             this.gameProcess.on('error', (err) => {
                 this.gameProcess = null
-                if (progressCallback) progressCallback({ type: 'error', error: err.message })
+                if (progressCallback) {
+                    progressCallback({ type: 'error', error: err.message, code: err.code || ERROR_CODE.UNKNOWN })
+                }
             })
 
             return { pid: this.gameProcess.pid }
         } catch (err) {
             logger.error('Launch failed:', err)
-            if (progressCallback) progressCallback({ type: 'error', error: err.message })
+            if (progressCallback) {
+                progressCallback({ type: 'error', error: err.message, code: err.code || ERROR_CODE.UNKNOWN })
+            }
             throw err
         }
     }

@@ -8,6 +8,7 @@ export function LaunchProvider({ children }) {
   const [progress, setProgress] = useState({ phase: '', message: '', current: 0, total: 0 })
   const [logs, setLogs] = useState([])
   const [gameRunning, setGameRunning] = useState(false)
+  const [lastError, setLastError] = useState(null)
   const cleanupRef = useRef(null)
 
   const addLog = useCallback((message, type) => {
@@ -60,6 +61,7 @@ export function LaunchProvider({ children }) {
           break
         case 'error':
           addLog(data.error, 'error')
+          setLastError({ code: data.code, message: data.error })
           setLaunchState('error')
           break
       }
@@ -73,6 +75,7 @@ export function LaunchProvider({ children }) {
   const launch = async () => {
     setLaunchState('preparing')
     setLogs([])
+    setLastError(null)
     setProgress({ phase: '', message: 'Iniciando...', current: 0, total: 0 })
     try {
       await ipc.launch.game()
@@ -85,11 +88,12 @@ export function LaunchProvider({ children }) {
 
   const resetState = () => {
     setLaunchState('idle')
+    setLastError(null)
     setProgress({ phase: '', message: '', current: 0, total: 0 })
   }
 
   return (
-    <LaunchContext.Provider value={{ launchState, progress, logs, gameRunning, launch, resetState }}>
+    <LaunchContext.Provider value={{ launchState, progress, logs, gameRunning, lastError, launch, resetState }}>
       {children}
     </LaunchContext.Provider>
   )

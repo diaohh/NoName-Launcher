@@ -8,7 +8,6 @@ export const Channels = {
   AUTH_TOKEN_EXPIRED: 'auth:tokenExpired',
 
   // Config
-  CONFIG_SAVE: 'config:save',
   CONFIG_GET_SETTINGS: 'config:getSettings',
   CONFIG_SET_JAVA_EXECUTABLE: 'config:setJavaExecutable',
   CONFIG_SET_JAVA_AUTO_DOWNLOAD: 'config:setJavaAutoDownload',

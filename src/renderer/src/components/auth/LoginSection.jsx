@@ -13,7 +13,7 @@ export default function LoginSection() {
       await login();
     } catch (err) {
       console.error("Login error:", err);
-      showStatus(err.desc || err.message || "Error al iniciar sesion", "error");
+      showStatus(err.message || "Error al iniciar sesion", "error");
     } finally {
       setLoggingIn(false);
     }
