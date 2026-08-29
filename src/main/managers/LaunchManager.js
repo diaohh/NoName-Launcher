@@ -276,7 +276,7 @@ class LaunchManager {
             await downloadQueue(pending, (received) => {
                 if (progressCallback) {
                     progressCallback({
-                        type: 'download',
+                        type: 'download_libraries',
                         current: received,
                         total: totalSize,
                         message: `Descargando librerias... ${toMB(received)} MB / ${toMB(totalSize)} MB`
@@ -561,7 +561,10 @@ class LaunchManager {
                     })
                 }
 
-                if (progressCallback) progressCallback({ type: 'download', message: `Descargando librerias de ${loaderType}...` })
+                // Its own phase, not `download`: the vanilla download already used that
+                // one earlier in the flow, and a phase that appears twice makes the
+                // progress bar run backwards.
+                if (progressCallback) progressCallback({ type: 'download_libraries', message: `Descargando librerias de ${loaderType}...` })
                 await this.downloadModLoaderLibraries(versionString, progressCallback)
             }
 
