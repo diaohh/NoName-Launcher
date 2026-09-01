@@ -1,3 +1,4 @@
+import { powerMonitor } from 'electron'
 import { MicrosoftAuth, MicrosoftErrorCode } from 'helios-core/microsoft'
 import { RestResponseStatus } from 'helios-core/common'
 import ConfigManager from './ConfigManager'
@@ -14,6 +15,21 @@ const TRANSPORT_ERROR_CODES = new Set([
     'EAI_AGAIN', 'ENETUNREACH', 'ENETDOWN', 'EHOSTUNREACH', 'EPIPE', 'EPROTO'
 ])
 
+/** How long before the Minecraft token expires the refresh is attempted. */
+const REFRESH_SKEW_MS = 5 * 60 * 1000
+
+/**
+ * Ceiling on a single sleep. Nothing should normally wake this early, but a corrupt or
+ * absurd expiresAt must not be able to park the scheduler for weeks.
+ */
+const MAX_DELAY_MS = 30 * 60 * 1000
+
+/** Floor, so a token already past its skew cannot spin the timer. */
+const MIN_DELAY_MS = 15 * 1000
+
+/** Backoff for a failure that left the account alive: no network, a 5xx, a 429. */
+const RETRY_DELAYS_MS = [60 * 1000, 2 * 60 * 1000, 5 * 60 * 1000, 10 * 60 * 1000]
+
 const MESSAGES = {
     NO_ACCOUNT: 'No hay ninguna cuenta iniciada. Inicia sesion con Microsoft.',
     NETWORK: 'No se ha podido contactar con Microsoft. Comprueba tu conexion e intentalo de nuevo.',
@@ -23,6 +39,11 @@ const MESSAGES = {
 }
 
 class AuthManager {
+
+    static refreshTimer = null
+    static onSessionExpired = null
+    static resumeListener = null
+    static retryAttempt = 0
 
     static authError(code, message, cause) {
         const error = new Error(message)
@@ -325,34 +346,111 @@ class AuthManager {
     }
 
     /**
-     * Periodic session check.
+     * Starts refreshing the session ahead of its expiry instead of polling for it.
      *
-     * `microsoft.expires_at` is the expiry of the Microsoft *access* token (about an
-     * hour), not of the refresh token (about 90 days). Comparing against it used to log
-     * every player out roughly a day after login, with a refresh token that was still
-     * perfectly good. It now runs the same refresh path a launch does and reports an
-     * expiry only when that path gave up for a terminal reason.
+     * The previous version woke every five minutes and returned immediately unless the token
+     * had *already* expired, so it never renewed anything in advance. It also lived inside
+     * `registerAuthIPC`, which macOS runs again on `activate`: a second interval that nothing
+     * ever cleared. Starting is idempotent for exactly that reason.
+     *
+     * @param onExpired Called only when the session is gone for a terminal reason. A network
+     *                  failure never reaches it — see ADR-0007.
      */
-    static async monitorTokenExpiration() {
-        const uuid = ConfigManager.getSelectedAccount()
-        if (!uuid) return null
+    static startTokenRefreshScheduler(onExpired) {
+        this.stopTokenRefreshScheduler()
+        this.onSessionExpired = onExpired
 
-        const account = ConfigManager.getAccountByUUID(uuid)
-        if (!account || account.type !== 'microsoft') return null
+        // A timer does not run while the machine is asleep and fires late on wake, so a
+        // laptop closed overnight comes back with a stale token and a pending timeout. That
+        // is the case this whole scheduler exists for.
+        this.resumeListener = () => {
+            logger.info('System resumed, re-checking the session')
+            this.scheduleTokenRefresh(0)
+        }
+        powerMonitor.on('resume', this.resumeListener)
 
-        if (account.expiresAt > new Date().getTime()) return { expired: false }
+        this.scheduleTokenRefresh()
+    }
 
-        const result = await this.validateSelectedMicrosoftAccount()
-        if (result.ok) return { expired: false }
-
-        // The account is still there, so the failure was recoverable: a network blip
-        // must not bounce the player back to the login screen.
-        if (ConfigManager.getAccountByUUID(uuid)) {
-            logger.warn(`Token refresh deferred (${result.code}), keeping the session`)
-            return { expired: false }
+    static stopTokenRefreshScheduler() {
+        if (this.refreshTimer) {
+            clearTimeout(this.refreshTimer)
+            this.refreshTimer = null
         }
 
-        return { expired: true, message: result.message }
+        if (this.resumeListener) {
+            powerMonitor.removeListener('resume', this.resumeListener)
+            this.resumeListener = null
+        }
+
+        this.onSessionExpired = null
+        this.retryAttempt = 0
+    }
+
+    /**
+     * Arms the timer against the selected account's own expiry.
+     *
+     * With no account there is nothing to refresh and no timer is left running; the next
+     * login re-arms it. The expiry read here is `expiresAt`, the Minecraft token's — never
+     * `microsoft.expires_at`, which belongs to the Microsoft *access* token and says nothing
+     * about whether the session can still be renewed.
+     */
+    static scheduleTokenRefresh(delayOverride = null) {
+        if (this.refreshTimer) {
+            clearTimeout(this.refreshTimer)
+            this.refreshTimer = null
+        }
+
+        const uuid = ConfigManager.getSelectedAccount()
+        const account = uuid ? ConfigManager.getAccountByUUID(uuid) : null
+        if (!account || account.type !== 'microsoft') return
+
+        const untilRefresh = account.expiresAt - new Date().getTime() - REFRESH_SKEW_MS
+        const delay = delayOverride ?? Math.min(Math.max(untilRefresh, MIN_DELAY_MS), MAX_DELAY_MS)
+
+        logger.info(`Next token check in ${Math.round(delay / 1000)}s`)
+        this.refreshTimer = setTimeout(() => this.runScheduledRefresh(), delay)
+    }
+
+    /**
+     * The scheduled check, run through the same path a launch uses so there is a single
+     * definition of "is this session still good".
+     */
+    static async runScheduledRefresh() {
+        this.refreshTimer = null
+
+        const uuid = ConfigManager.getSelectedAccount()
+        const account = uuid ? ConfigManager.getAccountByUUID(uuid) : null
+        if (!account || account.type !== 'microsoft') return
+
+        // Woken by the ceiling rather than by the expiry: nothing to do yet.
+        if (account.expiresAt - new Date().getTime() > REFRESH_SKEW_MS) {
+            this.scheduleTokenRefresh()
+            return
+        }
+
+        const result = await this.validateSelectedMicrosoftAccount()
+
+        if (result.ok) {
+            this.retryAttempt = 0
+            this.scheduleTokenRefresh()
+            return
+        }
+
+        // The account is still on disk, so the failure was judged recoverable: a network
+        // blip must not bounce the player back to the login screen.
+        if (ConfigManager.getAccountByUUID(uuid)) {
+            const delay = RETRY_DELAYS_MS[Math.min(this.retryAttempt, RETRY_DELAYS_MS.length - 1)]
+            this.retryAttempt++
+            logger.warn(`Token refresh deferred (${result.code}), retrying in ${delay / 1000}s`)
+            this.scheduleTokenRefresh(delay)
+            return
+        }
+
+        logger.warn(`Session lost for a terminal reason (${result.code})`)
+        const notify = this.onSessionExpired
+        this.stopTokenRefreshScheduler()
+        if (notify) notify({ expired: true, message: result.message })
     }
 
     static calculateExpiryDate(nowMs, expiresInS) {
