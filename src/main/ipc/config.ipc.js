@@ -1,9 +1,25 @@
+import os from 'os'
 import { dialog, shell } from 'electron'
 import { Channels } from './channels'
 import { handle } from './result'
 import ConfigManager from '../managers/ConfigManager'
 import LaunchManager from '../managers/LaunchManager'
 import { ERROR_CODE } from '../../shared/errorCodes'
+
+const RAM_STEP_MB = 512
+const RAM_MIN_MB = 1024
+
+/**
+ * A JVM that owns all of physical memory leaves nothing for the operating system, the
+ * launcher itself or the game's own native allocations — the machine swaps or the game is
+ * killed. The slider therefore stops at three quarters of the installed RAM, as a hard
+ * limit rather than a warning: there is no legitimate reason to go past it.
+ */
+function maxAllowedRamMB() {
+  const totalMB = Math.floor(os.totalmem() / 1024 / 1024)
+  const capped = Math.floor((totalMB * 0.75) / RAM_STEP_MB) * RAM_STEP_MB
+  return Math.max(RAM_MIN_MB, capped)
+}
 
 export function registerConfigIPC(mainWindow) {
   handle(Channels.CONFIG_GET_SETTINGS, async () => {
@@ -13,6 +29,15 @@ export function registerConfigIPC(mainWindow) {
       gameWidth: ConfigManager.getGameWidth(),
       gameHeight: ConfigManager.getGameHeight(),
       fullscreen: ConfigManager.getFullscreen(),
+      // RAM travels as megabytes in both directions; the '2G'/'4096M' format on disk never
+      // reaches the renderer.
+      minRamMB: ConfigManager.getMinRAMMb(),
+      maxRamMB: ConfigManager.getMaxRAMMb(),
+      useModpackRam: ConfigManager.getUseModpackRam(),
+      systemTotalRamMB: Math.floor(os.totalmem() / 1024 / 1024),
+      maxAllowedRamMB: maxAllowedRamMB(),
+      minAllowedRamMB: RAM_MIN_MB,
+      ramStepMB: RAM_STEP_MB,
       // The effective directory, which is not always the stored one: an unusable path
       // falls back to the default. `defaultDataDirectory` lets the UI tell them apart.
       dataDirectory: ConfigManager.getDataDirectory(),
@@ -27,6 +52,24 @@ export function registerConfigIPC(mainWindow) {
 
   handle(Channels.CONFIG_SET_JAVA_AUTO_DOWNLOAD, async (_event, value) => {
     ConfigManager.setJavaAutoDownload(value)
+    ConfigManager.save()
+  })
+
+  handle(Channels.CONFIG_SET_MAX_RAM, async (_event, megabytes) => {
+    const clamped = Math.min(Math.max(Math.round(megabytes) || RAM_MIN_MB, RAM_MIN_MB), maxAllowedRamMB())
+    ConfigManager.setMaxRAM(ConfigManager.formatRamFromMB(clamped))
+    ConfigManager.save()
+
+    // Answers with what was actually stored, minimum included: setMaxRAM pulls the floor
+    // down with the ceiling, and the settings screen has to show that.
+    return {
+      maxRamMB: ConfigManager.getMaxRAMMb(),
+      minRamMB: ConfigManager.getMinRAMMb()
+    }
+  })
+
+  handle(Channels.CONFIG_SET_USE_MODPACK_RAM, async (_event, value) => {
+    ConfigManager.setUseModpackRam(value)
     ConfigManager.save()
   })
 

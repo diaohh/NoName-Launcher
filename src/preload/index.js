@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   configGetSettings: () => ipcRenderer.invoke('config:getSettings'),
   configSetJavaExecutable: (path) => ipcRenderer.invoke('config:setJavaExecutable', path),
   configSetJavaAutoDownload: (val) => ipcRenderer.invoke('config:setJavaAutoDownload', val),
+  configSetMaxRam: (mb) => ipcRenderer.invoke('config:setMaxRam', mb),
+  configSetUseModpackRam: (val) => ipcRenderer.invoke('config:setUseModpackRam', val),
   configSetGameWidth: (w) => ipcRenderer.invoke('config:setGameWidth', w),
   configSetGameHeight: (h) => ipcRenderer.invoke('config:setGameHeight', h),
   configSetFullscreen: (val) => ipcRenderer.invoke('config:setFullscreen', val),

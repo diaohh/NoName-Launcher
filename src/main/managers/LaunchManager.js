@@ -448,9 +448,21 @@ class LaunchManager {
             classpath_separator: process.platform === 'win32' ? ';' : ':'
         }
 
-        const maxRAM = server?.rawServer?.java?.maxRam || ConfigManager.getMaxRAM()
-        const minRAM = server?.rawServer?.java?.minRam || ConfigManager.getMinRAM()
-        const args = ['-Xmx' + maxRAM, '-Xms' + minRAM]
+        // The modpack's own allocation is tuned for its mod list, so it wins — but only
+        // while the player leaves that preference on. The slider in settings is otherwise
+        // the authority.
+        const useModpackRam = ConfigManager.getUseModpackRam()
+        const maxRAM = (useModpackRam && server?.rawServer?.java?.maxRam) || ConfigManager.getMaxRAM()
+        const minRAM = (useModpackRam && server?.rawServer?.java?.minRam) || ConfigManager.getMinRAM()
+
+        // A modpack can declare an inconsistent pair, and nothing validates it on the way in.
+        // `-Xms` above `-Xmx` aborts the JVM before it prints anything, so the floor is never
+        // allowed to win over the ceiling.
+        const maxMb = ConfigManager.parseRamToMB(maxRAM)
+        const minMb = ConfigManager.parseRamToMB(minRAM)
+        const effectiveMinRAM = (maxMb != null && minMb != null && minMb > maxMb) ? maxRAM : minRAM
+
+        const args = ['-Xmx' + maxRAM, '-Xms' + effectiveMinRAM]
 
         this.appendArguments(args, versionData.arguments.jvm || [], argContext)
 
