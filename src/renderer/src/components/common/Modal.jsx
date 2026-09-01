@@ -33,8 +33,12 @@ export default function Modal({ open, onClose, title, footer, size = 'max-w-[560
   if (!open) return null
 
   return createPortal(
+    // The overlay stays nearly transparent on purpose. backdrop-filter blurs everything
+    // painted behind the element it sits on, the overlay's own background included, so a
+    // solid scrim here would leave the panel blurring a flat wash and no glass would show.
+    // Dimming belongs to the overlay, the blur to the panel.
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/25 p-6"
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
       <div
@@ -43,7 +47,7 @@ export default function Modal({ open, onClose, title, footer, size = 'max-w-[560
         aria-modal="true"
         aria-label={title}
         tabIndex={-1}
-        className={`w-full ${size} max-h-[80vh] flex flex-col bg-[rgba(20,20,22,0.95)] backdrop-blur-[20px] border border-white/10 rounded-xl shadow-[0_20px_60px_rgba(0,0,0,0.6)] focus:outline-none`}
+        className={`w-full ${size} max-h-[80vh] flex flex-col bg-[rgba(18,18,20,0.55)] backdrop-blur-[28px] backdrop-saturate-150 border border-white/10 rounded-xl shadow-[0_20px_60px_rgba(0,0,0,0.5)] focus:outline-none`}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 shrink-0">
           <h2 className="text-sm font-bold text-white uppercase tracking-widest">{title}</h2>
