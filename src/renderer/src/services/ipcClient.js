@@ -33,6 +33,8 @@ export const ipc = {
     getSettings: invoke('configGetSettings'),
     setJavaExecutable: invoke('configSetJavaExecutable'),
     setJavaAutoDownload: invoke('configSetJavaAutoDownload'),
+    setMaxRam: invoke('configSetMaxRam'),
+    setUseModpackRam: invoke('configSetUseModpackRam'),
     setGameWidth: invoke('configSetGameWidth'),
     setGameHeight: invoke('configSetGameHeight'),
     setFullscreen: invoke('configSetFullscreen'),
@@ -51,6 +53,7 @@ export const ipc = {
   launch: {
     game: invoke('launchGame'),
     kill: invoke('launchKill'),
+    getStatus: invoke('launchGetStatus'),
     onProgress: (cb) => window.electronAPI.onLaunchProgress(cb)
   },
   events: {

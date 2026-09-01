@@ -98,13 +98,16 @@ class ConfigManager {
                 game: {
                     resWidth: 1280,
                     resHeight: 720,
-                    fullscreen: false
+                    fullscreen: true
                 },
                 java: {
                     minRAM: '2G',
                     maxRAM: '4G',
                     executable: null,
-                    autoDownload: true
+                    autoDownload: true,
+                    // Modpacks ship a RAM allocation tuned for their own mod list, so it
+                    // wins by default; the settings slider only takes over when this is off.
+                    useModpackRam: true
                 },
                 launcher: {
                     // null means "wherever the launcher lives". Storing the absolute path
@@ -332,6 +335,9 @@ class ConfigManager {
     static getMaxRAM() { return this.config.settings.java.maxRAM }
     static getJavaExecutable() { return this.config.settings.java.executable }
     static getJavaAutoDownload() { return this.config.settings.java.autoDownload }
+    static getUseModpackRam() { return this.config.settings.java.useModpackRam }
+    static getMinRAMMb() { return this.parseRamToMB(this.getMinRAM()) }
+    static getMaxRAMMb() { return this.parseRamToMB(this.getMaxRAM()) }
     static getSelectedServer() { return this.config.selectedServer }
     static getSelectedAccount() { return this.config.selectedAccount }
     static getAuthenticationDatabase() { return this.config.authenticationDatabase }
@@ -344,7 +350,46 @@ class ConfigManager {
     static setGameHeight(height) { this.config.settings.game.resHeight = height }
     static setFullscreen(fullscreen) { this.config.settings.game.fullscreen = fullscreen }
     static setMinRAM(ram) { this.config.settings.java.minRAM = ram }
-    static setMaxRAM(ram) { this.config.settings.java.maxRAM = ram }
+    static setUseModpackRam(value) { this.config.settings.java.useModpackRam = !!value }
+
+    /**
+     * The JVM aborts before printing anything useful when `-Xms` sits above `-Xmx`, and the
+     * defaults are 2G/4G — so dragging the settings slider down past the minimum would build
+     * a launch command that simply dies. The floor follows the ceiling down.
+     */
+    static setMaxRAM(ram) {
+        this.config.settings.java.maxRAM = ram
+
+        const maxMb = this.parseRamToMB(ram)
+        const minMb = this.parseRamToMB(this.config.settings.java.minRAM)
+
+        if (maxMb != null && minMb != null && minMb > maxMb) {
+            logger.info(`Clamping minRAM to ${maxMb}M so it does not exceed maxRAM`)
+            this.config.settings.java.minRAM = this.formatRamFromMB(maxMb)
+        }
+    }
+
+    /**
+     * Megabytes are the single internal unit for RAM: the JVM accepts `-Xmx4096M` exactly as
+     * it accepts `-Xmx4G`, so only the stored format has to be read back. Returns null for
+     * anything unparseable rather than guessing a number.
+     */
+    static parseRamToMB(value) {
+        if (typeof value === 'number' && Number.isFinite(value)) return Math.round(value)
+        if (typeof value !== 'string') return null
+
+        const match = value.trim().match(/^(\d+(?:\.\d+)?)\s*([GMK])?B?$/i)
+        if (!match) return null
+
+        const unit = (match[2] || 'M').toUpperCase()
+        const multiplier = unit === 'G' ? 1024 : unit === 'K' ? 1 / 1024 : 1
+
+        return Math.round(parseFloat(match[1]) * multiplier)
+    }
+
+    static formatRamFromMB(megabytes) {
+        return `${Math.round(megabytes)}M`
+    }
     static setJavaExecutable(executable) { this.config.settings.java.executable = executable }
     static setJavaAutoDownload(autoDownload) { this.config.settings.java.autoDownload = autoDownload }
     /**

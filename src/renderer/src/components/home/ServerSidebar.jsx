@@ -34,7 +34,7 @@ function ServerIcon({ server, isActive, onSelect }) {
 }
 
 export default function ServerSidebar() {
-  const { servers, selectedServer, selectServer, loading } = useServers()
+  const { servers, selectedServer, selectServer, loading, error } = useServers()
 
   if (loading) {
     return (
@@ -56,7 +56,15 @@ export default function ServerSidebar() {
         />
       ))}
 
-      {servers.length === 0 && (
+      {/* "Sin servidores" must not be the answer to a failed read: it reads as "you have no
+          modpacks assigned", which is the one conclusion the player must not draw here. */}
+      {error && (
+        <div className="text-red-400/60 text-[10px] text-center px-2 mt-4" title={error.message}>
+          {error.kind === 'network' ? 'Sin conexion' : 'Error'}
+        </div>
+      )}
+
+      {!error && servers.length === 0 && (
         <div className="text-white/20 text-[10px] text-center px-2 mt-4">
           Sin servidores
         </div>

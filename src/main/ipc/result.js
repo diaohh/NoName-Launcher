@@ -15,8 +15,13 @@ const FALLBACK_MESSAGE = 'Ha ocurrido un error inesperado.'
  * `{ ok: false, code, message }`; `services/ipcClient.js` unwraps the envelope and
  * rebuilds a real Error carrying the code, so the renderer can branch on `err.code`
  * instead of matching substrings of a message.
+ *
+ * The handler is removed before being registered. `registerAllIPC` runs inside
+ * `createWindow()`, which macOS calls again on `activate`, and `ipcMain.handle` throws on
+ * a duplicate channel — re-registering is the intended behaviour, not an error.
  */
 export function handle(channel, handler) {
+  ipcMain.removeHandler(channel)
   ipcMain.handle(channel, async (event, ...args) => {
     try {
       return { ok: true, data: await handler(event, ...args) }

@@ -1,15 +1,31 @@
 import { useState, useEffect } from 'react'
 import { ipc } from '../../services/ipcClient'
+import { useStatus } from '../../contexts/StatusContext'
 import JavaSection from './JavaSection'
 import GameSection from './GameSection'
 import LauncherSection from './LauncherSection'
 
 export default function SettingsScreen({ onBack }) {
+  const { showStatus } = useStatus()
   const [settings, setSettings] = useState(null)
+  const [failed, setFailed] = useState(false)
 
   useEffect(() => {
-    ipc.config.getSettings().then(setSettings)
-  }, [])
+    let ignore = false
+
+    ipc.config.getSettings()
+      .then(loaded => { if (!ignore) setSettings(loaded) })
+      .catch(err => {
+        // Without this the screen sat on "Cargando..." forever, with nothing in the log and
+        // nothing on screen — on the very screen StatusContext was introduced for.
+        if (ignore) return
+        console.error('Failed to load settings:', err)
+        setFailed(true)
+        showStatus(err.message || 'No se han podido cargar los ajustes', 'error')
+      })
+
+    return () => { ignore = true }
+  }, [showStatus])
 
   const updateSetting = (key, value) => {
     setSettings(prev => ({ ...prev, [key]: value }))
@@ -17,8 +33,20 @@ export default function SettingsScreen({ onBack }) {
 
   if (!settings) {
     return (
-      <div className="w-screen h-screen flex items-center justify-center bg-[#1a1a1e] font-inter text-white">
-        <p className="text-white/30 text-sm">Cargando...</p>
+      <div className="w-screen h-screen flex flex-col items-center justify-center gap-4 bg-[#1a1a1e] font-inter text-white">
+        {failed ? (
+          <>
+            <p className="text-white/50 text-sm">No se han podido cargar los ajustes.</p>
+            <button
+              onClick={onBack}
+              className="bg-white/5 border border-white/10 rounded px-5 py-2.5 text-sm text-white/70 hover:bg-white/10 hover:border-accent-green hover:text-white transition-all duration-200 cursor-pointer"
+            >
+              Volver
+            </button>
+          </>
+        ) : (
+          <p className="text-white/30 text-sm">Cargando...</p>
+        )}
       </div>
     )
   }
