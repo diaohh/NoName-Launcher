@@ -12,6 +12,10 @@ export function registerLaunchIPC(mainWindow) {
   })
 
   handle(Channels.LAUNCH_KILL, async () => {
-    LaunchManager.killGame()
+    return LaunchManager.killGame()
+  })
+
+  handle(Channels.LAUNCH_GET_STATUS, async () => {
+    return LaunchManager.getStatus()
   })
 }

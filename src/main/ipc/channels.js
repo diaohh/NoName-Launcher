@@ -28,6 +28,7 @@ export const Channels = {
   LAUNCH_GAME: 'launch:game',
   LAUNCH_PROGRESS: 'launch:progress',
   LAUNCH_KILL: 'launch:kill',
+  LAUNCH_GET_STATUS: 'launch:getStatus',
 
   // Window
   WINDOW_MINIMIZE: 'window:minimize',

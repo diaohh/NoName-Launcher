@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Launch
   launchGame: () => ipcRenderer.invoke('launch:game'),
   launchKill: () => ipcRenderer.invoke('launch:kill'),
+  launchGetStatus: () => ipcRenderer.invoke('launch:getStatus'),
   onLaunchProgress: (callback) => {
     const handler = (_event, data) => callback(data)
     ipcRenderer.on('launch:progress', handler)

@@ -51,6 +51,7 @@ export const ipc = {
   launch: {
     game: invoke('launchGame'),
     kill: invoke('launchKill'),
+    getStatus: invoke('launchGetStatus'),
     onProgress: (cb) => window.electronAPI.onLaunchProgress(cb)
   },
   events: {

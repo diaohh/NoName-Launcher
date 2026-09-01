@@ -87,6 +87,25 @@ export function LaunchProvider({ children }) {
     }
   }, [addLog])
 
+  // The game lives in the main process, so a renderer reload loses every trace of it. Without
+  // this the UI would believe nothing is running and the kill button would never appear.
+  useEffect(() => {
+    let ignore = false
+
+    ipc.launch.getStatus()
+      .then(status => {
+        if (ignore || !status?.running) return
+        setGameRunning(true)
+        setLaunchState('playing')
+        addLog(`Minecraft ya estaba en ejecucion (PID: ${status.pid})`, 'system')
+      })
+      .catch(err => {
+        console.error('Failed to read the launch status:', err)
+      })
+
+    return () => { ignore = true }
+  }, [addLog])
+
   const launch = async () => {
     setLaunchState('preparing')
     setLogs([])

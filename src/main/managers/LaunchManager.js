@@ -37,6 +37,14 @@ class LaunchManager {
 
     static gameProcess = null
 
+    /**
+     * Held for the length of the preparation, which is everything up to the spawn. Once the
+     * game is up `gameProcess` is the lock; between the two there is nothing else, and two
+     * concurrent flows would sync the same instance directory against each other and leave
+     * the first process orphaned when the second overwrote `gameProcess`.
+     */
+    static launchInProgress = false
+
     static assertSupportedVersion(minecraftVersion) {
         const [major, minor] = minecraftVersion.split('.').map(part => parseInt(part))
 
@@ -459,6 +467,18 @@ class LaunchManager {
     }
 
     static async launchMinecraft(progressCallback) {
+        // Checked before the try, and deliberately not reported through `progressCallback`:
+        // an `{type:'error'}` event here would drive LaunchContext into its error state and
+        // tear down the UI of the launch that is actually running.
+        if (this.launchInProgress || this.gameProcess != null) {
+            logger.warn('Refused a concurrent launch')
+            const error = new Error('Ya hay un lanzamiento en curso o Minecraft ya esta abierto.')
+            error.code = ERROR_CODE.LAUNCH_ALREADY_RUNNING
+            throw error
+        }
+
+        this.launchInProgress = true
+
         try {
             if (progressCallback) progressCallback({ type: 'auth', message: 'Validando cuenta...' })
 
@@ -614,13 +634,32 @@ class LaunchManager {
                 progressCallback({ type: 'error', error: err.message, code: err.code || ERROR_CODE.UNKNOWN })
             }
             throw err
+        } finally {
+            this.launchInProgress = false
         }
     }
 
+    /**
+     * Asks the game to close. The `close` handler stays the only place that clears
+     * `gameProcess`: nulling it here would tell `config:setDataDirectory` that no game is
+     * running while the JVM is still shutting down with files open in the instance.
+     */
     static killGame() {
-        if (this.gameProcess) {
-            this.gameProcess.kill()
-            this.gameProcess = null
+        if (!this.gameProcess) return false
+
+        logger.info('Killing Minecraft, PID:', this.gameProcess.pid)
+        this.gameProcess.kill()
+        return true
+    }
+
+    /**
+     * Lets the renderer rebuild its state after a reload: without it a refresh during a
+     * game leaves the UI believing nothing is running, and the kill button never appears.
+     */
+    static getStatus() {
+        return {
+            running: this.gameProcess != null,
+            pid: this.gameProcess?.pid ?? null
         }
     }
 }
