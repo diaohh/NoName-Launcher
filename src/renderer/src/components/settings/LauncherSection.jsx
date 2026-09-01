@@ -4,6 +4,11 @@ import { useStatus } from '../../contexts/StatusContext'
 export default function LauncherSection({ settings, onUpdate }) {
   const { showStatus } = useStatus()
 
+  // The stored path can differ from the effective one: an unusable directory falls back
+  // to the default without being rewritten, so compare against what the main process
+  // reports as active rather than against the raw setting.
+  const isDefault = settings.dataDirectory === settings.defaultDataDirectory
+
   const handlePickFolder = async () => {
     const result = await ipc.dialog.openFolder({
       title: 'Seleccionar directorio de datos'
@@ -17,6 +22,17 @@ export default function LauncherSection({ settings, onUpdate }) {
       onUpdate('dataDirectory', applied)
     } catch (err) {
       showStatus(err.message || 'No se ha podido cambiar el directorio de datos', 'error')
+    }
+  }
+
+  const handleReset = async () => {
+    try {
+      // null means "wherever the launcher lives" — the config stops carrying an absolute
+      // path instead of storing today's default as a literal.
+      const applied = await ipc.config.setDataDirectory(null)
+      onUpdate('dataDirectory', applied)
+    } catch (err) {
+      showStatus(err.message || 'No se ha podido restablecer el directorio de datos', 'error')
     }
   }
 
@@ -40,6 +56,14 @@ export default function LauncherSection({ settings, onUpdate }) {
             className="bg-white/5 border border-white/10 rounded px-4 py-2 text-sm text-white/70 hover:bg-white/10 hover:border-accent-green hover:text-white transition-all duration-200 cursor-pointer shrink-0"
           >
             Buscar
+          </button>
+          <button
+            onClick={handleReset}
+            disabled={isDefault}
+            title={isDefault ? 'Ya estas en el directorio por defecto' : 'Volver al directorio por defecto'}
+            className="bg-white/5 border border-white/10 rounded px-4 py-2 text-sm text-white/70 hover:bg-white/10 hover:border-accent-green hover:text-white transition-all duration-200 cursor-pointer shrink-0 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-white/5 disabled:hover:border-white/10 disabled:hover:text-white/70"
+          >
+            Restablecer
           </button>
         </div>
         <p className="text-xs text-white/30 mt-1.5">
