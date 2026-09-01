@@ -47,6 +47,7 @@ made — but only the marked alternatives distinguish what was actually rejected
 | [0006](0006-usersallowed-is-ux-not-access-control.md) | `usersAllowed` is UX, not access control | Stand-by |
 | [0007](0007-encrypt-account-secrets-with-safestorage.md) | Encrypt account secrets with `safeStorage`, and never fall back to plaintext | Accepted |
 | [0008](0008-useeffect-only-for-external-systems.md) | Use `useEffect` only to synchronize with an external system | Accepted |
+| [0009](0009-no-offline-mode.md) | No offline mode: report the network failure instead | Accepted |
 
 ## Not written yet
 

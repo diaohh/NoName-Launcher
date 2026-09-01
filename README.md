@@ -10,7 +10,7 @@ A custom Minecraft launcher built with Electron, React, and Tailwind CSS. Featur
 - **Modpack Distribution** — Managed via Firebase Firestore with per-user allow lists
 - **Automatic Java Management** — Reads the required Java version from the Minecraft manifest, reuses a compatible JVM if one is installed, downloads it otherwise
 - **Fabric Support** — Loader profile resolved from the Fabric Meta API. Forge is implemented but not yet reachable end to end (see the loader table below)
-- **Per-Modpack Settings** — RAM allocation defined per modpack, overriding launcher defaults
+- **Per-Modpack Settings** — RAM allocation defined per modpack, used by default; a launcher-wide slider takes over when the per-modpack override is switched off in Settings
 - **Dynamic UI** — Modpack banners, player skin display via Minotar, glassmorphism dark theme
 - **Cross-Platform** — Windows (NSIS installer + portable), Linux (AppImage), macOS (DMG)
 
@@ -132,7 +132,12 @@ Validate account (refresh Microsoft/Minecraft tokens if needed)
   → Build the launch command and spawn the game
 ```
 
-Everything runs in the main process and reports progress to the renderer over a single `launch:progress` event.
+Everything runs in the main process and reports progress to the renderer over a single `launch:progress` event. Only one launch runs at a time — the main process refuses a second one rather than relying on the button being disabled.
+
+The launcher is **online-only**. Every launch validates or refreshes a Minecraft token against
+Microsoft, so there is no offline mode and no cached catalogue: a modpack list that cannot be
+read is reported with a retry instead of being faked from disk. See
+[ADR-0009](docs/adr/0009-no-offline-mode.md).
 
 ## Data Directories
 
@@ -209,8 +214,9 @@ src/
     ├── hooks/              # useServers
     └── components/
         ├── auth/           # Login screen
+        ├── common/         # Modal (portal + Escape), status message
         ├── home/           # Main screen (sidebar, background, profile)
-        ├── launch/         # Play button, progress bar, log viewer
+        ├── launch/         # Play button, kill button, progress bar, log viewer
         └── settings/       # Settings screen
 ```
 
