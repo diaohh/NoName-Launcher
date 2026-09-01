@@ -98,7 +98,7 @@ class ConfigManager {
                 game: {
                     resWidth: 1280,
                     resHeight: 720,
-                    fullscreen: false
+                    fullscreen: true
                 },
                 java: {
                     minRAM: '2G',
