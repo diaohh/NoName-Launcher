@@ -48,11 +48,13 @@ made — but only the marked alternatives distinguish what was actually rejected
 | [0007](0007-encrypt-account-secrets-with-safestorage.md) | Encrypt account secrets with `safeStorage`, and never fall back to plaintext | Accepted |
 | [0008](0008-useeffect-only-for-external-systems.md) | Use `useEffect` only to synchronize with an external system | Accepted |
 | [0009](0009-no-offline-mode.md) | No offline mode: report the network failure instead | Accepted |
+| [0010](0010-sandboxed-windows-and-a-webrequest-csp.md) | Sandbox both windows and apply the CSP through `webRequest` | Accepted |
+| [0011](0011-enforce-indentation-per-area.md) | Enforce the indentation each area already uses | Accepted |
 
 ## Not written yet
 
-Decisions already taken and documented in prose in `CLAUDE.md` or `TODO.md`, worth extracting
-when they are next touched:
+Decisions already taken and documented in prose in `CLAUDE.md` (which is gitignored, so they
+reach nobody who clones the repo), worth extracting when they are next touched:
 
 - **State in the Context API, no Redux** — four providers, why the launcher's state is small
   enough and what `StatusContext` replaced.
@@ -60,7 +62,3 @@ when they are next touched:
   cannot run under plain node, and what that costs.
 - **Mod loaders are ours, not helios-core's** — Fabric via the Meta API, Forge via the
   official installer, NeoForge planned and the version-id trap.
-- **CJS preload, `sandbox: true`, CSP applied through `webRequest`** — and why the full ESM
-  migration is deferred because of it.
-- **Deliberately non-uniform indentation**, with ESLint enforcing per-area rather than
-  picking a winner.

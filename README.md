@@ -177,6 +177,22 @@ Two conventions are easy to break from outside and are worth reading before a fi
   `Error`. Handlers register through `handle()` from `src/main/ipc/result.js`; codes are
   shared constants in `src/shared/errorCodes.js`. Never branch on message text.
 
+### Gotchas
+
+- **`helios-distribution-types` looks unused. It is not — do not remove it.** Nothing in
+  `src/` imports it, so every dependency audit flags it. It is required at runtime by
+  `helios-core/common` (→ `DistributionAPI` → `DistributionFactory`), which is where
+  `AuthManager` gets `RestResponseStatus`, and helios-core declares it only as a
+  **devDependency** — so the consumer has to provide it. Removing it once left the launcher
+  unable to start from a clean install, and it stayed hidden for weeks because the existing
+  `node_modules` still had the package on disk. It will only reproduce after
+  `rm -rf node_modules && pnpm install`.
+- **`package.json` lists `pnpm.onlyBuiltDependencies`.** pnpm 10 skips postinstall scripts
+  unless a package is on that list; without `electron` there the binary is never downloaded and
+  `pnpm dev` fails.
+- `resources/icon.png` is referenced by `electron-builder.yml` and by the main process but is
+  not in the repo yet, so `pnpm package` fails until it is added.
+
 ## Build & Package
 
 ```bash
