@@ -9,7 +9,7 @@ A custom Minecraft launcher built with Electron, React, and Tailwind CSS. Featur
 - **Microsoft Authentication** — Full OAuth flow with automatic token refresh
 - **Modpack Distribution** — Managed via Firebase Firestore with per-user allow lists
 - **Automatic Java Management** — Reads the required Java version from the Minecraft manifest, reuses a compatible JVM if one is installed, downloads it otherwise
-- **Forge & Fabric Support** — Forge is installed with the official installer, Fabric through the Fabric Meta API
+- **Fabric Support** — Loader profile resolved from the Fabric Meta API. Forge is implemented but not yet reachable end to end (see the loader table below)
 - **Per-Modpack Settings** — RAM allocation defined per modpack, overriding launcher defaults
 - **Dynamic UI** — Modpack banners, player skin display via Minotar, glassmorphism dark theme
 - **Cross-Platform** — Windows (NSIS installer + portable), Linux (AppImage), macOS (DMG)
@@ -21,8 +21,9 @@ A custom Minecraft launcher built with Electron, React, and Tailwind CSS. Featur
 | Loader | Status |
 |--------|--------|
 | Vanilla | Supported |
-| Forge (1.17+) | Supported — installed via the official Forge installer |
-| Fabric (1.17+) | Supported — profile resolved from `meta.fabricmc.net` |
+| Fabric (1.17+) | **Supported** — profile resolved from `meta.fabricmc.net`, exercised end to end |
+| Forge (1.17+) | **Implemented, unverified** — `ModLoaderManager.installForge` runs the official installer, but `tools/pack-publish` refuses non-Fabric packs, so no pack using it can be published yet |
+| NeoForge | Planned |
 | Minecraft ≤ 1.16 | Not supported |
 
 ## Tech Stack
@@ -33,7 +34,7 @@ A custom Minecraft launcher built with Electron, React, and Tailwind CSS. Featur
 | Frontend | React 19, Tailwind CSS v4 |
 | Build | electron-vite, electron-builder |
 | Backend | Firebase Firestore |
-| Game Engine | [helios-core](https://github.com/dscalzi/helios-core) 2.3 |
+| Game Engine | [helios-core](https://github.com/dscalzi/helios-core) 2.x — signatures changed in 2.x, check `node_modules/helios-core/dist/**/*.d.ts` |
 | Auth | Microsoft Azure AD (OAuth 2.0) |
 
 ## Prerequisites
@@ -155,10 +156,21 @@ instances/<id>/      Per-modpack game directory (mods, config, saves, natives)
 ## Development
 
 ```bash
-pnpm dev
+pnpm dev     # electron-vite dev server, hot reload for the renderer
+pnpm lint    # ESLint (flat config) — the repo stays at 0 errors
 ```
 
-This starts the electron-vite dev server with hot reload for the renderer process.
+Design decisions and the reasoning behind the conventions below live in
+[docs/adr/](docs/adr/README.md).
+
+Two conventions are easy to break from outside and are worth reading before a first change:
+
+- **Adding an IPC call means touching four layers** — `src/main/ipc/channels.js`, the
+  `*.ipc.js` handler, `src/preload/index.js`, and `src/renderer/src/services/ipcClient.js`.
+  A channel missing from any of them is dead code.
+- **Errors cross the IPC boundary in a `{ ok, code, message }` envelope**, never as a thrown
+  `Error`. Handlers register through `handle()` from `src/main/ipc/result.js`; codes are
+  shared constants in `src/shared/errorCodes.js`. Never branch on message text.
 
 ## Build & Package
 
@@ -188,10 +200,12 @@ src/
 │   └── ipc/                # IPC channel handlers
 ├── preload/                # Context bridge (main ↔ renderer)
 │   └── index.js
+├── shared/                 # Bundled into BOTH processes — must stay dependency-free
+│   └── errorCodes.js       # The only source of IPC error codes
 └── renderer/src/           # React application
     ├── App.jsx             # Root component + providers
-    ├── contexts/           # AuthContext, LaunchContext, ServersContext
-    ├── services/           # ipcClient, Firebase, Firestore queries
+    ├── contexts/           # Auth, Launch, Servers, Status
+    ├── services/           # ipcClient, Firebase, Firestore queries, launchPhases
     ├── hooks/              # useServers
     └── components/
         ├── auth/           # Login screen
@@ -204,9 +218,12 @@ src/
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/my-feature`)
-3. Commit your changes using [Conventional Commits](https://www.conventionalcommits.org/)
-4. Push to the branch (`git push origin feature/my-feature`)
-5. Open a Pull Request
+3. Run `pnpm lint` — the repo stays at 0 errors
+4. Commit your changes using [Conventional Commits](https://www.conventionalcommits.org/) in English, one logical change per commit
+5. Push to the branch (`git push origin feature/my-feature`)
+6. Open a Pull Request
+
+A change that alters a structural decision needs an ADR in [docs/adr/](docs/adr/README.md) in the same PR.
 
 ## License
 
