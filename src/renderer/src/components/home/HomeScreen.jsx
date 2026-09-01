@@ -5,10 +5,11 @@ import ServerSidebar from './ServerSidebar'
 import UserProfile from './UserProfile'
 import PlayButton from '../launch/PlayButton'
 import LaunchOverlay from './LaunchOverlay'
+import ServersError from './ServersError'
 import SettingsScreen from '../settings/SettingsScreen'
 
 export default function HomeScreen() {
-  const { selectedServer } = useServers()
+  const { selectedServer, error, reload } = useServers()
   const [showSettings, setShowSettings] = useState(false)
 
   if (showSettings) {
@@ -25,9 +26,13 @@ export default function HomeScreen() {
         <UserProfile onOpenSettings={() => setShowSettings(true)} />
 
         {!selectedServer && (
-          <h1 className="text-[3.5rem] font-black tracking-[-3px] uppercase font-inter select-none">
-            NONAME<span className="text-accent-green animate-blink">_</span>
-          </h1>
+          error
+            ? <ServersError error={error} onRetry={reload} />
+            : (
+              <h1 className="text-[3.5rem] font-black tracking-[-3px] uppercase font-inter select-none">
+                NONAME<span className="text-accent-green animate-blink">_</span>
+              </h1>
+            )
         )}
 
         {selectedServer && (
