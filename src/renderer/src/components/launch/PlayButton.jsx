@@ -69,8 +69,8 @@ export default function PlayButton() {
       </div>
 
       {selectedServer && (
-        <p className="text-center text-white/40 text-xs mt-3 tracking-wider">
-          {selectedServer.name} — {selectedServer.minecraftVersion}
+        <p className="text-center text-white/40 text-xs mt-3 tracking-wider text-shadow-[0_1px_3px_rgb(0_0_0/0.8)]">
+          {selectedServer.name}
         </p>
       )}
     </div>

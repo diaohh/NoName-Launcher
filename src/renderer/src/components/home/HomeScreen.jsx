@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useServers } from '../../contexts/ServersContext'
 import DynamicBackground from './DynamicBackground'
+import ModpackLogo from './ModpackLogo'
 import ServerSidebar from './ServerSidebar'
 import UserProfile from './UserProfile'
 import PlayButton from '../launch/PlayButton'
@@ -35,10 +36,18 @@ export default function HomeScreen() {
             )
         )}
 
+        {/* Centred in <main>, the same box the play button is centred in, so logo and button
+            share a vertical axis. ModpackLogo caps its own height so this stack never reaches
+            the button. */}
         {selectedServer && (
-          <p className="text-white/40 text-sm mb-4">
-            {selectedServer.description}
-          </p>
+          <div className="absolute inset-0 flex flex-col items-center justify-center px-8 pointer-events-none">
+            {selectedServer.logo && (
+              <ModpackLogo key={selectedServer.logo} url={selectedServer.logo} name={selectedServer.name} />
+            )}
+            <p className="text-white/40 text-sm text-center text-shadow-[0_1px_3px_rgb(0_0_0/0.8)]">
+              {selectedServer.description}
+            </p>
+          </div>
         )}
 
         <PlayButton />
