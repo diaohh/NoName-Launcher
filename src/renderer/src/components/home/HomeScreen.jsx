@@ -30,7 +30,7 @@ export default function HomeScreen() {
           error
             ? <ServersError error={error} onRetry={reload} />
             : (
-              <h1 className="text-[3.5rem] font-black tracking-[-3px] uppercase font-inter select-none">
+              <h1 className="text-[3.5rem] font-black tracking-[-3px] uppercase font-inter">
                 NONAME<span className="text-accent-green animate-blink">_</span>
               </h1>
             )

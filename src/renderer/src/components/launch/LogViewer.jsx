@@ -63,7 +63,7 @@ export default function LogViewer() {
         <div
           ref={scrollRef}
           onScroll={handleScroll}
-          className="h-[60vh] overflow-y-auto px-5 py-4 font-mono text-[11px] leading-[1.5]"
+          className="h-[60vh] overflow-y-auto px-5 py-4 font-mono text-[11px] leading-[1.5] select-text"
         >
           {logs.length === 0 ? (
             <p className="text-white/30">Todavia no hay ninguna linea.</p>

@@ -31,6 +31,24 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* A launcher, not a document: nothing is selectable or draggable by default, so a stray
+   drag does not highlight the title or pull a modpack icon out as a ghost image. Fields
+   stay selectable, and anything worth copying opts back in with `select-text`. */
+@layer base {
+  body {
+    user-select: none;
+  }
+
+  input,
+  textarea {
+    user-select: text;
+  }
+
+  img {
+    -webkit-user-drag: none;
+  }
+}
+
 @layer utilities {
   .auth-bg {
     background-image:
