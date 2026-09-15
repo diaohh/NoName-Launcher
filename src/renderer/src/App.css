@@ -18,11 +18,35 @@
      Montserrat is gone: nothing ever used font-montserrat. */
   --font-inter: 'Inter Variable', 'Inter', system-ui, sans-serif;
   --animate-blink: blink 1s step-end infinite;
+  --animate-fade-in-up: fade-in-up 500ms cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 
 @keyframes blink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* A launcher, not a document: nothing is selectable or draggable by default, so a stray
+   drag does not highlight the title or pull a modpack icon out as a ghost image. Fields
+   stay selectable, and anything worth copying opts back in with `select-text`. */
+@layer base {
+  body {
+    user-select: none;
+  }
+
+  input,
+  textarea {
+    user-select: text;
+  }
+
+  img {
+    -webkit-user-drag: none;
+  }
 }
 
 @layer utilities {

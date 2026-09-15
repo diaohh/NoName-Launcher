@@ -5,6 +5,21 @@ import JavaSection from './JavaSection'
 import GameSection from './GameSection'
 import LauncherSection from './LauncherSection'
 
+function CloseButton({ onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label="Cerrar"
+      title="Cerrar"
+      className="bg-transparent border-none text-white/50 hover:text-white cursor-pointer p-2 rounded hover:bg-white/5 transition-all duration-200"
+    >
+      <svg width="20" height="20" viewBox="0 0 16 16" fill="none">
+        <path d="M4 4L12 12M12 4L4 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      </svg>
+    </button>
+  )
+}
+
 export default function SettingsScreen({ onBack }) {
   const { showStatus } = useStatus()
   const [settings, setSettings] = useState(null)
@@ -33,7 +48,12 @@ export default function SettingsScreen({ onBack }) {
 
   if (!settings) {
     return (
-      <div className="w-screen h-screen flex flex-col items-center justify-center gap-4 bg-[#1a1a1e] font-inter text-white">
+      <div className="relative w-screen h-screen flex flex-col items-center justify-center gap-4 bg-[#1a1a1e] font-inter text-white">
+        {/* Same spot as in the loaded header, so the way out does not depend on the load. */}
+        <div className="absolute top-8 right-8">
+          <CloseButton onClick={onBack} />
+        </div>
+
         {failed ? (
           <>
             <p className="text-white/50 text-sm">No se han podido cargar los ajustes.</p>
@@ -53,18 +73,11 @@ export default function SettingsScreen({ onBack }) {
 
   return (
     <div className="w-screen h-screen flex flex-col overflow-hidden bg-[#1a1a1e] font-inter text-white">
-      <div className="flex items-center gap-4 px-8 pt-8 pb-6">
-        <button
-          onClick={onBack}
-          className="bg-transparent border-none text-white/50 hover:text-white cursor-pointer p-2 rounded hover:bg-white/5 transition-all duration-200"
-        >
-          <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-            <path d="M12.5 15L7.5 10L12.5 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-        </button>
+      <div className="flex items-center justify-between gap-4 px-8 pt-8 pb-6">
         <h1 className="text-2xl font-black uppercase tracking-[-1px]">
           Configuracion
         </h1>
+        <CloseButton onClick={onBack} />
       </div>
 
       <div className="flex-1 overflow-y-auto px-8 pb-8">

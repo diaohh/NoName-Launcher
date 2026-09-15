@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { getModpacks, getModpack, FIRESTORE_TIMEOUT } from '../services/firestoreService'
 import { ipc } from '../services/ipcClient'
+import { preloadImages } from '../services/imagePreload'
 import { useStatus } from '../contexts/StatusContext'
 
 const NETWORK_MESSAGE = 'No se ha podido conectar con el catalogo de modpacks. Comprueba tu conexion a internet.'
@@ -49,6 +50,8 @@ export function useServers(accountUsername) {
         setServers(modpacks)
         setError(null)
         setLoading(false)
+        // Icons are not listed: the sidebar renders them as soon as the list arrives.
+        preloadImages(modpacks.flatMap(m => [m.banner, m.logo]))
       })
       .catch(err => {
         if (ignore) return
