@@ -1,38 +1,31 @@
-## Resumen
+## Changes
 
-<!-- Qué cambia y por qué, en una o dos frases. -->
+<!-- One line per change. Delete the groups that do not apply. -->
 
-## Tipo de cambio
-
-- [ ] Funcionalidad nueva
-- [ ] Corrección de bug
-- [ ] Refactor / limpieza
-- [ ] Documentación
-- [ ] Build / dependencias
-
-## Cambios
-
-<!-- Una línea por cambio relevante. -->
+### Added
 
 -
 
-## Cómo probar
+### Changed
 
-<!-- Pasos para verificarlo a mano. -->
+-
 
-1.
+### Fixed
 
-## Capturas
+-
 
-<!-- Opcional: antes / después si hay cambios visuales. -->
+### Refactor
 
-## Checklist
+-
 
-- [ ] `pnpm lint` sin errores
-- [ ] `pnpm build` compila
-- [ ] Probado a mano en `pnpm dev`
-- [ ] `TODO.md` / ADR actualizados si aplica
+### Removed
 
-## Notas
+-
 
-<!-- Opcional: riesgos, pendientes o decisiones que conviene dejar por escrito. -->
+## Screenshots
+
+<!-- Optional: before / after for visual changes. Delete if not needed. -->
+
+## Notes
+
+<!-- Only if needed: risks, follow-ups or decisions worth recording. Delete otherwise. -->
