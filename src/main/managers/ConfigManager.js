@@ -14,6 +14,15 @@ const logger = Logger.getLogger('ConfigManager')
  */
 const CONFIG_VERSION = 1
 
+const isPlainObject = (value) => value != null && typeof value === 'object' && !Array.isArray(value)
+
+/** Whether a stored value can stand in for its default. See `validateConfig`. */
+function hasExpectedType(actual, expected) {
+    if (expected === null) return actual === null || typeof actual === 'string'
+    if (typeof expected === 'number') return typeof actual === 'number' && Number.isFinite(actual)
+    return typeof actual === typeof expected
+}
+
 class ConfigManager {
     static config = null
     static configPath = null
@@ -149,6 +158,8 @@ class ConfigManager {
         let parsed
         try {
             parsed = JSON.parse(fs.readFileSync(this.configPath, 'UTF-8'))
+            // `null`, an array or a bare string parse fine and are still not a config.
+            if (!isPlainObject(parsed)) throw new Error('config.json does not hold an object')
         } catch (err) {
             this.quarantineConfig(err)
             this.config = this.getDefaultConfig()
@@ -192,6 +203,16 @@ class ConfigManager {
         let rewriteNeeded = false
 
         for (const [uuid, account] of Object.entries(database)) {
+            // Only possible in a hand-edited file. Dropping the entry costs that account's
+            // session and nothing else, which is the same deal as an undecryptable one.
+            if (!isPlainObject(account)) {
+                logger.warn(`Dropping a malformed account entry (${uuid})`)
+                delete database[uuid]
+                if (this.config.selectedAccount === uuid) this.config.selectedAccount = null
+                rewriteNeeded = true
+                continue
+            }
+
             if (account.secrets == null) {
                 // A v0 account: plaintext on disk, encrypted by the next save.
                 rewriteNeeded = true
@@ -363,22 +384,41 @@ class ConfigManager {
         return config
     }
 
+    /**
+     * Merges the defaults into a parsed config and repairs every value of the wrong type.
+     *
+     * The file is hand-editable and survives across releases, so valid JSON is not the same as
+     * a usable config: `"settings": "x"` used to make the merge itself throw, and a string
+     * where a number belongs reached the launch command. Each key is checked against the type
+     * of its default. A `null` default means "a string or nothing" (paths, selected ids). A
+     * mismatch falls back to the default for that key alone, never for the whole file.
+     */
     static validateConfig(config) {
         const defaults = this.getDefaultConfig()
 
-        const merge = (target, source) => {
+        const merge = (target, source, parentKey) => {
             for (const key in source) {
-                if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
-                    target[key] = target[key] || {}
-                    merge(target[key], source[key])
-                } else if (target[key] === undefined) {
-                    target[key] = source[key]
+                const expected = source[key]
+                const actual = target[key]
+                const keyPath = parentKey ? `${parentKey}.${key}` : key
+
+                if (isPlainObject(expected)) {
+                    if (!isPlainObject(actual)) {
+                        if (actual !== undefined) logger.warn(`Config: "${keyPath}" is not an object, resetting it`)
+                        target[key] = {}
+                    }
+                    merge(target[key], expected, keyPath)
+                } else if (actual === undefined) {
+                    target[key] = expected
+                } else if (!hasExpectedType(actual, expected)) {
+                    logger.warn(`Config: "${keyPath}" has an invalid value, resetting it to the default`)
+                    target[key] = expected
                 }
             }
             return target
         }
 
-        return merge(config, defaults)
+        return merge(config, defaults, '')
     }
 
     static getConfig() { return this.config }
