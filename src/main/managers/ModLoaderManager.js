@@ -5,6 +5,7 @@ import crypto from 'crypto'
 import ConfigManager from './ConfigManager'
 import Logger from '../utils/Logger'
 import { resolveInside } from '../utils/PathUtils'
+import { fetchWithTimeout } from '../utils/HttpUtils'
 import { ERROR_CODE } from '../../shared/errorCodes'
 
 const logger = Logger.getLogger('ModLoaderManager')
@@ -73,7 +74,7 @@ class ModLoaderManager {
             if (progressCallback) progressCallback({ current: 30, total: 100, message: 'Descargando perfil de Fabric...' })
             logger.info('Fetching Fabric profile:', profileUrl)
 
-            const response = await fetch(profileUrl)
+            const response = await fetchWithTimeout(profileUrl, 'el perfil de Fabric')
             if (!response.ok) {
                 throw new Error(`Fabric Meta respondio ${response.status} para Fabric ${loader.version} / Minecraft ${minecraftVersion}`)
             }

@@ -4,6 +4,7 @@ import crypto from 'crypto'
 import ConfigManager from './ConfigManager'
 import Logger from '../utils/Logger'
 import { isSafeRelativePath } from '../utils/PathUtils'
+import { fetchWithTimeout } from '../utils/HttpUtils'
 import { ERROR_CODE } from '../../shared/errorCodes'
 
 const logger = Logger.getLogger('ManifestManager')
@@ -107,7 +108,7 @@ class ManifestManager {
 
         logger.info('Fetching manifest:', ref.url)
 
-        const response = await fetch(ref.url, { cache: 'no-store' })
+        const response = await fetchWithTimeout(ref.url, 'el manifest del modpack', { cache: 'no-store' })
         if (!response.ok) {
             throw new Error(`No se pudo descargar el manifest (HTTP ${response.status}) desde ${ref.url}`)
         }
