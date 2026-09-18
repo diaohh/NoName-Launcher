@@ -60,3 +60,9 @@ rewritten anyway and the reformat rides along with a change that has its own rea
   asked to make in a commit whose stated purpose was "add a linter".
 - **No indentation rule at all.** *(reconstructed)* Costs nothing today and drifts, which is how
   the split arose in the first place.
+
+## Addendum (2026-09-17)
+
+The `DynamicBackground.jsx` warning mentioned above is gone: the effect it pointed at was
+removed when the banner started loading through a hidden `<img>`, and the repo is at 0 errors
+and 0 warnings.

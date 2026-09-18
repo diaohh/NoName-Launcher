@@ -1,13 +1,13 @@
 # NoNameLauncher
 
-A custom Minecraft launcher built with Electron, React, and Tailwind CSS. Features Microsoft authentication, Firestore-based modpack distribution with per-user access control, and automatic Java management.
+A custom Minecraft launcher built with Electron, React, and Tailwind CSS. Features Microsoft authentication, Firestore-based modpack distribution with per-user visibility lists, and automatic Java management.
 
 <!-- ![NoNameLauncher Screenshot](docs/screenshot.png) -->
 
 ## Features
 
 - **Microsoft Authentication** — Full OAuth flow with automatic token refresh
-- **Modpack Distribution** — Managed via Firebase Firestore with per-user allow lists
+- **Modpack Distribution** — Catalogue in Firebase Firestore, files on a CDN verified by sha256. Per-user visibility lists hide packs in the UI; they are **not** access control (see below)
 - **Automatic Java Management** — Reads the required Java version from the Minecraft manifest, reuses a compatible JVM if one is installed, downloads it otherwise
 - **Fabric Support** — Loader profile resolved from the Fabric Meta API. Forge is implemented but not yet reachable end to end (see the loader table below)
 - **Per-Modpack Settings** — RAM allocation defined per modpack, used by default; a launcher-wide slider takes over when the per-modpack override is switched off in Settings
@@ -95,7 +95,9 @@ A custom Minecraft launcher built with Electron, React, and Tailwind CSS. Featur
    | `name` | string | Display name |
    | `description` | string | Shown under the title on the home screen |
    | `minecraftVersion` | string | **Display only.** The manifest is authoritative for launching |
-   | `icon` / `banner` | string (URL) | Sidebar icon and background image |
+   | `icon` | string (URL) | Sidebar icon |
+   | `banner` | string (URL) | Full-window background. **Art only, no text**: it is centred on the window and cropped, so a title drawn into it never lines up with the play button |
+   | `logo` | string (URL) | Optional transparent title image, centred on the play button's axis |
    | `isPublic` | boolean | Must be `true` to be queryable |
    | `enabled` | boolean | Toggle modpack visibility |
    | `usersAllowed` | string[] | Minecraft **usernames** allowed to see the modpack |
@@ -107,8 +109,12 @@ A custom Minecraft launcher built with Electron, React, and Tailwind CSS. Featur
    | `manifest.hash` | string | sha256 of that file; the launcher refuses a mismatch |
    | `manifest.version` | string | Pack version, informational |
 
-   `manifest.hash` is the only field that changes when a modpack is updated, which makes
-   publishing atomic: nothing is visible to players until it is flipped.
+   Players only pick up a new manifest once `manifest.hash` is flipped. The files themselves,
+   however, are overwritten in place on the CDN during the upload, so **publishing is only
+   safe while `maintenance` is `true`, and rolling back means re-uploading the old version** —
+   pointing the hash back is not enough. See "Publishing and rollback" in
+   [docs/manifest.md](docs/manifest.md) and the proposed fix in
+   [ADR-0012](docs/adr/0012-content-addressed-pack-files.md).
 
    > **`usersAllowed` is not access control.** It is filtered client-side, so anyone with
    > the bundle can read the whole catalogue. Enforcing it in Security Rules is not
@@ -192,6 +198,16 @@ Two conventions are easy to break from outside and are worth reading before a fi
   `pnpm dev` fails.
 - `resources/icon.png` is referenced by `electron-builder.yml` and by the main process but is
   not in the repo yet, so `pnpm package` fails until it is added.
+- **Packaged builds write no log file.** The logger is helios-core's `LoggerUtil`, which only
+  has a console transport; run the app from a terminal to see its output.
+- **`MICROSOFT_CLIENT_ID` in a packaged build is the literal fallback in the source**, not your
+  `.env` value, because `.env` is not shipped. Check that the fallback in `AuthManager.js` and
+  `windows/msftAuth.js` is the Azure app you expect before packaging.
+- **Development mode is currently detected from environment variables**
+  (`ELECTRON_RENDERER_URL`, `NODE_ENV`), and `dotenv` is loaded in production too. Do not run a
+  packaged build from a folder that holds a development `.env`.
+
+Known gaps and their priority are tracked in [TODO.md](TODO.md).
 
 ## Build & Package
 
