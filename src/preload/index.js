@@ -24,7 +24,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   dialogOpenFolder: (options) => ipcRenderer.invoke('dialog:openFolder', options),
 
   // Shell
-  shellOpenPath: (path) => ipcRenderer.invoke('shell:openPath', path),
+  shellOpenDataDirectory: () => ipcRenderer.invoke('shell:openDataDirectory'),
 
   // Distribution
   distroSetServerData: (data) => ipcRenderer.invoke('distro:setServerData', data),

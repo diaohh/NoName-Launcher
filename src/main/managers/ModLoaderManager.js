@@ -4,6 +4,8 @@ import child_process from 'child_process'
 import crypto from 'crypto'
 import ConfigManager from './ConfigManager'
 import Logger from '../utils/Logger'
+import { resolveInside } from '../utils/PathUtils'
+import { fetchWithTimeout } from '../utils/HttpUtils'
 import { ERROR_CODE } from '../../shared/errorCodes'
 
 const logger = Logger.getLogger('ModLoaderManager')
@@ -31,7 +33,7 @@ class ModLoaderManager {
     }
 
     static versionJsonPath(versionString) {
-        return path.join(ConfigManager.getCommonDirectory(), 'versions', versionString, `${versionString}.json`)
+        return ConfigManager.getVersionJsonPath(versionString)
     }
 
     static isModLoaderInstalled(loader, minecraftVersion) {
@@ -67,24 +69,33 @@ class ModLoaderManager {
 
             if (!loader.version) throw new Error('El manifest no declara la version de Fabric (loader.version)')
 
-            const profileUrl = `${FABRIC_META_URL}/v2/versions/loader/${minecraftVersion}/${loader.version}/profile/json`
+            const profileUrl = `${FABRIC_META_URL}/v2/versions/loader/${encodeURIComponent(minecraftVersion)}/${encodeURIComponent(loader.version)}/profile/json`
 
             if (progressCallback) progressCallback({ current: 30, total: 100, message: 'Descargando perfil de Fabric...' })
             logger.info('Fetching Fabric profile:', profileUrl)
 
-            const response = await fetch(profileUrl)
+            const response = await fetchWithTimeout(profileUrl, 'el perfil de Fabric')
             if (!response.ok) {
                 throw new Error(`Fabric Meta respondio ${response.status} para Fabric ${loader.version} / Minecraft ${minecraftVersion}`)
             }
 
             const profile = await response.json()
-            const versionId = profile.id || this.getVersionString(loader, minecraftVersion)
+
+            // The profile is written under the id the launcher will later look it up by, never
+            // under whatever `id` the response carries: that is network data, and a profile saved
+            // anywhere else would be reinstalled on every launch and never found by the launch.
+            const versionId = this.getVersionString(loader, minecraftVersion)
+            if (profile.id !== versionId) {
+                const error = new Error(`Fabric Meta devolvio el perfil "${profile.id}" y se esperaba "${versionId}"`)
+                error.code = ERROR_CODE.MODLOADER_FAILED
+                throw error
+            }
 
             if (progressCallback) progressCallback({ current: 70, total: 100, message: 'Guardando perfil de Fabric...' })
 
-            const versionDir = path.join(ConfigManager.getCommonDirectory(), 'versions', versionId)
-            await fs.ensureDir(versionDir)
-            await fs.writeJson(path.join(versionDir, `${versionId}.json`), profile, { spaces: 2 })
+            const versionJsonPath = this.versionJsonPath(versionId)
+            await fs.ensureDir(path.dirname(versionJsonPath))
+            await fs.writeJson(versionJsonPath, profile, { spaces: 2 })
 
             logger.info(`Fabric ${loader.version} profile installed for Minecraft ${minecraftVersion}`)
             if (progressCallback) progressCallback({ current: 100, total: 100, message: 'Fabric instalado correctamente' })
@@ -120,7 +131,7 @@ class ModLoaderManager {
                 throw error
             }
 
-            const installerPath = path.join(instanceDir, installerRelPath)
+            const installerPath = resolveInside(instanceDir, installerRelPath)
             if (!fs.existsSync(installerPath)) {
                 throw new Error(`No se encontro el instalador de Forge en: ${installerPath}`)
             }

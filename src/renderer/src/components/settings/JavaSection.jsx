@@ -24,9 +24,15 @@ export default function JavaSection({ settings, onUpdate }) {
         { name: 'All Files', extensions: ['*'] }
       ]
     })
-    if (result) {
+    if (!result) return
+
+    // Main rejects anything that is not a java/javaw executable, so the field only changes
+    // once the path has actually been accepted and stored.
+    try {
+      await ipc.config.setJavaExecutable(result)
       onUpdate('javaExecutable', result)
-      ipc.config.setJavaExecutable(result)
+    } catch (err) {
+      showStatus(err.message || 'No se ha podido guardar la ruta de Java', 'error')
     }
   }
 

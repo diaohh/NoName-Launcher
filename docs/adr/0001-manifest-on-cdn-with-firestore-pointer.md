@@ -58,3 +58,13 @@ Split the data by mutability.
 - **Sign the manifest instead of hashing it.** *(reconstructed)* Real integrity against a compromised CDN, but
   needs key management and a rotation story. The sha256 pointer already closes the practical
   gap, because Firestore is the trusted side of the pair.
+
+## Addendum (2026-09-17)
+
+The first consequence above overstates what was built. The pointer makes the **manifest**
+atomic, but the files are stored by path (`<packId>/files/<path>`) and `publish.mjs` overwrites
+them in place with `rclone sync`. Publishing is therefore safe only while `maintenance` is
+raised, and flipping the pointer back does not roll back, because the old files are gone. The
+decision itself stands; the fix is proposed in
+[ADR-0012](0012-content-addressed-pack-files.md), and `docs/manifest.md` ("Publishing and
+rollback") describes the current behaviour.

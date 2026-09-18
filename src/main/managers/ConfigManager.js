@@ -3,6 +3,7 @@ import path from 'path'
 import os from 'os'
 import { safeStorage } from 'electron'
 import Logger from '../utils/Logger'
+import { resolveInside } from '../utils/PathUtils'
 import { ERROR_CODE } from '../../shared/errorCodes'
 
 const logger = Logger.getLogger('ConfigManager')
@@ -12,6 +13,15 @@ const logger = Logger.getLogger('ConfigManager')
  * A file without the field predates the stamp and is treated as version 0.
  */
 const CONFIG_VERSION = 1
+
+const isPlainObject = (value) => value != null && typeof value === 'object' && !Array.isArray(value)
+
+/** Whether a stored value can stand in for its default. See `validateConfig`. */
+function hasExpectedType(actual, expected) {
+    if (expected === null) return actual === null || typeof actual === 'string'
+    if (typeof expected === 'number') return typeof actual === 'number' && Number.isFinite(actual)
+    return typeof actual === typeof expected
+}
 
 class ConfigManager {
     static config = null
@@ -91,6 +101,19 @@ class ConfigManager {
         return path.join(this.getDataDirectory(), 'common')
     }
 
+    /**
+     * `common/versions/<id>`. The id comes from the manifest or from a downloaded version
+     * JSON (`inheritsFrom`), so it is resolved inside the versions directory rather than
+     * trusted to be a single path segment.
+     */
+    static getVersionDirectory(versionId) {
+        return resolveInside(path.join(this.getCommonDirectory(), 'versions'), versionId)
+    }
+
+    static getVersionJsonPath(versionId) {
+        return path.join(this.getVersionDirectory(versionId), `${versionId}.json`)
+    }
+
     static getDefaultConfig() {
         return {
             version: CONFIG_VERSION,
@@ -128,17 +151,19 @@ class ConfigManager {
         if (!fs.existsSync(this.configPath)) {
             logger.info('Config file not found, creating default...')
             this.config = this.getDefaultConfig()
-            this.save()
+            this.saveAfterLoad()
             return this.config
         }
 
         let parsed
         try {
             parsed = JSON.parse(fs.readFileSync(this.configPath, 'UTF-8'))
+            // `null`, an array or a bare string parse fine and are still not a config.
+            if (!isPlainObject(parsed)) throw new Error('config.json does not hold an object')
         } catch (err) {
             this.quarantineConfig(err)
             this.config = this.getDefaultConfig()
-            this.save()
+            this.saveAfterLoad()
             return this.config
         }
 
@@ -156,7 +181,7 @@ class ConfigManager {
         }
 
         if (diskVersion !== CONFIG_VERSION || rewriteNeeded) {
-            this.save()
+            this.saveAfterLoad()
         }
 
         logger.info('Configuration loaded successfully')
@@ -178,6 +203,16 @@ class ConfigManager {
         let rewriteNeeded = false
 
         for (const [uuid, account] of Object.entries(database)) {
+            // Only possible in a hand-edited file. Dropping the entry costs that account's
+            // session and nothing else, which is the same deal as an undecryptable one.
+            if (!isPlainObject(account)) {
+                logger.warn(`Dropping a malformed account entry (${uuid})`)
+                delete database[uuid]
+                if (this.config.selectedAccount === uuid) this.config.selectedAccount = null
+                rewriteNeeded = true
+                continue
+            }
+
             if (account.secrets == null) {
                 // A v0 account: plaintext on disk, encrypted by the next save.
                 rewriteNeeded = true
@@ -265,16 +300,56 @@ class ConfigManager {
         }
     }
 
+    /**
+     * Writes the config atomically and throws when it cannot.
+     *
+     * The data goes to a temporary file that is flushed to disk and then renamed over
+     * `config.json`, so a crash or a power cut leaves either the old file or the new one —
+     * never a truncated one that the next start would have to quarantine, taking the session
+     * and every setting with it.
+     *
+     * A failure is thrown (`CONFIG_SAVE_FAILED`) rather than logged: a settings screen that
+     * shows a value the disk never received is lying to the player.
+     */
     static save() {
+        const data = JSON.stringify(this.toDiskConfig(), null, 4)
+        const tmpPath = `${this.configPath}.tmp`
+
         try {
-            fs.writeFileSync(
-                this.configPath,
-                JSON.stringify(this.toDiskConfig(), null, 4),
-                'UTF-8'
-            )
-            logger.info('Configuration saved successfully')
+            const fd = fs.openSync(tmpPath, 'w')
+            try {
+                fs.writeFileSync(fd, data, 'utf-8')
+                fs.fsyncSync(fd)
+            } finally {
+                fs.closeSync(fd)
+            }
+            fs.renameSync(tmpPath, this.configPath)
         } catch (err) {
+            try {
+                fs.removeSync(tmpPath)
+            } catch {
+                // Nothing more to do; the next save overwrites it.
+            }
             logger.error('Failed to save config', err)
+
+            const error = new Error('No se ha podido guardar la configuracion. Comprueba que hay espacio en disco y permiso de escritura.')
+            error.code = ERROR_CODE.CONFIG_SAVE_FAILED
+            error.cause = err
+            throw error
+        }
+
+        logger.info('Configuration saved successfully')
+    }
+
+    /**
+     * `load()` rewrites the file after a migration or a reset, but the launcher must still
+     * open when that write fails — a read-only disk is reported by the next explicit save.
+     */
+    static saveAfterLoad() {
+        try {
+            this.save()
+        } catch {
+            // Already logged by save().
         }
     }
 
@@ -309,22 +384,41 @@ class ConfigManager {
         return config
     }
 
+    /**
+     * Merges the defaults into a parsed config and repairs every value of the wrong type.
+     *
+     * The file is hand-editable and survives across releases, so valid JSON is not the same as
+     * a usable config: `"settings": "x"` used to make the merge itself throw, and a string
+     * where a number belongs reached the launch command. Each key is checked against the type
+     * of its default. A `null` default means "a string or nothing" (paths, selected ids). A
+     * mismatch falls back to the default for that key alone, never for the whole file.
+     */
     static validateConfig(config) {
         const defaults = this.getDefaultConfig()
 
-        const merge = (target, source) => {
+        const merge = (target, source, parentKey) => {
             for (const key in source) {
-                if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
-                    target[key] = target[key] || {}
-                    merge(target[key], source[key])
-                } else if (target[key] === undefined) {
-                    target[key] = source[key]
+                const expected = source[key]
+                const actual = target[key]
+                const keyPath = parentKey ? `${parentKey}.${key}` : key
+
+                if (isPlainObject(expected)) {
+                    if (!isPlainObject(actual)) {
+                        if (actual !== undefined) logger.warn(`Config: "${keyPath}" is not an object, resetting it`)
+                        target[key] = {}
+                    }
+                    merge(target[key], expected, keyPath)
+                } else if (actual === undefined) {
+                    target[key] = expected
+                } else if (!hasExpectedType(actual, expected)) {
+                    logger.warn(`Config: "${keyPath}" has an invalid value, resetting it to the default`)
+                    target[key] = expected
                 }
             }
             return target
         }
 
-        return merge(config, defaults)
+        return merge(config, defaults, '')
     }
 
     static getConfig() { return this.config }
@@ -399,7 +493,11 @@ class ConfigManager {
      * restores the default location.
      */
     static setDataDirectory(directory) {
-        if (directory != null && !this.isUsableDataDirectory(directory)) {
+        // A relative path would resolve against whatever the working directory happens to be.
+        const isValid = directory == null
+            || (typeof directory === 'string' && path.isAbsolute(directory) && this.isUsableDataDirectory(directory))
+
+        if (!isValid) {
             const error = new Error('No se puede escribir en esa carpeta. Elige otra.')
             error.code = ERROR_CODE.CONFIG_INVALID_DATA_DIR
             throw error

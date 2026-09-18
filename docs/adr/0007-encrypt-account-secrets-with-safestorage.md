@@ -58,3 +58,12 @@ so a single parse error silently wiped every setting the player had.
 - **Store nothing and log in every launch.** The safest option, and the one the no-keyring
   path actually degrades to — but as the default it makes the launcher unpleasant for the
   common case where `safeStorage` works.
+
+## Addendum (2026-09-17)
+
+- The list of terminal codes lives in `src/shared/errorCodes.js` as `TERMINAL_AUTH_CODES`
+  (checked with `isTerminalAuthCode`), not `TERMINAL_CODES` as written above.
+- The Minecraft `accessToken` does leave the main process in one place: it is passed to the
+  game as `--accessToken` on the JVM command line, which other local processes of the same user
+  can read. That is inherent to Mojang's argument format and cannot be avoided by a launcher;
+  the guarantee of this ADR is about the renderer and the disk, not the game process.

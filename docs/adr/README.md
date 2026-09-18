@@ -29,6 +29,11 @@ Copy [`0000-template.md`](0000-template.md), take the next number, name the file
 kebab-case. Status is `Proposed`, `Accepted`, `Stand-by` or `Superseded by NNNN`. Add the row
 to the table below in the same commit.
 
+A **factual correction** that leaves the decision standing (a consequence that turned out
+wrong, a renamed constant, a warning that no longer exists) goes in a dated `## Addendum`
+section at the end of the file. The original text is never edited. A change to the decision
+itself is still a new ADR that supersedes the old one.
+
 Alternatives marked **(reconstructed)** were not weighed when the decision was made; they were
 written down afterwards as plausible roads not taken. Everything unmarked was a real option at
 the time. ADRs 0001–0007 were backfilled on 2026-09-01 from the prose already in `CLAUDE.md`
@@ -50,6 +55,9 @@ made — but only the marked alternatives distinguish what was actually rejected
 | [0009](0009-no-offline-mode.md) | No offline mode: report the network failure instead | Accepted |
 | [0010](0010-sandboxed-windows-and-a-webrequest-csp.md) | Sandbox both windows and apply the CSP through `webRequest` | Accepted |
 | [0011](0011-enforce-indentation-per-area.md) | Enforce the indentation each area already uses | Accepted |
+| [0012](0012-content-addressed-pack-files.md) | Store pack files in the bucket by content hash | Proposed |
+
+ADRs 0001, 0007 and 0011 carry an addendum from the 2026-09-17 audit.
 
 ## Not written yet
 

@@ -3,6 +3,9 @@ import fs from 'fs-extra'
 import crypto from 'crypto'
 import ConfigManager from './ConfigManager'
 import Logger from '../utils/Logger'
+import { isSafeRelativePath } from '../utils/PathUtils'
+import { fetchWithTimeout } from '../utils/HttpUtils'
+import { ERROR_CODE } from '../../shared/errorCodes'
 
 const logger = Logger.getLogger('ManifestManager')
 
@@ -59,6 +62,21 @@ class ManifestManager {
                 throw new Error(`Entrada de manifest invalida: ${JSON.stringify(file)}`)
             }
         }
+
+        // Every path below is joined onto the instance directory, for writing or deleting.
+        // A hash only proves the manifest is the published one, so its paths are checked too.
+        const paths = [
+            ...manifest.files.map(file => file.path),
+            ...(manifest.policies || []).map(rule => rule?.path?.replace(/\/+$/, '')),
+            ...(manifest.loader?.installer ? [manifest.loader.installer.path] : [])
+        ]
+
+        const unsafe = paths.find(relativePath => !isSafeRelativePath(relativePath))
+        if (unsafe !== undefined) {
+            const error = new Error(`El manifest contiene una ruta no permitida: ${JSON.stringify(unsafe)}`)
+            error.code = ERROR_CODE.MANIFEST_INVALID
+            throw error
+        }
     }
 
     /**
@@ -90,7 +108,7 @@ class ManifestManager {
 
         logger.info('Fetching manifest:', ref.url)
 
-        const response = await fetch(ref.url, { cache: 'no-store' })
+        const response = await fetchWithTimeout(ref.url, 'el manifest del modpack', { cache: 'no-store' })
         if (!response.ok) {
             throw new Error(`No se pudo descargar el manifest (HTTP ${response.status}) desde ${ref.url}`)
         }

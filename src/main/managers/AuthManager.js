@@ -44,6 +44,7 @@ class AuthManager {
     static onSessionExpired = null
     static resumeListener = null
     static retryAttempt = 0
+    static validationInFlight = null
 
     static authError(code, message, cause) {
         const error = new Error(message)
@@ -252,8 +253,22 @@ class AuthManager {
      * Returns `{ ok: true }` or `{ ok: false, code, message }`. A transient failure must
      * never cost the player their account, so the account is removed only for a terminal
      * code.
+     *
+     * Single-flight: the scheduler, a resume from sleep and a launch can all ask at once, and
+     * each would otherwise spend the same refresh token. Microsoft rotates it, so the second
+     * refresh races the first, the last write wins, and an `invalid_grant` from the loser is
+     * terminal. Concurrent callers share the validation already in progress instead.
      */
-    static async validateSelectedMicrosoftAccount() {
+    static validateSelectedMicrosoftAccount() {
+        if (!this.validationInFlight) {
+            this.validationInFlight = this.runAccountValidation().finally(() => {
+                this.validationInFlight = null
+            })
+        }
+        return this.validationInFlight
+    }
+
+    static async runAccountValidation() {
         const uuid = ConfigManager.getSelectedAccount()
         if (!uuid) {
             logger.warn('No account selected')
@@ -287,7 +302,13 @@ class AuthManager {
 
             if (this.isTerminalError(code)) {
                 logger.warn(`Refresh failed with a terminal error (${code}), logging out user`)
-                this.removeAccount(uuid)
+                try {
+                    this.removeAccount(uuid)
+                } catch (saveErr) {
+                    // The account is already gone from memory, which is what logs the player
+                    // out; a disk that refuses the write must not turn this into a crash.
+                    logger.error('The account was dropped but config.json could not be rewritten', saveErr)
+                }
             } else {
                 logger.warn(`Refresh failed with a recoverable error (${code}), keeping the account`)
             }
