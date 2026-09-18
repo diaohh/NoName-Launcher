@@ -203,9 +203,9 @@ Two conventions are easy to break from outside and are worth reading before a fi
 - **`MICROSOFT_CLIENT_ID` in a packaged build is the literal fallback in the source**, not your
   `.env` value, because `.env` is not shipped. Check that the fallback in `AuthManager.js` and
   `windows/msftAuth.js` is the Azure app you expect before packaging.
-- **Development mode is currently detected from environment variables**
-  (`ELECTRON_RENDERER_URL`, `NODE_ENV`), and `dotenv` is loaded in production too. Do not run a
-  packaged build from a folder that holds a development `.env`.
+- **`.env` and the development behaviour only exist unpackaged.** `src/main/env.js` loads
+  `.env` only when `app.isPackaged` is false, and the dev renderer URL, DevTools and the
+  relaxed CSP are gated on the same check.
 
 Known gaps and their priority are tracked in [TODO.md](TODO.md).
 

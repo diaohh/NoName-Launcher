@@ -1,4 +1,4 @@
-import 'dotenv/config'
+import './env'
 import { app, BrowserWindow, session, shell } from 'electron'
 import path from 'path'
 import { registerAllIPC } from './ipc'
@@ -6,8 +6,11 @@ import ConfigManager from './managers/ConfigManager'
 
 let mainWindow
 
-const rendererUrl = process.env.ELECTRON_RENDERER_URL
-const isDev = process.env.NODE_ENV === 'development' || Boolean(rendererUrl)
+// Development behaviour — a remote renderer URL, DevTools, the relaxed CSP — is decided by
+// `app.isPackaged` first. Environment variables only choose between dev variants, so no
+// variable set on a player's machine can switch an installed launcher into any of them.
+const rendererUrl = app.isPackaged ? undefined : process.env.ELECTRON_RENDERER_URL
+const isDev = !app.isPackaged && (process.env.NODE_ENV === 'development' || Boolean(rendererUrl))
 
 /**
  * Content Security Policy for the renderer.
