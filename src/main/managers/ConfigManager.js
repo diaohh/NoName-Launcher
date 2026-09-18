@@ -493,7 +493,11 @@ class ConfigManager {
      * restores the default location.
      */
     static setDataDirectory(directory) {
-        if (directory != null && !this.isUsableDataDirectory(directory)) {
+        // A relative path would resolve against whatever the working directory happens to be.
+        const isValid = directory == null
+            || (typeof directory === 'string' && path.isAbsolute(directory) && this.isUsableDataDirectory(directory))
+
+        if (!isValid) {
             const error = new Error('No se puede escribir en esa carpeta. Elige otra.')
             error.code = ERROR_CODE.CONFIG_INVALID_DATA_DIR
             throw error

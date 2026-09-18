@@ -1,4 +1,6 @@
 import os from 'os'
+import fs from 'fs'
+import path from 'path'
 import { dialog, shell } from 'electron'
 import { Channels } from './channels'
 import { handle } from './result'
@@ -19,6 +21,48 @@ function maxAllowedRamMB() {
   const totalMB = Math.floor(os.totalmem() / 1024 / 1024)
   const capped = Math.floor((totalMB * 0.75) / RAM_STEP_MB) * RAM_STEP_MB
   return Math.max(RAM_MIN_MB, capped)
+}
+
+// From the smallest window Minecraft lays out sanely to the largest texture a GPU is expected
+// to take. The settings screen enforces the minimum too, but only main can be trusted.
+const GAME_WIDTH = { min: 640, max: 16384 }
+const GAME_HEIGHT = { min: 480, max: 16384 }
+
+/**
+ * Everything below arrives from the renderer and ends up in config.json and, from there, in
+ * the JVM command line. The settings screen only sends sane values, but it is the side an
+ * attacker reaches first, so each handler checks its own input instead of trusting the UI.
+ */
+function invalidSetting(message) {
+  const error = new Error(message)
+  error.code = ERROR_CODE.CONFIG_INVALID_VALUE
+  return error
+}
+
+function requireBoolean(value, label) {
+  if (typeof value !== 'boolean') throw invalidSetting(`${label}: se esperaba si o no.`)
+  return value
+}
+
+function requireInteger(value, { min, max }, label) {
+  if (!Number.isInteger(value) || value < min || value > max) {
+    throw invalidSetting(`${label} debe ser un numero entero entre ${min} y ${max}.`)
+  }
+  return value
+}
+
+/** An existing file named java or javaw — the only thing the launcher will ever spawn. */
+function requireJavaExecutable(executable) {
+  if (executable === null) return null
+
+  const isJava = typeof executable === 'string'
+    && path.isAbsolute(executable)
+    && /^javaw?(\.exe)?$/i.test(path.basename(executable))
+    && fs.existsSync(executable)
+    && fs.statSync(executable).isFile()
+
+  if (!isJava) throw invalidSetting('Selecciona el ejecutable de Java (java o javaw) de una instalacion existente.')
+  return executable
 }
 
 export function registerConfigIPC(mainWindow) {
@@ -45,18 +89,21 @@ export function registerConfigIPC(mainWindow) {
     }
   })
 
-  handle(Channels.CONFIG_SET_JAVA_EXECUTABLE, async (_event, path) => {
-    ConfigManager.setJavaExecutable(path)
+  handle(Channels.CONFIG_SET_JAVA_EXECUTABLE, async (_event, executable) => {
+    ConfigManager.setJavaExecutable(requireJavaExecutable(executable))
     ConfigManager.save()
   })
 
   handle(Channels.CONFIG_SET_JAVA_AUTO_DOWNLOAD, async (_event, value) => {
-    ConfigManager.setJavaAutoDownload(value)
+    ConfigManager.setJavaAutoDownload(requireBoolean(value, 'Descarga automatica de Java'))
     ConfigManager.save()
   })
 
   handle(Channels.CONFIG_SET_MAX_RAM, async (_event, megabytes) => {
-    const clamped = Math.min(Math.max(Math.round(megabytes) || RAM_MIN_MB, RAM_MIN_MB), maxAllowedRamMB())
+    if (typeof megabytes !== 'number' || !Number.isFinite(megabytes)) {
+      throw invalidSetting('La memoria asignada debe ser un numero de megabytes.')
+    }
+    const clamped = Math.min(Math.max(Math.round(megabytes), RAM_MIN_MB), maxAllowedRamMB())
     ConfigManager.setMaxRAM(ConfigManager.formatRamFromMB(clamped))
     ConfigManager.save()
 
@@ -69,22 +116,22 @@ export function registerConfigIPC(mainWindow) {
   })
 
   handle(Channels.CONFIG_SET_USE_MODPACK_RAM, async (_event, value) => {
-    ConfigManager.setUseModpackRam(value)
+    ConfigManager.setUseModpackRam(requireBoolean(value, 'Usar la RAM del modpack'))
     ConfigManager.save()
   })
 
   handle(Channels.CONFIG_SET_GAME_WIDTH, async (_event, width) => {
-    ConfigManager.setGameWidth(width)
+    ConfigManager.setGameWidth(requireInteger(width, GAME_WIDTH, 'El ancho'))
     ConfigManager.save()
   })
 
   handle(Channels.CONFIG_SET_GAME_HEIGHT, async (_event, height) => {
-    ConfigManager.setGameHeight(height)
+    ConfigManager.setGameHeight(requireInteger(height, GAME_HEIGHT, 'El alto'))
     ConfigManager.save()
   })
 
   handle(Channels.CONFIG_SET_FULLSCREEN, async (_event, value) => {
-    ConfigManager.setFullscreen(value)
+    ConfigManager.setFullscreen(requireBoolean(value, 'Pantalla completa'))
     ConfigManager.save()
   })
 
