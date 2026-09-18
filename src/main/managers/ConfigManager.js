@@ -3,6 +3,7 @@ import path from 'path'
 import os from 'os'
 import { safeStorage } from 'electron'
 import Logger from '../utils/Logger'
+import { resolveInside } from '../utils/PathUtils'
 import { ERROR_CODE } from '../../shared/errorCodes'
 
 const logger = Logger.getLogger('ConfigManager')
@@ -89,6 +90,19 @@ class ConfigManager {
 
     static getCommonDirectory() {
         return path.join(this.getDataDirectory(), 'common')
+    }
+
+    /**
+     * `common/versions/<id>`. The id comes from the manifest or from a downloaded version
+     * JSON (`inheritsFrom`), so it is resolved inside the versions directory rather than
+     * trusted to be a single path segment.
+     */
+    static getVersionDirectory(versionId) {
+        return resolveInside(path.join(this.getCommonDirectory(), 'versions'), versionId)
+    }
+
+    static getVersionJsonPath(versionId) {
+        return path.join(this.getVersionDirectory(versionId), `${versionId}.json`)
     }
 
     static getDefaultConfig() {

@@ -3,6 +3,8 @@ import fs from 'fs-extra'
 import crypto from 'crypto'
 import ConfigManager from './ConfigManager'
 import Logger from '../utils/Logger'
+import { isSafeRelativePath } from '../utils/PathUtils'
+import { ERROR_CODE } from '../../shared/errorCodes'
 
 const logger = Logger.getLogger('ManifestManager')
 
@@ -58,6 +60,21 @@ class ManifestManager {
             if (!file.path || !file.hash || typeof file.size !== 'number') {
                 throw new Error(`Entrada de manifest invalida: ${JSON.stringify(file)}`)
             }
+        }
+
+        // Every path below is joined onto the instance directory, for writing or deleting.
+        // A hash only proves the manifest is the published one, so its paths are checked too.
+        const paths = [
+            ...manifest.files.map(file => file.path),
+            ...(manifest.policies || []).map(rule => rule?.path?.replace(/\/+$/, '')),
+            ...(manifest.loader?.installer ? [manifest.loader.installer.path] : [])
+        ]
+
+        const unsafe = paths.find(relativePath => !isSafeRelativePath(relativePath))
+        if (unsafe !== undefined) {
+            const error = new Error(`El manifest contiene una ruta no permitida: ${JSON.stringify(unsafe)}`)
+            error.code = ERROR_CODE.MANIFEST_INVALID
+            throw error
         }
     }
 

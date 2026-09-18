@@ -69,9 +69,10 @@ Format notes:
   content moves.
 - `path` is **relative to the instance and must stay inside it**: no leading `/`, no drive
   letter, no `\`, no `..` segment. The generator produces such paths by construction, since it
-  walks `files/`. The launcher only enforces this when **deleting** orphans today, not when
-  downloading, so a hand-edited manifest can write outside the instance. Checking it on every
-  entry is a P1 item in `TODO.md`.
+  walks `files/`. The launcher rejects a manifest with any other shape (`MANIFEST_INVALID`)
+  before touching a file. That covers `files[].path`, `policies[].path` and
+  `loader.installer.path`, and every write or delete is also resolved inside the instance
+  (`PathUtils.resolveInside`).
 - The manifest hash is the sha256 of the **bytes** of `manifest.json`, written as UTF-8 with no
   BOM. The launcher currently hashes the decoded text, which gives the same result only for
   that encoding, so do not save the file with a BOM.

@@ -4,6 +4,8 @@ import ManifestManager from './ManifestManager'
 import Logger from '../utils/Logger'
 import { hashFile, validateLocalFile } from '../utils/FileUtils'
 import { compileIgnore, resolvePolicy, strictRoots } from '../utils/PackPolicy'
+import { isSafeRelativePath, resolveInside } from '../utils/PathUtils'
+import { ERROR_CODE } from '../../shared/errorCodes'
 import path from 'path'
 import fs from 'fs-extra'
 
@@ -29,6 +31,8 @@ class DistributionManager {
      * everything about files and the mod loader now comes from the manifest.
      */
     static setServerData(serverData) {
+        // The id becomes a directory name, so it is checked before anything is stored.
+        this.instanceDirFor(serverData?.id)
         this.selectedServer = { rawServer: serverData }
         logger.info('Server data set from Firestore:', serverData.name)
         ConfigManager.setSelectedServer(serverData.id)
@@ -39,7 +43,20 @@ class DistributionManager {
     static getSelectedServer() { return this.selectedServer }
 
     static getInstanceDir(server) {
-        return path.join(ConfigManager.getInstanceDirectory(), server.rawServer.id)
+        return this.instanceDirFor(server.rawServer.id)
+    }
+
+    /**
+     * `instances/<id>`. The id arrives from the renderer (it is the Firestore document id),
+     * so it must be exactly one safe path segment.
+     */
+    static instanceDirFor(id) {
+        if (typeof id !== 'string' || id.includes('/') || !isSafeRelativePath(id)) {
+            const error = new Error(`El identificador del modpack no es valido: ${JSON.stringify(id)}`)
+            error.code = ERROR_CODE.MODPACK_INVALID
+            throw error
+        }
+        return resolveInside(ConfigManager.getInstanceDirectory(), id)
     }
 
     // ------------------------------------------------------------------- state
@@ -102,7 +119,7 @@ class DistributionManager {
                 })
             }
 
-            const filePath = path.join(instanceDir, entry.path)
+            const filePath = resolveInside(instanceDir, entry.path)
 
             if (!fs.existsSync(filePath)) {
                 toDownload.push(entry)
@@ -158,7 +175,7 @@ class DistributionManager {
         const orphans = []
 
         for (const root of strictRoots(manifest.policies)) {
-            const rootDir = path.join(instanceDir, root)
+            const rootDir = resolveInside(instanceDir, root)
             if (!fs.existsSync(rootDir) || !fs.statSync(rootDir).isDirectory()) continue
 
             for (const relPath of this.walk(rootDir, instanceDir)) {
@@ -194,9 +211,11 @@ class DistributionManager {
         const state = { ...plan.state }
 
         for (const relPath of plan.toDelete) {
-            const filePath = path.join(instanceDir, relPath)
             // Never step outside the instance, whatever the manifest claims.
-            if (!filePath.startsWith(instanceDir + path.sep)) {
+            let filePath
+            try {
+                filePath = resolveInside(instanceDir, relPath)
+            } catch {
                 logger.warn(`Refusing to delete outside the instance: ${relPath}`)
                 continue
             }
@@ -216,7 +235,7 @@ class DistributionManager {
                 algo: HashAlgo.SHA256,
                 size: entry.size,
                 url: ManifestManager.fileUrl(baseUrl, entry.path),
-                path: path.join(instanceDir, entry.path)
+                path: resolveInside(instanceDir, entry.path)
             }))
 
             const totalSize = getExpectedDownloadSize(downloads)

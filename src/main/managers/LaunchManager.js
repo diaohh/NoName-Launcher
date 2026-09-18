@@ -13,6 +13,7 @@ import MinecraftDownloadManager from './MinecraftDownloadManager'
 import Logger from '../utils/Logger'
 import { validateLocalFile } from '../utils/FileUtils'
 import { mavenToRelativePath, mavenToUrl } from '../utils/MavenUtils'
+import { resolveInside } from '../utils/PathUtils'
 import { ERROR_CODE } from '../../shared/errorCodes'
 
 const logger = Logger.getLogger('LaunchManager')
@@ -240,7 +241,7 @@ class LaunchManager {
         try {
             const commonDir = ConfigManager.getCommonDirectory()
             const librariesDir = path.join(commonDir, 'libraries')
-            const versionJsonPath = path.join(commonDir, 'versions', versionString, `${versionString}.json`)
+            const versionJsonPath = ConfigManager.getVersionJsonPath(versionString)
 
             if (!fs.existsSync(versionJsonPath)) {
                 logger.warn(`Version JSON not found for ${versionString}, skipping`)
@@ -256,7 +257,7 @@ class LaunchManager {
                 const artifact = this.resolveLibraryArtifact(lib)
                 if (!artifact) continue
 
-                const libPath = path.join(librariesDir, artifact.relativePath)
+                const libPath = resolveInside(librariesDir, artifact.relativePath)
 
                 if (await validateLocalFile(libPath, HashAlgo.SHA1, artifact.sha1)) continue
 
@@ -307,7 +308,7 @@ class LaunchManager {
     }
 
     static async readVersionJson(versionId) {
-        const versionJsonPath = path.join(ConfigManager.getCommonDirectory(), 'versions', versionId, `${versionId}.json`)
+        const versionJsonPath = ConfigManager.getVersionJsonPath(versionId)
         if (!fs.existsSync(versionJsonPath)) {
             const error = new Error(`Falta el manifiesto de la version ${versionId}. Vuelve a lanzar para descargarlo.`)
             error.code = ERROR_CODE.MANIFEST_INVALID
@@ -400,7 +401,7 @@ class LaunchManager {
         }
 
         const commonDir = ConfigManager.getCommonDirectory()
-        const gameDir = server ? path.join(ConfigManager.getInstanceDirectory(), server.rawServer.id) : ConfigManager.getInstanceDirectory()
+        const gameDir = server ? DistributionManager.getInstanceDir(server) : ConfigManager.getInstanceDirectory()
         const assetsDir = path.join(commonDir, 'assets')
         const librariesDir = path.join(commonDir, 'libraries')
         const nativesDir = path.join(gameDir, 'natives')
@@ -414,14 +415,14 @@ class LaunchManager {
             if (lib.rules && !this.processArgumentRules(lib)) continue
             const artifact = this.resolveLibraryArtifact(lib)
             if (!artifact) continue
-            librariesByArtifact.set(this.libraryKey(lib, artifact), path.join(librariesDir, artifact.relativePath))
+            librariesByArtifact.set(this.libraryKey(lib, artifact), resolveInside(librariesDir, artifact.relativePath))
         }
 
         const libraries = [...librariesByArtifact.values()]
 
         // The client jar always belongs to the vanilla version, even when launching a
         // mod loader profile such as `1.20.1-forge-47.2.0`.
-        const clientJar = path.join(commonDir, 'versions', vanillaVersion, `${vanillaVersion}.jar`)
+        const clientJar = path.join(ConfigManager.getVersionDirectory(vanillaVersion), `${vanillaVersion}.jar`)
         libraries.push(clientJar)
 
         const classpath = libraries.join(process.platform === 'win32' ? ';' : ':')
@@ -583,7 +584,7 @@ class LaunchManager {
             const loader = manifest.loader
             const loaderType = ModLoaderManager.detectModLoader(loader)
             const versionString = ModLoaderManager.getVersionString(loader, minecraftVersion)
-            const instanceDir = path.join(ConfigManager.getInstanceDirectory(), server.rawServer.id)
+            const instanceDir = DistributionManager.getInstanceDir(server)
 
             if (loaderType !== 'vanilla') {
                 if (!ModLoaderManager.isModLoaderInstalled(loader, minecraftVersion)) {
