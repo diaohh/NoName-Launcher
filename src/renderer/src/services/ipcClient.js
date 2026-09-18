@@ -45,7 +45,7 @@ export const ipc = {
     openFolder: invoke('dialogOpenFolder')
   },
   shell: {
-    openPath: invoke('shellOpenPath')
+    openDataDirectory: invoke('shellOpenDataDirectory')
   },
   distro: {
     setServerData: invoke('distroSetServerData')

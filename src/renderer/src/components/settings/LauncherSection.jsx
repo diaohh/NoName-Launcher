@@ -36,8 +36,12 @@ export default function LauncherSection({ settings, onUpdate }) {
     }
   }
 
-  const handleOpenFolder = () => {
-    ipc.shell.openPath(settings.dataDirectory)
+  const handleOpenFolder = async () => {
+    try {
+      await ipc.shell.openDataDirectory()
+    } catch (err) {
+      showStatus(err.message || 'No se ha podido abrir la carpeta de datos', 'error')
+    }
   }
 
   return (

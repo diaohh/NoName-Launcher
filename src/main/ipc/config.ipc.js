@@ -119,7 +119,15 @@ export function registerConfigIPC(mainWindow) {
     return canceled ? null : filePaths[0]
   })
 
-  handle(Channels.SHELL_OPEN_PATH, async (_event, dirPath) => {
-    await shell.openPath(dirPath)
+  // Takes no path on purpose. `shell.openPath` runs whatever it is given — an .exe, a .bat —
+  // so a path chosen by the renderer would let it execute any file on disk. The only thing
+  // the UI ever needs to open is the data directory, and main knows where that is.
+  handle(Channels.SHELL_OPEN_DATA_DIRECTORY, async () => {
+    const failure = await shell.openPath(ConfigManager.getDataDirectory())
+    if (failure) {
+      const error = new Error(`No se ha podido abrir la carpeta de datos: ${failure}`)
+      error.code = ERROR_CODE.SHELL_OPEN_FAILED
+      throw error
+    }
   })
 }
