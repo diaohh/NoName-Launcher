@@ -67,6 +67,14 @@ Format notes:
 - `files` is **sorted by `path`** and the manifest carries **no timestamp**, so regenerating
   an unchanged pack produces a byte-identical file. The manifest hash moves only when the
   content moves.
+- `path` is **relative to the instance and must stay inside it**: no leading `/`, no drive
+  letter, no `\`, no `..` segment. The generator produces such paths by construction, since it
+  walks `files/`. The launcher only enforces this when **deleting** orphans today, not when
+  downloading, so a hand-edited manifest can write outside the instance. Checking it on every
+  entry is a P1 item in `TODO.md`.
+- The manifest hash is the sha256 of the **bytes** of `manifest.json`, written as UTF-8 with no
+  BOM. The launcher currently hashes the decoded text, which gives the same result only for
+  that encoding, so do not save the file with a BOM.
 
 ## Three distinct concepts
 
@@ -115,10 +123,29 @@ modpacks/<packId>: {
 verify that what it downloaded is what Firestore points at — worth having because
 `manifest.json` is served from a fixed, therefore cacheable, URL.
 
-This field is the only mutable state in the whole system; everything in the bucket is
-immutable content addressed by a hash the launcher checks. That makes publishing atomic:
-nothing is visible to players until the pointer flips, and rolling back is flipping it
-back.
+The full list of fields on the document (name, visuals, `usersAllowed`, RAM…) is in the
+README's "Modpack document" table.
+
+## Publishing and rollback
+
+The pointer makes the **manifest** atomic: the launcher only reads a manifest whose hash
+matches Firestore, and the manifest is cached by that hash. The **files are not**. They live
+at `<packId>/files/<path>`, addressed by path rather than by content, and `publish.mjs`
+uploads them with `rclone sync`, which overwrites and deletes them in place. So:
+
+- **During an upload**, Firestore still points at the old manifest while the CDN already
+  serves some new files. A player launching then fails with a checksum error. The
+  `maintenance: true` step in the publishing cycle
+  ([tools/pack-publish/README.md](../tools/pack-publish/README.md)) exists to prevent that, and
+  it is **not optional**. It also does not stop a launch that re-read the document before the
+  flag went up.
+- **Rolling back is not flipping the pointer back.** The old version's files have already been
+  overwritten or deleted, so it means regenerating and re-uploading the old pack folder.
+
+Making the bucket genuinely immutable — objects keyed by their sha256, uploaded with `copy`
+and never `sync` — is proposed in
+[ADR-0012](adr/0012-content-addressed-pack-files.md). It changes this contract
+(`formatVersion` 2).
 
 ## Local instance state
 
@@ -128,6 +155,9 @@ of re-hashing hundreds of megabytes on every launch. Losing the file costs one s
 never correctness.
 
 ## Pending
+
+- **Content-addressed files.** See "Publishing and rollback" above and
+  [ADR-0012](adr/0012-content-addressed-pack-files.md).
 
 - **Forge.** The generator refuses any `loader.type` other than `fabric` on purpose.
 

@@ -94,6 +94,13 @@ write to Firestore: that stays manual, so no service-account key has to exist.
 The launcher re-reads the document when the player presses play, so step 1 blocks
 launches for the few seconds the upload takes, and step 4 releases them.
 
+**Step 1 is not optional.** Files are addressed by path and `rclone sync` overwrites them in
+place, so without maintenance a player launching mid-upload gets new files checked against the
+old manifest and fails. For the same reason **rollback is a re-publish** of the previous pack
+folder, not a pointer flip: the old files no longer exist. See "Publishing and rollback" in
+[`docs/manifest.md`](../../docs/manifest.md) and
+[ADR-0012](../../docs/adr/0012-content-addressed-pack-files.md).
+
 ## rclone setup
 
 ```
