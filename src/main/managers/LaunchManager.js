@@ -188,7 +188,7 @@ class LaunchManager {
         } catch (err) {
             // helios-core's JavaGuard reports in English. The original is kept as the
             // cause and is already in the log; the player gets a message they can read.
-            if (err.code === ERROR_CODE.JAVA_UNAVAILABLE) throw err
+            if (err.code === ERROR_CODE.JAVA_UNAVAILABLE || err.code === ERROR_CODE.CONFIG_SAVE_FAILED) throw err
 
             const error = new Error(`No se ha podido preparar Java ${requiredVersion}. Revisa los logs.`)
             error.code = ERROR_CODE.JAVA_UNAVAILABLE

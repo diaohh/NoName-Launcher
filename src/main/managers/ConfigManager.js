@@ -142,7 +142,7 @@ class ConfigManager {
         if (!fs.existsSync(this.configPath)) {
             logger.info('Config file not found, creating default...')
             this.config = this.getDefaultConfig()
-            this.save()
+            this.saveAfterLoad()
             return this.config
         }
 
@@ -152,7 +152,7 @@ class ConfigManager {
         } catch (err) {
             this.quarantineConfig(err)
             this.config = this.getDefaultConfig()
-            this.save()
+            this.saveAfterLoad()
             return this.config
         }
 
@@ -170,7 +170,7 @@ class ConfigManager {
         }
 
         if (diskVersion !== CONFIG_VERSION || rewriteNeeded) {
-            this.save()
+            this.saveAfterLoad()
         }
 
         logger.info('Configuration loaded successfully')
@@ -279,16 +279,56 @@ class ConfigManager {
         }
     }
 
+    /**
+     * Writes the config atomically and throws when it cannot.
+     *
+     * The data goes to a temporary file that is flushed to disk and then renamed over
+     * `config.json`, so a crash or a power cut leaves either the old file or the new one —
+     * never a truncated one that the next start would have to quarantine, taking the session
+     * and every setting with it.
+     *
+     * A failure is thrown (`CONFIG_SAVE_FAILED`) rather than logged: a settings screen that
+     * shows a value the disk never received is lying to the player.
+     */
     static save() {
+        const data = JSON.stringify(this.toDiskConfig(), null, 4)
+        const tmpPath = `${this.configPath}.tmp`
+
         try {
-            fs.writeFileSync(
-                this.configPath,
-                JSON.stringify(this.toDiskConfig(), null, 4),
-                'UTF-8'
-            )
-            logger.info('Configuration saved successfully')
+            const fd = fs.openSync(tmpPath, 'w')
+            try {
+                fs.writeFileSync(fd, data, 'utf-8')
+                fs.fsyncSync(fd)
+            } finally {
+                fs.closeSync(fd)
+            }
+            fs.renameSync(tmpPath, this.configPath)
         } catch (err) {
+            try {
+                fs.removeSync(tmpPath)
+            } catch {
+                // Nothing more to do; the next save overwrites it.
+            }
             logger.error('Failed to save config', err)
+
+            const error = new Error('No se ha podido guardar la configuracion. Comprueba que hay espacio en disco y permiso de escritura.')
+            error.code = ERROR_CODE.CONFIG_SAVE_FAILED
+            error.cause = err
+            throw error
+        }
+
+        logger.info('Configuration saved successfully')
+    }
+
+    /**
+     * `load()` rewrites the file after a migration or a reset, but the launcher must still
+     * open when that write fails — a read-only disk is reported by the next explicit save.
+     */
+    static saveAfterLoad() {
+        try {
+            this.save()
+        } catch {
+            // Already logged by save().
         }
     }
 

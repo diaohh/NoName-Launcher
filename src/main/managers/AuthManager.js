@@ -287,7 +287,13 @@ class AuthManager {
 
             if (this.isTerminalError(code)) {
                 logger.warn(`Refresh failed with a terminal error (${code}), logging out user`)
-                this.removeAccount(uuid)
+                try {
+                    this.removeAccount(uuid)
+                } catch (saveErr) {
+                    // The account is already gone from memory, which is what logs the player
+                    // out; a disk that refuses the write must not turn this into a crash.
+                    logger.error('The account was dropped but config.json could not be rewritten', saveErr)
+                }
             } else {
                 logger.warn(`Refresh failed with a recoverable error (${code}), keeping the account`)
             }
