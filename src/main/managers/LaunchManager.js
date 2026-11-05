@@ -1,4 +1,5 @@
 import child_process from 'child_process'
+import os from 'os'
 import path from 'path'
 import fs from 'fs-extra'
 import { app } from 'electron'
@@ -27,6 +28,21 @@ const MIN_SUPPORTED_MINOR = 17
 
 /** A `.sha1` file is 40 bytes; if it takes longer than this the maven is not answering. */
 const SHA1_TIMEOUT_MS = 15 * 1000
+
+/**
+ * The launcher features version manifests can condition arguments on. Anything not listed
+ * is off — demo mode, Quick Play — which is what keeps those argument blocks out.
+ */
+const LAUNCH_FEATURES = {
+    has_custom_resolution: true
+}
+
+/** Mojang's spelling of the platform in `rules[].os`. */
+const MOJANG_OS = { win32: 'windows', darwin: 'osx', linux: 'linux' }
+const MOJANG_ARCH = { ia32: 'x86', x64: 'x86_64', arm64: 'arm64' }
+
+/** An argument that is nothing but one placeholder, like the value half of `--xuid ${auth_xuid}`. */
+const BARE_PLACEHOLDER = /^\$\{[^}]+\}$/
 
 /**
  * One progress shape for the whole launch flow: every callback in the chain takes a
@@ -256,7 +272,7 @@ class LaunchManager {
             const pending = []
 
             for (const lib of versionData.libraries || []) {
-                if (lib.rules && !this.processArgumentRules(lib)) continue
+                if (!this.rulesAllow(lib.rules)) continue
 
                 const artifact = this.resolveLibraryArtifact(lib)
                 if (!artifact) continue
@@ -390,42 +406,103 @@ class LaunchManager {
         return { versionData: merged, vanillaVersion: versionData.inheritsFrom }
     }
 
+    /**
+     * Fills `${placeholders}` from the context. Returns null when any of them has no value:
+     * passing `${clientid}` to the game verbatim is never right, and the caller decides what
+     * to drop instead.
+     */
     static processArgTemplate(arg, argContext) {
         if (typeof arg !== 'string') return arg
-        return arg.replace(/\$\{([^}]+)\}/g, (match, key) => argContext[key] || match)
+
+        let unresolved = false
+        const filled = arg.replace(/\$\{([^}]+)\}/g, (match, key) => {
+            if (Object.hasOwn(argContext, key) && argContext[key] != null) return String(argContext[key])
+            unresolved = true
+            return match
+        })
+        return unresolved ? null : filled
     }
 
-    static processArgumentRules(arg) {
-        if (typeof arg === 'string') return true
-        if (arg.rules) {
-            const activeFeatures = {
-                has_custom_resolution: true
-            }
-            for (const rule of arg.rules) {
-                if (rule.os) {
-                    const osName = process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'osx' : 'linux'
-                    if (rule.os.name && rule.os.name !== osName) return rule.action === 'disallow'
-                }
-                if (rule.features) {
-                    const featureMatch = Object.entries(rule.features).every(
-                        ([key, value]) => activeFeatures[key] === value
-                    )
-                    if (rule.action === 'allow') return featureMatch
-                    return !featureMatch
+    /** The OS version Mojang's `os.version` patterns are written against. */
+    static systemVersion() {
+        // Electron's reports the product version (macOS 14.2, Windows 10.0.22631); os.release()
+        // is the kernel's, which on macOS is a Darwin number no Mojang rule was written for.
+        return typeof process.getSystemVersion === 'function' ? process.getSystemVersion() : os.release()
+    }
+
+    static ruleMatches(rule, features) {
+        const ruleOs = rule.os
+        if (ruleOs) {
+            if (ruleOs.name && ruleOs.name !== (MOJANG_OS[process.platform] ?? process.platform)) return false
+            if (ruleOs.arch && ruleOs.arch !== (MOJANG_ARCH[process.arch] ?? process.arch)) return false
+            if (ruleOs.version) {
+                try {
+                    if (!new RegExp(ruleOs.version).test(this.systemVersion())) return false
+                } catch {
+                    return false
                 }
             }
         }
+
+        if (rule.features) {
+            for (const [feature, expected] of Object.entries(rule.features)) {
+                if ((features[feature] ?? false) !== expected) return false
+            }
+        }
+
         return true
     }
 
+    /**
+     * Mojang's rule semantics, for libraries and arguments alike: with no rules the entry
+     * applies; with rules it starts out **disallowed** and every matching rule overwrites the
+     * verdict, so the last match wins. Returning on the first match, as this used to, ignored
+     * `os.arch` (the x86-only `-Xss1M` landed on x64) and turned lwjgl's "allow, then
+     * disallow osx" pair in 1.17–1.18 into "allow everywhere".
+     */
+    static rulesAllow(rules, features = LAUNCH_FEATURES) {
+        if (!Array.isArray(rules) || rules.length === 0) return true
+
+        let allowed = false
+        for (const rule of rules) {
+            if (this.ruleMatches(rule, features)) allowed = rule.action === 'allow'
+        }
+        return allowed
+    }
+
+    /**
+     * Expands one `arguments.jvm`/`arguments.game` list onto `args`.
+     *
+     * A value whose placeholder has no source is dropped, and when it is a bare placeholder
+     * the `--flag` right before it goes too: 1.20 ships `--clientId ${clientid}` and
+     * `--xuid ${auth_xuid}`, and the launcher has neither (the XSTS token it requests carries
+     * no xid). Both are optional for the game.
+     *
+     * @returns {string[]} The flags and values that were dropped, for the log.
+     */
     static appendArguments(args, argList, argContext) {
+        const dropped = []
+
         for (const arg of argList) {
-            if (!this.processArgumentRules(arg)) continue
-            const argValue = typeof arg === 'string' ? arg : (arg.value || [])
-            for (const value of (Array.isArray(argValue) ? argValue : [argValue])) {
-                args.push(this.processArgTemplate(value, argContext))
+            if (typeof arg !== 'string' && !this.rulesAllow(arg.rules)) continue
+
+            const values = typeof arg === 'string' ? [arg] : [].concat(arg.value ?? [])
+            for (const value of values) {
+                const filled = this.processArgTemplate(value, argContext)
+                if (filled !== null) {
+                    args.push(filled)
+                    continue
+                }
+
+                const previous = args[args.length - 1]
+                if (BARE_PLACEHOLDER.test(value) && typeof previous === 'string' && previous.startsWith('--')) {
+                    dropped.push(args.pop())
+                }
+                dropped.push(value)
             }
         }
+
+        return dropped
     }
 
     static async buildLaunchCommand(account, versionId, server) {
@@ -451,7 +528,7 @@ class LaunchManager {
         // and the vanilla one would win.
         const librariesByArtifact = new Map()
         for (const lib of versionData.libraries) {
-            if (lib.rules && !this.processArgumentRules(lib)) continue
+            if (!this.rulesAllow(lib.rules)) continue
             const artifact = this.resolveLibraryArtifact(lib)
             if (!artifact) continue
             librariesByArtifact.set(this.libraryKey(lib, artifact), resolveInside(librariesDir, artifact.relativePath))
@@ -504,12 +581,16 @@ class LaunchManager {
 
         const args = ['-Xmx' + maxRAM, '-Xms' + effectiveMinRAM]
 
-        this.appendArguments(args, versionData.arguments.jvm || [], argContext)
+        const dropped = this.appendArguments(args, versionData.arguments.jvm || [], argContext)
 
         args.push('-XX:+UnlockExperimentalVMOptions', '-XX:+UseG1GC', '-XX:G1NewSizePercent=20', '-XX:G1ReservePercent=20', '-XX:MaxGCPauseMillis=50', '-XX:G1HeapRegionSize=32M')
         args.push(versionData.mainClass)
 
-        this.appendArguments(args, versionData.arguments.game || [], argContext)
+        dropped.push(...this.appendArguments(args, versionData.arguments.game || [], argContext))
+
+        if (dropped.length > 0) {
+            logger.info(`Dropped launch arguments with no value: ${dropped.join(' ')}`)
+        }
 
         if (ConfigManager.getFullscreen()) {
             args.push('--fullscreen')
