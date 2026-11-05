@@ -1,9 +1,14 @@
 import { useState, useRef, useEffect } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
+import { useStatus } from '../../contexts/StatusContext'
 
 export default function UserProfile({ onOpenSettings }) {
   const { account, logout } = useAuth()
+  const { showStatus } = useStatus()
   const [menuOpen, setMenuOpen] = useState(false)
+  // The fallback used to be a second minotar URL set from `onError`. With minotar down that
+  // one failed too, re-entering the handler; a local initial cannot fail.
+  const [avatarFailed, setAvatarFailed] = useState(false)
   const menuRef = useRef(null)
 
   useEffect(() => {
@@ -22,7 +27,11 @@ export default function UserProfile({ onOpenSettings }) {
 
   const handleLogout = async () => {
     setMenuOpen(false)
-    await logout()
+    try {
+      await logout()
+    } catch (err) {
+      showStatus(err.message || 'No se ha podido cerrar la sesion', 'error')
+    }
   }
 
   return (
@@ -31,15 +40,19 @@ export default function UserProfile({ onOpenSettings }) {
         onClick={() => setMenuOpen(!menuOpen)}
         className="w-[50px] h-[50px] rounded-full border-2 border-sidebar-border overflow-hidden bg-[#111] transition-all duration-300 hover:border-accent-green hover:shadow-[0_0_15px_rgba(74,222,128,0.2)] cursor-pointer"
       >
-        <img
-          src={avatarUrl}
-          alt={account.displayName}
-          className="w-full h-full"
-          style={{ imageRendering: 'pixelated' }}
-          onError={(e) => {
-            e.target.src = 'https://minotar.net/armor/bust/MHF_Steve/100.png'
-          }}
-        />
+        {avatarFailed ? (
+          <span className="w-full h-full flex items-center justify-center text-lg font-black uppercase text-white/60">
+            {account.displayName.charAt(0)}
+          </span>
+        ) : (
+          <img
+            src={avatarUrl}
+            alt={account.displayName}
+            className="w-full h-full"
+            style={{ imageRendering: 'pixelated' }}
+            onError={() => setAvatarFailed(true)}
+          />
+        )}
       </button>
 
       {menuOpen && (
