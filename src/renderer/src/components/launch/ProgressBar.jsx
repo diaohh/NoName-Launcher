@@ -1,4 +1,5 @@
 import { useLaunch } from '../../contexts/LaunchContext'
+import { PHASE_LABEL } from '../../services/launchPhases'
 
 export default function ProgressBar() {
   const { launchState, progress } = useLaunch()
@@ -13,7 +14,7 @@ export default function ProgressBar() {
   return (
     <div className="my-3">
       <div className="flex justify-between text-xs text-white/60 mb-1.5">
-        <span>{progress.phase || 'Preparando...'}</span>
+        <span>{PHASE_LABEL[progress.phase] ?? (progress.phase || 'Preparando...')}</span>
         <span>{percent != null ? `${percent}%` : ''}</span>
       </div>
       <div className="w-full h-[6px] bg-white/10 rounded-full overflow-hidden">
