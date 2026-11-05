@@ -1,4 +1,3 @@
-import './env'
 import { app, BrowserWindow, session, shell } from 'electron'
 import path from 'path'
 import { registerAllIPC } from './ipc'

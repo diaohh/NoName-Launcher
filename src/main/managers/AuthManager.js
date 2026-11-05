@@ -3,11 +3,10 @@ import { MicrosoftAuth, MicrosoftErrorCode } from 'helios-core/microsoft'
 import { RestResponseStatus } from 'helios-core/common'
 import ConfigManager from './ConfigManager'
 import Logger from '../utils/Logger'
+import { MICROSOFT_CLIENT_ID } from '../constants'
 import { ERROR_CODE, isTerminalAuthCode } from '../../shared/errorCodes'
 
 const logger = Logger.getLogger('AuthManager')
-
-const MICROSOFT_CLIENT_ID = process.env.MICROSOFT_CLIENT_ID || 'b7607eac-c8e1-404f-9042-b7f75757daa3'
 
 /** got reports a request that never reached the server with one of these and no response. */
 const TRANSPORT_ERROR_CODES = new Set([

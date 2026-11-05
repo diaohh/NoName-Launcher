@@ -1,10 +1,10 @@
 import { BrowserWindow } from 'electron'
 import Logger from '../utils/Logger'
+import { MICROSOFT_CLIENT_ID } from '../constants'
 import { ERROR_CODE } from '../../shared/errorCodes'
 
 const logger = Logger.getLogger('MsftAuth')
 
-const MICROSOFT_CLIENT_ID = process.env.MICROSOFT_CLIENT_ID || 'b7607eac-c8e1-404f-9042-b7f75757daa3'
 const REDIRECT_URI = 'https://login.microsoftonline.com/common/oauth2/nativeclient'
 
 /**
