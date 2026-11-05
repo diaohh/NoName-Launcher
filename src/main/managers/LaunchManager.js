@@ -731,36 +731,41 @@ class LaunchManager {
             await fs.ensureDir(path.join(instanceDir, 'natives'))
 
             const normalizedJavaPath = path.normalize(javaPath)
-            this.gameProcess = child_process.spawn(normalizedJavaPath, args, {
+            const child = child_process.spawn(normalizedJavaPath, args, {
                 cwd: instanceDir, detached: false, windowsHide: false
             })
 
-            logger.info('Minecraft process started, PID:', this.gameProcess.pid)
-            if (progressCallback) progressCallback({ type: 'started', message: 'Minecraft iniciado correctamente', pid: this.gameProcess.pid })
+            // `spawn` returns before the OS has tried to start anything; a missing javaw only
+            // shows up afterwards as an `error` event. Waiting here keeps `started` honest and
+            // lets a failure take the same path as every other launch error, below.
+            await this.waitForSpawn(child, normalizedJavaPath)
 
-            this.gameProcess.stdout.on('data', (data) => {
+            this.gameProcess = child
+            logger.info('Minecraft process started, PID:', child.pid)
+            if (progressCallback) progressCallback({ type: 'started', message: 'Minecraft iniciado correctamente', pid: child.pid })
+
+            child.stdout.on('data', (data) => {
                 const output = data.toString().trim()
                 if (progressCallback) progressCallback({ type: 'stdout', data: output })
             })
 
-            this.gameProcess.stderr.on('data', (data) => {
+            child.stderr.on('data', (data) => {
                 const output = data.toString().trim()
                 if (progressCallback) progressCallback({ type: 'stderr', data: output })
             })
 
-            this.gameProcess.on('close', (code) => {
+            child.on('close', (code) => {
                 this.gameProcess = null
                 if (progressCallback) progressCallback({ type: 'exit', code })
             })
 
-            this.gameProcess.on('error', (err) => {
-                this.gameProcess = null
-                if (progressCallback) {
-                    progressCallback({ type: 'error', error: err.message, code: err.code || ERROR_CODE.UNKNOWN })
-                }
+            // Once running, `error` only means a signal could not be delivered: the process is
+            // still there, and `close` remains the one place that ends the game.
+            child.on('error', (err) => {
+                logger.error('Minecraft process error:', err)
             })
 
-            return { pid: this.gameProcess.pid }
+            return { pid: child.pid }
         } catch (err) {
             logger.error('Launch failed:', err)
             if (progressCallback) {
@@ -770,6 +775,32 @@ class LaunchManager {
         } finally {
             this.launchInProgress = false
         }
+    }
+
+    /**
+     * Resolves once the OS has started the process, or rejects with GAME_SPAWN_FAILED when it
+     * could not (ENOENT, EACCES). Node still emits `close` after a failed spawn, which is why
+     * the caller attaches its own `close` handler only after this resolves.
+     */
+    static waitForSpawn(child, javaPath) {
+        return new Promise((resolve, reject) => {
+            const onSpawn = () => {
+                child.off('error', onError)
+                resolve()
+            }
+            const onError = (err) => {
+                child.off('spawn', onSpawn)
+                const error = new Error(
+                    `No se ha podido iniciar Java (${javaPath}). ` +
+                    'Comprueba la ruta de Java en Ajustes, o quitala para que el launcher busque uno.'
+                )
+                error.code = ERROR_CODE.GAME_SPAWN_FAILED
+                error.cause = err
+                reject(error)
+            }
+            child.once('spawn', onSpawn)
+            child.once('error', onError)
+        })
     }
 
     /**

@@ -78,6 +78,9 @@ export function LaunchProvider({ children }) {
           addLog(data.error, 'error')
           setLastError({ code: data.code, message: data.error })
           setLaunchState('error')
+          // Errors only come out of the preparation, before any game is running; the kill
+          // button must not stay up next to a launch that never started.
+          setGameRunning(false)
           break
       }
     })
