@@ -6,6 +6,9 @@ import path from 'path'
 import icon from '../../resources/icon.png?asset&asarUnpack'
 import { registerAllIPC } from './ipc'
 import ConfigManager from './managers/ConfigManager'
+import Logger from './utils/Logger'
+
+const logger = Logger.getLogger('Main')
 
 let mainWindow
 
@@ -131,6 +134,14 @@ function focusMainWindow() {
 }
 
 function startLauncher() {
+  // Before anything else is logged, so the file has the whole run. Lives next to config.json,
+  // not under the data directory: see ConfigManager.getLogsDirectory.
+  Logger.enableFileLogging(ConfigManager.getLogsDirectory())
+  logger.info(
+    `${app.getName()} ${app.getVersion()} starting, Electron ${process.versions.electron}, ` +
+    `${process.platform} ${process.arch}${app.isPackaged ? '' : ', development'}`
+  )
+
   app.on('second-instance', focusMainWindow)
 
   app.whenReady().then(() => {
