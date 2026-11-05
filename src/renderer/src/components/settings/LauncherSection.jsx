@@ -1,6 +1,8 @@
 import { ipc } from '../../services/ipcClient'
 import { useStatus } from '../../contexts/StatusContext'
 
+const buttonClass = 'bg-white/5 border border-white/10 rounded px-4 py-2.5 text-sm text-white/70 hover:bg-white/10 hover:border-accent-green hover:text-white transition-all duration-200 cursor-pointer'
+
 export default function LauncherSection({ settings, onUpdate }) {
   const { showStatus } = useStatus()
 
@@ -44,6 +46,14 @@ export default function LauncherSection({ settings, onUpdate }) {
     }
   }
 
+  const handleOpenLogs = async () => {
+    try {
+      await ipc.shell.openLogsDirectory()
+    } catch (err) {
+      showStatus(err.message || 'No se ha podido abrir la carpeta de logs', 'error')
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -75,12 +85,19 @@ export default function LauncherSection({ settings, onUpdate }) {
         </p>
       </div>
 
-      <button
-        onClick={handleOpenFolder}
-        className="bg-white/5 border border-white/10 rounded px-4 py-2.5 text-sm text-white/70 hover:bg-white/10 hover:border-accent-green hover:text-white transition-all duration-200 cursor-pointer"
-      >
-        Abrir carpeta de datos
-      </button>
+      <div>
+        <div className="flex flex-wrap gap-2">
+          <button onClick={handleOpenFolder} className={buttonClass}>
+            Abrir carpeta de datos
+          </button>
+          <button onClick={handleOpenLogs} className={buttonClass}>
+            Abrir carpeta de logs
+          </button>
+        </div>
+        <p className="text-xs text-white/30 mt-1.5">
+          Si algo falla, adjunta los archivos de la carpeta de logs al reportarlo
+        </p>
+      </div>
     </div>
   )
 }

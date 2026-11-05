@@ -170,11 +170,24 @@ export function registerConfigIPC(mainWindow) {
   // so a path chosen by the renderer would let it execute any file on disk. The only thing
   // the UI ever needs to open is the data directory, and main knows where that is.
   handle(Channels.SHELL_OPEN_DATA_DIRECTORY, async () => {
-    const failure = await shell.openPath(ConfigManager.getDataDirectory())
-    if (failure) {
-      const error = new Error(`No se ha podido abrir la carpeta de datos: ${failure}`)
-      error.code = ERROR_CODE.SHELL_OPEN_FAILED
-      throw error
-    }
+    await openFolder(ConfigManager.getDataDirectory(), 'la carpeta de datos')
   })
+
+  // Same rule: no argument, main decides the path. The folder is created on demand so the
+  // button works even before the first line has been written.
+  handle(Channels.SHELL_OPEN_LOGS_DIRECTORY, async () => {
+    const logsDir = ConfigManager.getLogsDirectory()
+    fs.mkdirSync(logsDir, { recursive: true })
+    await openFolder(logsDir, 'la carpeta de logs')
+  })
+}
+
+/** `shell.openPath` reports failure as a string instead of rejecting. */
+async function openFolder(directory, label) {
+  const failure = await shell.openPath(directory)
+  if (failure) {
+    const error = new Error(`No se ha podido abrir ${label}: ${failure}`)
+    error.code = ERROR_CODE.SHELL_OPEN_FAILED
+    throw error
+  }
 }

@@ -38,6 +38,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Shell
   shellOpenDataDirectory: () => ipcRenderer.invoke(Channels.SHELL_OPEN_DATA_DIRECTORY),
+  shellOpenLogsDirectory: () => ipcRenderer.invoke(Channels.SHELL_OPEN_LOGS_DIRECTORY),
 
   // Distribution
   distroSetServerData: (data) => ipcRenderer.invoke(Channels.DISTRO_SET_SERVER_DATA, data),

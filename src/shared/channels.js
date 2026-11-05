@@ -27,6 +27,7 @@ export const Channels = {
   DIALOG_OPEN_FILE: 'dialog:openFile',
   DIALOG_OPEN_FOLDER: 'dialog:openFolder',
   SHELL_OPEN_DATA_DIRECTORY: 'shell:openDataDirectory',
+  SHELL_OPEN_LOGS_DIRECTORY: 'shell:openLogsDirectory',
 
   // Distribution
   DISTRO_SET_SERVER_DATA: 'distro:setServerData',

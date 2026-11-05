@@ -210,7 +210,7 @@ class LaunchManager {
             // cause and is already in the log; the player gets a message they can read.
             if (err.code === ERROR_CODE.JAVA_UNAVAILABLE || err.code === ERROR_CODE.CONFIG_SAVE_FAILED) throw err
 
-            const error = new Error(`No se ha podido preparar Java ${requiredVersion}. Revisa los logs.`)
+            const error = new Error(`No se ha podido preparar Java ${requiredVersion}. Revisa los logs (Configuracion > Abrir carpeta de logs).`)
             error.code = ERROR_CODE.JAVA_UNAVAILABLE
             error.cause = err
             throw error
