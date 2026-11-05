@@ -350,7 +350,7 @@ class LaunchManager {
         const versionJsonPath = ConfigManager.getVersionJsonPath(versionId)
         if (!fs.existsSync(versionJsonPath)) {
             const error = new Error(`Falta el manifiesto de la version ${versionId}. Vuelve a lanzar para descargarlo.`)
-            error.code = ERROR_CODE.MANIFEST_INVALID
+            error.code = ERROR_CODE.VERSION_JSON_MISSING
             logger.error(`Version manifest not found: ${versionJsonPath}`)
             throw error
         }

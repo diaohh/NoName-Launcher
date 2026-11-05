@@ -27,9 +27,15 @@ class ManifestManager {
     static deriveBaseUrl(manifestUrl) {
         const marker = '/manifest.json'
         if (!manifestUrl.endsWith(marker)) {
-            throw new Error(`La URL del manifest debe terminar en ${marker}: ${manifestUrl}`)
+            throw this.manifestError(ERROR_CODE.MANIFEST_INVALID, `La URL del manifest debe terminar en ${marker}: ${manifestUrl}`)
         }
         return manifestUrl.slice(0, -marker.length)
+    }
+
+    static manifestError(code, message) {
+        const error = new Error(message)
+        error.code = code
+        return error
     }
 
     /** Mod filenames contain spaces and brackets, so every segment is encoded. */
@@ -43,23 +49,22 @@ class ManifestManager {
     }
 
     static assertShape(manifest) {
-        if (manifest.formatVersion !== SUPPORTED_FORMAT_VERSION) {
-            const error = new Error(
-                `El manifest usa el formato ${manifest.formatVersion} y este launcher entiende ` +
+        if (manifest?.formatVersion !== SUPPORTED_FORMAT_VERSION) {
+            throw this.manifestError(
+                ERROR_CODE.UNSUPPORTED_MANIFEST_FORMAT,
+                `El manifest usa el formato ${manifest?.formatVersion} y este launcher entiende ` +
                 `el ${SUPPORTED_FORMAT_VERSION}. Actualiza el launcher.`
             )
-            error.code = 'UNSUPPORTED_MANIFEST_FORMAT'
-            throw error
         }
 
-        if (!Array.isArray(manifest.files)) throw new Error('El manifest no contiene "files"')
-        if (!manifest.minecraft?.version) throw new Error('El manifest no declara "minecraft.version"')
+        if (!Array.isArray(manifest.files)) throw this.manifestError(ERROR_CODE.MANIFEST_INVALID, 'El manifest no contiene "files"')
+        if (!manifest.minecraft?.version) throw this.manifestError(ERROR_CODE.MANIFEST_INVALID, 'El manifest no declara "minecraft.version"')
 
         // A missing hash used to mean "existence is enough", which silently froze files
         // at whatever version the player already had. It is an error now.
         for (const file of manifest.files) {
             if (!file.path || !file.hash || typeof file.size !== 'number') {
-                throw new Error(`Entrada de manifest invalida: ${JSON.stringify(file)}`)
+                throw this.manifestError(ERROR_CODE.MANIFEST_INVALID, `Entrada de manifest invalida: ${JSON.stringify(file)}`)
             }
         }
 
@@ -73,9 +78,7 @@ class ManifestManager {
 
         const unsafe = paths.find(relativePath => !isSafeRelativePath(relativePath))
         if (unsafe !== undefined) {
-            const error = new Error(`El manifest contiene una ruta no permitida: ${JSON.stringify(unsafe)}`)
-            error.code = ERROR_CODE.MANIFEST_INVALID
-            throw error
+            throw this.manifestError(ERROR_CODE.MANIFEST_INVALID, `El manifest contiene una ruta no permitida: ${JSON.stringify(unsafe)}`)
         }
     }
 
@@ -85,9 +88,10 @@ class ManifestManager {
      */
     static async fetch(ref) {
         if (!ref || !ref.url || !ref.hash) {
-            const error = new Error('El modpack no tiene un manifest publicado. Revisa el campo "manifest" en Firestore.')
-            error.code = 'MANIFEST_MISSING'
-            throw error
+            throw this.manifestError(
+                ERROR_CODE.MANIFEST_MISSING,
+                'El modpack no tiene un manifest publicado. Revisa el campo "manifest" en Firestore.'
+            )
         }
 
         const baseUrl = this.deriveBaseUrl(ref.url)
@@ -110,20 +114,22 @@ class ManifestManager {
 
         const response = await fetchWithTimeout(ref.url, 'el manifest del modpack', { cache: 'no-store' })
         if (!response.ok) {
-            throw new Error(`No se pudo descargar el manifest (HTTP ${response.status}) desde ${ref.url}`)
+            throw this.manifestError(
+                ERROR_CODE.MANIFEST_DOWNLOAD_FAILED,
+                `No se pudo descargar el manifest (HTTP ${response.status}) desde ${ref.url}`
+            )
         }
 
         const raw = await response.text()
         const actual = this.sha256(raw)
 
         if (actual !== ref.hash) {
-            const error = new Error(
+            logger.error(`Manifest hash mismatch: expected ${ref.hash}, got ${actual}`)
+            throw this.manifestError(
+                ERROR_CODE.MANIFEST_HASH_MISMATCH,
                 'El manifest descargado no coincide con el publicado en Firestore. ' +
                 'Puede que la actualizacion siga en curso; intentalo de nuevo en unos minutos.'
             )
-            error.code = 'MANIFEST_HASH_MISMATCH'
-            logger.error(`Manifest hash mismatch: expected ${ref.hash}, got ${actual}`)
-            throw error
         }
 
         const manifest = JSON.parse(raw)

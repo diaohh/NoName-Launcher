@@ -1,5 +1,6 @@
 import { BrowserWindow } from 'electron'
 import Logger from '../utils/Logger'
+import { ERROR_CODE } from '../../shared/errorCodes'
 
 const logger = Logger.getLogger('MsftAuth')
 
@@ -25,10 +26,26 @@ const ALLOWED_HOSTS = new Set([
     'passwordreset.microsoftonline.com'
 ])
 
-const OAUTH_ERROR_MESSAGES = {
-    access_denied: 'Has cancelado el inicio de sesion con Microsoft.',
-    consent_required: 'Debes aceptar los permisos de la aplicacion para poder entrar.',
-    login_required: 'Microsoft ha pedido iniciar sesion de nuevo. Intentalo otra vez.'
+/** The `error` values Microsoft puts in the redirect that the launcher words on its own. */
+const OAUTH_ERRORS = {
+    access_denied: {
+        code: ERROR_CODE.OAUTH_ACCESS_DENIED,
+        message: 'Has cancelado el inicio de sesion con Microsoft.'
+    },
+    consent_required: {
+        code: ERROR_CODE.OAUTH_CONSENT_REQUIRED,
+        message: 'Debes aceptar los permisos de la aplicacion para poder entrar.'
+    },
+    login_required: {
+        code: ERROR_CODE.OAUTH_LOGIN_REQUIRED,
+        message: 'Microsoft ha pedido iniciar sesion de nuevo. Intentalo otra vez.'
+    }
+}
+
+function oauthError(code, message) {
+    const error = new Error(message)
+    error.code = code
+    return error
 }
 
 let msftAuthWindow = null
@@ -36,7 +53,7 @@ let msftAuthWindow = null
 export function createMsftAuthWindow() {
     return new Promise((resolve, reject) => {
         if (msftAuthWindow) {
-            reject(new Error('Ya hay una ventana de inicio de sesion abierta.'))
+            reject(oauthError(ERROR_CODE.OAUTH_WINDOW_OPEN, 'Ya hay una ventana de inicio de sesion abierta.'))
             return
         }
 
@@ -97,17 +114,15 @@ export function createMsftAuthWindow() {
             }
 
             // Without this the window just sat there forever after a cancellation.
-            const oauthError = query.get('error')
-            if (oauthError) {
-                const message = OAUTH_ERROR_MESSAGES[oauthError]
+            const errorParam = query.get('error')
+            if (errorParam) {
+                const known = OAUTH_ERRORS[errorParam]
+                const message = known?.message
                     || query.get('error_description')
                     || 'Microsoft ha rechazado el inicio de sesion.'
 
-                logger.warn(`Authorization failed: ${oauthError}`)
-
-                const err = new Error(message)
-                err.code = `OAUTH_${oauthError.toUpperCase()}`
-                finish(reject, err)
+                logger.warn(`Authorization failed: ${errorParam}`)
+                finish(reject, oauthError(known?.code ?? ERROR_CODE.OAUTH_FAILED, message))
             }
         }
 
@@ -131,9 +146,7 @@ export function createMsftAuthWindow() {
             if (settled) return
 
             settled = true
-            const err = new Error('Has cerrado la ventana antes de completar el inicio de sesion.')
-            err.code = 'OAUTH_WINDOW_CLOSED'
-            reject(err)
+            reject(oauthError(ERROR_CODE.OAUTH_WINDOW_CLOSED, 'Has cerrado la ventana antes de completar el inicio de sesion.'))
         })
 
         const authUrl = 'https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize?' +
