@@ -90,16 +90,15 @@ class MinecraftDownloadManager {
         }
     }
 
+    /** Exactly the sub-phases `downloadMinecraft` reports, nothing it never emits. */
     static getPhaseDisplayName(phase) {
         const phases = {
-            'init': 'Inicializando',
-            'validation': 'Validando archivos',
-            'assets': 'Descargando recursos',
-            'libraries': 'Descargando librerias',
-            'client': 'Descargando cliente',
-            'complete': 'Completado'
+            init: 'Preparando Minecraft',
+            validation: 'Validando Minecraft',
+            download: 'Descargando Minecraft',
+            complete: 'Minecraft listo'
         }
-        return phases[phase] || 'Descargando...'
+        return phases[phase] || 'Descargando Minecraft'
     }
 }
 

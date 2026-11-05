@@ -224,8 +224,11 @@ class DistributionManager {
             logger.info(`Removed orphan: ${relPath}`)
         }
 
+        // Nothing countable is downloaded yet, so the phase sits at its floor (ADR-0005).
+        // Reporting the deletions as current/total would fill the slice and freeze the bar there
+        // until the download caught up.
         if (plan.toDelete.length > 0 && progressCallback) {
-            progressCallback({ message: `Eliminando ${plan.toDelete.length} archivos obsoletos...` })
+            progressCallback({ current: 0, total: 0, message: `Eliminados ${plan.toDelete.length} archivos obsoletos` })
         }
 
         if (plan.toDownload.length > 0) {
