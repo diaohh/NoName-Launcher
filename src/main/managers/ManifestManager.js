@@ -83,6 +83,20 @@ class ManifestManager {
     }
 
     /**
+     * The published bytes, parsed. The hash is always taken over the bytes themselves (see
+     * `fetch`), so a UTF-8 BOM is only stripped here, for `JSON.parse`, never before hashing.
+     */
+    static parse(bytes) {
+        try {
+            return JSON.parse(bytes.toString('utf8').replace(/^\uFEFF/, ''))
+        } catch (err) {
+            const error = this.manifestError(ERROR_CODE.MANIFEST_INVALID, 'El manifest publicado no es un JSON valido.')
+            error.cause = err
+            throw error
+        }
+    }
+
+    /**
      * @param {{url: string, hash: string, version?: string}} ref The Firestore pointer.
      * @returns {Promise<{manifest: object, baseUrl: string}>}
      */
@@ -99,10 +113,10 @@ class ManifestManager {
 
         // The cache is keyed by hash, so a hit is proof the content is current.
         if (fs.existsSync(cached)) {
-            const raw = await fs.readFile(cached, 'utf8')
-            if (this.sha256(raw) === ref.hash) {
+            const bytes = await fs.readFile(cached)
+            if (this.sha256(bytes) === ref.hash) {
                 logger.info(`Manifest ${ref.hash.slice(0, 12)} served from cache`)
-                const manifest = JSON.parse(raw)
+                const manifest = this.parse(bytes)
                 this.assertShape(manifest)
                 return { manifest, baseUrl }
             }
@@ -120,8 +134,10 @@ class ManifestManager {
             )
         }
 
-        const raw = await response.text()
-        const actual = this.sha256(raw)
+        // Hashed as bytes, exactly as published. `response.text()` decodes first, so a BOM or
+        // any byte that is not valid UTF-8 changed the hash and failed every launch for good.
+        const bytes = Buffer.from(await response.arrayBuffer())
+        const actual = this.sha256(bytes)
 
         if (actual !== ref.hash) {
             logger.error(`Manifest hash mismatch: expected ${ref.hash}, got ${actual}`)
@@ -132,18 +148,19 @@ class ManifestManager {
             )
         }
 
-        const manifest = JSON.parse(raw)
+        const manifest = this.parse(bytes)
         this.assertShape(manifest)
 
         await fs.ensureDir(path.dirname(cached))
-        await fs.writeFile(cached, raw)
+        await fs.writeFile(cached, bytes)
 
         logger.info(`Manifest ${manifest.packId} ${manifest.version}: ${manifest.files.length} files, ${manifest.loader?.type || 'vanilla'}`)
         return { manifest, baseUrl }
     }
 
-    static sha256(text) {
-        return crypto.createHash('sha256').update(text).digest('hex')
+    /** @param {Buffer} bytes */
+    static sha256(bytes) {
+        return crypto.createHash('sha256').update(bytes).digest('hex')
     }
 }
 
