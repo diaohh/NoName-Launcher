@@ -1,4 +1,4 @@
-import { Channels } from './channels'
+import { Channels } from '../../shared/channels'
 import { handle } from './result'
 import AuthManager from '../managers/AuthManager'
 import { createMsftAuthWindow } from '../windows/msftAuth'

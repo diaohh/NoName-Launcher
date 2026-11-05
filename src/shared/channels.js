@@ -1,3 +1,8 @@
+/**
+ * IPC channel names, read by the handlers in `main/ipc/` and by the preload. Living in
+ * `shared/` keeps the two from drifting: the preload used to repeat every name as a string
+ * literal, so a rename on one side silently left the other invoking a channel nobody answered.
+ */
 export const Channels = {
   // Auth
   AUTH_MSFT_LOGIN: 'auth:msftLogin',

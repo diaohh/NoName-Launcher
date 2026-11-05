@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import { Channels } from './channels'
+import { Channels } from '../../shared/channels'
 
 export function registerWindowIPC(mainWindow) {
   ipcMain.on(Channels.WINDOW_MINIMIZE, () => {
