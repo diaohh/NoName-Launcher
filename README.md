@@ -74,7 +74,7 @@ A custom Minecraft launcher built with Electron, React, and Tailwind CSS. Featur
    | `VITE_FIREBASE_AUTH_DOMAIN` | Firebase auth domain |
    | `VITE_FIREBASE_PROJECT_ID` | Firebase project ID |
 
-   > Variables prefixed with `VITE_` are inlined into the renderer bundle at build time. Non-prefixed variables are read by the main process at runtime — and `.env` is **not** shipped inside the packaged app, so anything the main process needs in production must have a build-time default.
+   > Every variable is read **at build time**; `.env` is never shipped and never read by the running app. `VITE_` variables are inlined into the renderer bundle, and `MICROSOFT_CLIENT_ID` is inlined into the main bundle by `electron.vite.config.mjs` — `pnpm dev` and `pnpm build` both stop with an error if it is missing or is not an Azure application id. A variable set in the environment wins over `.env`.
 
    The Azure application must be a **public client** with the redirect URI `https://login.microsoftonline.com/common/oauth2/nativeclient` and the `XboxLive.signin offline_access` scopes.
 
@@ -151,6 +151,7 @@ The launcher root is `%APPDATA%/.nonamelauncher` on Windows (`~/Library/Applicat
 
 ```
 config.json          Launcher settings + account database
+logs/                launcher.log, rotated at 5 MB, five files kept (Settings → "Abrir carpeta de logs")
 ```
 
 Everything bulky lives under the **data directory**, which defaults to that same root and can be moved from Settings → Launcher:
@@ -162,7 +163,9 @@ manifests/           Verified pack manifests, keyed by sha256
 instances/<id>/      Per-modpack game directory (mods, config, saves, natives)
 ```
 
-`config.json` always stays in the launcher root — it is what records where the data directory is. Changing the setting affects new downloads only; existing files are not moved.
+`config.json` and `logs/` always stay in the launcher root — the config is what records where the data directory is, and the logs have to be findable even when the data directory is what broke. Changing the setting affects new downloads only; existing files are not moved.
+
+Only one launcher runs at a time: opening it again brings the existing window to the front.
 
 ## Development
 
@@ -177,9 +180,10 @@ same rules in the form they need while editing.
 
 Two conventions are easy to break from outside and are worth reading before a first change:
 
-- **Adding an IPC call means touching four layers** — `src/main/ipc/channels.js`, the
+- **Adding an IPC call means touching four layers** — `src/shared/channels.js`, the
   `*.ipc.js` handler, `src/preload/index.js`, and `src/renderer/src/services/ipcClient.js`.
-  A channel missing from any of them is dead code.
+  A channel missing from any of them is dead code. The handlers and the preload both read the
+  names from `channels.js`, so a rename cannot leave them out of step.
 - **Errors cross the IPC boundary in a `{ ok, code, message }` envelope**, never as a thrown
   `Error`. Handlers register through `handle()` from `src/main/ipc/result.js`; codes are
   shared constants in `src/shared/errorCodes.js`. Never branch on message text.
@@ -197,16 +201,18 @@ Two conventions are easy to break from outside and are worth reading before a fi
 - **`package.json` lists `pnpm.onlyBuiltDependencies`.** pnpm 10 skips postinstall scripts
   unless a package is on that list; without `electron` there the binary is never downloaded and
   `pnpm dev` fails.
-- `resources/icon.png` is referenced by `electron-builder.yml` and by the main process but is
-  not in the repo yet, so `pnpm package` fails until it is added.
-- **Packaged builds write no log file.** The logger is helios-core's `LoggerUtil`, which only
-  has a console transport; run the app from a terminal to see its output.
-- **`MICROSOFT_CLIENT_ID` in a packaged build is the literal fallback in the source**, not your
-  `.env` value, because `.env` is not shipped. Check that the fallback in `AuthManager.js` and
-  `windows/msftAuth.js` is the Azure app you expect before packaging.
-- **`.env` and the development behaviour only exist unpackaged.** `src/main/env.js` loads
-  `.env` only when `app.isPackaged` is false, and the dev renderer URL, DevTools and the
-  relaxed CSP are gated on the same check.
+- **`resources/` is electron-vite's public directory for the main process.** The window icon
+  is imported as `resources/icon.png?asset&asarUnpack`, which resolves to a path next to the
+  bundle rather than copying the file, so `electron-builder.yml` has to ship it explicitly
+  (`files` + `asarUnpack`). The same file is the installer/executable icon.
+- **Logs go through `src/main/utils/Logger.js`**, one winston logger with a console and a
+  rotating file transport. Error objects are written as stack, code and cause chain, and
+  anything that looks like a token is redacted — but that is a safety net: never log a token,
+  or an object that may carry one. helios-core's own internal loggers still write to the
+  console only.
+- **The development behaviour only exists unpackaged.** The dev renderer URL, DevTools and the
+  relaxed CSP are gated on `app.isPackaged`, so no environment variable can switch an installed
+  launcher into them.
 
 Known gaps and their priority are tracked in [TODO.md](TODO.md).
 
@@ -219,7 +225,7 @@ pnpm package:linux      # Linux AppImage
 pnpm package:mac        # macOS DMG
 ```
 
-Packaged output goes to `dist/`. Packaging requires `resources/icon.png` to exist — it is referenced by `electron-builder.yml` and by the main process window.
+Packaged output goes to `dist/`. The application icon is `resources/icon.png` (1024×1024, transparent), used both for the executables and for the window.
 
 ## Project Structure
 
@@ -238,7 +244,8 @@ src/
 │   └── ipc/                # IPC channel handlers
 ├── preload/                # Context bridge (main ↔ renderer)
 │   └── index.js
-├── shared/                 # Bundled into BOTH processes — must stay dependency-free
+├── shared/                 # Bundled into more than one process — must stay dependency-free
+│   ├── channels.js         # IPC channel names, read by the handlers and the preload
 │   └── errorCodes.js       # The only source of IPC error codes
 └── renderer/src/           # React application
     ├── App.jsx             # Root component + providers
