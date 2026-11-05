@@ -12,7 +12,6 @@ export function LaunchProvider({ children }) {
   const [logs, setLogs] = useState([])
   const [gameRunning, setGameRunning] = useState(false)
   const [lastError, setLastError] = useState(null)
-  const cleanupRef = useRef(null)
   // The bar must never retreat, whatever order the events arrive in.
   const maxPercentRef = useRef(0)
 
@@ -23,8 +22,9 @@ export function LaunchProvider({ children }) {
     })
   }, [])
 
+  // IPC subscription; the function onProgress hands back is the cleanup.
   useEffect(() => {
-    cleanupRef.current = ipc.launch.onProgress((data) => {
+    const unsubscribe = ipc.launch.onProgress((data) => {
       switch (data.type) {
         case 'auth':
         case 'manifest':
@@ -85,9 +85,7 @@ export function LaunchProvider({ children }) {
       }
     })
 
-    return () => {
-      if (cleanupRef.current) cleanupRef.current()
-    }
+    return unsubscribe
   }, [addLog])
 
   // The game lives in the main process, so a renderer reload loses every trace of it. Without
