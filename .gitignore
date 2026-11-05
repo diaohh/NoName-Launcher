@@ -36,4 +36,7 @@ dist/
 launcher-data/
 CLAUDE.md
 distribution.json
+
+# Manual audit reports: local working material, their findings are tracked in TODO.md
+docs/audits/
 test.html
