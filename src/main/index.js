@@ -115,19 +115,43 @@ function createWindow() {
   })
 }
 
-app.whenReady().then(() => {
-  applyContentSecurityPolicy()
-  createWindow()
+/** Brings the existing window forward when the player opens the launcher a second time. */
+function focusMainWindow() {
+  if (!mainWindow) {
+    if (app.isReady()) createWindow()
+    return
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow()
+function startLauncher() {
+  app.on('second-instance', focusMainWindow)
+
+  app.whenReady().then(() => {
+    applyContentSecurityPolicy()
+    createWindow()
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow()
+      }
+    })
+  })
+
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') {
+      app.quit()
     }
   })
-})
+}
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit()
-  }
-})
+// One launcher at a time. A second process would write config.json behind the first one's
+// back, and could sync the same instance directory concurrently — `launchInProgress` only
+// guards a single process. The second launch hands over to the first and exits.
+if (app.requestSingleInstanceLock()) {
+  startLauncher()
+} else {
+  app.quit()
+}
