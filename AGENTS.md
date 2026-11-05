@@ -1,0 +1,365 @@
+# AGENTS.md
+
+Guidance for AI coding agents (Claude Code, Codex, Copilot, Cursor…) working in this repository. This is
+the versioned copy; a local `CLAUDE.md` (gitignored) only imports it, so edit this file, not that one.
+
+## Project
+
+NoNameLauncher — A Minecraft launcher built with Electron 37, React 19, and Tailwind CSS v4. Uses Microsoft authentication, Firestore for modpack distribution, and helios-core for game management.
+
+## Architecture Decisions
+
+The **why** behind the rules in this file lives in [`docs/adr/`](docs/adr/README.md), one file
+per decision, superseded rather than rewritten. Read the relevant ADR before arguing with a rule
+here, and write a new one when a decision is structural, contested, or deliberately deferred —
+the index says what qualifies. `TODO.md` is pending work only; it is not where decisions are
+recorded. A factual correction that leaves a decision standing goes in a dated `## Addendum` at
+the end of the ADR, never as an in-place edit.
+
+Full reviews are done by hand and kept in `docs/audits/`, which is **gitignored**: the reports are
+local working material and are never committed (latest: `2026-09-17-auditoria.md`). Their actionable
+findings are in `TODO.md`, marked 📋 and tagged `S`/`B`/`D` + number, which points back to the
+report's tables. If you have the report, read it before touching an area it flags.
+
+## Commands
+
+```bash
+pnpm dev          # Start dev server (electron-vite)
+pnpm lint         # ESLint (flat config, must stay at 0 errors)
+pnpm build        # Build for production
+pnpm package      # Build + create Windows NSIS installer
+pnpm package:linux  # AppImage
+pnpm package:mac    # DMG
+```
+
+Package manager is **pnpm** (not npm or yarn). `package.json` lists `pnpm.onlyBuiltDependencies` — pnpm 10 skips postinstall scripts unless a package is on it, and without `electron` there the Electron binary is never downloaded and `pnpm dev` fails.
+
+## Verifying Changes
+
+There is no test runner. `pnpm build` only proves the bundle compiles, and launching the game end-to-end needs a Microsoft account plus a Firestore modpack, so for launch/Java/loader logic use a throwaway script instead:
+
+1. Write a script that imports the managers directly, points `ConfigManager.launcherDir` at a temp dir and sets `ConfigManager.config = ConfigManager.getDefaultConfig()`.
+2. Write synthetic manifests into `<tmp>/common/versions/**` and call the real function (`buildLaunchCommand`, `loadVersionManifest`, …), asserting on the result.
+3. Node cannot run the sources directly — imports are extensionless. Bundle first:
+
+```bash
+./node_modules/.bin/esbuild ./script.mjs --bundle --platform=node --format=esm --outfile=out.mjs \
+  --banner:js="import{createRequire as __cr}from'module';const require=__cr(import.meta.url);"
+node out.mjs
+```
+
+Two things the recipe needs in practice:
+
+- **The entry point must sit inside the project.** esbuild resolves `fs-extra`, `helios-core` and friends from the importing file's directory, so a script left in a temp dir fails to bundle. Copy it to the repo root, run, delete.
+- **Anything reaching `ConfigManager` now imports `electron`** (for `safeStorage`), which plain node cannot load. Stub it: write a module exporting a fake `safeStorage` (`isEncryptionAvailable`/`encryptString`/`decryptString`) and bundle with `--alias:electron=./stub.mjs`. Driving that stub is how the encryption, the v0 migration, the undecryptable-blob purge and the no-keyring path were verified.
+
+This is how the classpath dedupe, vanilla-jar resolution, version guards, the config/secret handling and the auth error classification were verified. Keep such scripts out of the repo unless a real test setup is added.
+
+## Architecture
+
+### Process Model (Electron)
+
+```
+Main Process (src/main/)          Preload (src/preload/)       Renderer (src/renderer/src/)
+├── index.js (BrowserWindow)      └── index.js (contextBridge)  ├── App.jsx (providers)
+├── managers/                                                    ├── contexts/ (Auth, Launch, Servers, Status)
+│   ├── AuthManager.js                                          ├── services/
+│   ├── ConfigManager.js                                        │   ├── ipcClient.js
+│   ├── DistributionManager.js                                  │   ├── firebase.js
+│   ├── LaunchManager.js                                        │   └── firestoreService.js
+│   ├── ManifestManager.js                                      ├── hooks/useServers.js
+│   ├── ModLoaderManager.js                                     └── components/{feature}/
+│   └── MinecraftDownloadManager.js
+├── constants.js (build-time MICROSOFT_CLIENT_ID)
+└── ipc/
+    ├── result.js (handle() + envelope)
+    ├── auth.ipc.js
+    ├── config.ipc.js
+    ├── distribution.ipc.js
+    ├── launch.ipc.js
+    └── window.ipc.js
+```
+
+### IPC Pattern
+
+All main↔renderer communication follows this chain:
+
+1. **src/shared/channels.js** — Define constant: `CONFIG_SET_FULLSCREEN: 'config:setFullscreen'`
+2. **\*.ipc.js** — Register handler: `ipcMain.handle(Channels.CONFIG_SET_FULLSCREEN, ...)`
+3. **preload/index.js** — Expose via contextBridge: `configSetFullscreen: (val) => ipcRenderer.invoke(Channels.CONFIG_SET_FULLSCREEN, val)`. The preload imports `Channels` from `src/shared/channels.js` like the handlers do — never write a channel name as a string literal there. A handler that receives data must validate it itself (see Trust Boundaries)
+4. **ipcClient.js** — Wrap for React: `ipc.config.setFullscreen: (val) => window.electronAPI.configSetFullscreen(val)`
+
+Events from main→renderer use `ipcRenderer.on` (e.g., launch progress, token expiry).
+
+**Errors cross the boundary in an envelope, never as a thrown `Error`** — Electron would serialize it to a string and lose `error.code` ([ADR-0002](docs/adr/0002-ipc-error-envelope.md)):
+
+- Every handler is registered through `handle()` from `main/ipc/result.js`, which answers `{ ok: true, data }` or `{ ok: false, code, message }`. Do not call `ipcMain.handle` directly.
+- `ipcClient.js` unwraps it and rebuilds a real `Error` carrying `.code`, so renderer `try/catch` keeps working and callers branch on the code.
+- Codes live in `src/shared/errorCodes.js`, imported by **both** processes. Never compare against a literal copied into the renderer, and never branch on message text.
+
+`src/shared/` is bundled into the main, preload and renderer bundles, so anything there must stay dependency-free.
+
+### State Management
+
+React Context API only (no Redux). Four providers wrap the app:
+
+- **AuthProvider** — Microsoft account, login/logout, token expiry monitoring
+- **LaunchProvider** — Launch state machine (`idle` → `preparing` → `playing`), progress tracking, game logs
+- **ServersProvider** — Modpack list from Firestore, server selection, module loading
+- **StatusProvider** — Transient messages. `useStatus().showStatus(message, type)` with `type` `error` (default), `success` or `info`; a single `<StatusMessage />` host lives in `App.jsx` above every screen, so a message raised on the way out of one screen is still visible on the next. It is the **outermost** provider, so the others (AuthProvider tells the player why a session expired) can report through it
+
+**`useEffect` is for synchronizing with a system outside React, and nothing else** — see
+[ADR-0008](docs/adr/0008-useeffect-only-for-external-systems.md). Before writing one, name the
+external system it connects to: an IPC subscription, a DOM listener outside the tree, a timer,
+imperative DOM the tree cannot express, or a fetch on mount. If there is no answer, it does not
+get written — a value derived from props or state is computed in render, and a reaction to a
+user action goes in the handler that caused it.
+
+Every effect that stays needs all four: **cleanup** for anything it subscribes to,
+**cancellation** of async work (an `ignore` flag or `AbortController` — StrictMode
+double-invokes and a dependency change re-runs it), a **dependency array that matches what the
+body reads**, and an **error path** that reaches the user through `useStatus()` instead of
+leaving a screen stuck on "Cargando...". Known violations are listed in `TODO.md` P3.
+
+### Data Sources
+
+- **Firestore** (renderer-side via Firebase SDK) — Modpack catalogue and the manifest pointer only ([ADR-0001](docs/adr/0001-manifest-on-cdn-with-firestore-pointer.md)). Single collection: `modpacks/{id}`. There is no `modules` subcollection: file lists, per-path policies and the mod loader all live in the manifest.
+  - Visual fields: `icon` (sidebar), `banner` (full-window background, **art only, no text** — it is centred on the window and cropped by `bg-cover`, so a title drawn into it never lines up with JUGAR), and the optional `logo` (transparent image rendered by `ModpackLogo`, centred in the launcher area on the play button's axis). All three are preloaded or rendered as soon as the list arrives. With no modpack selected the background is a fixed grey gradient, not a photo
+- **Pack manifest** (Cloudflare R2, public `r2.dev` URL) — The authority on what an instance contains. Generated by `tools/pack-publish/generate.mjs` from a modpack folder; schema and publishing flow in `docs/manifest.md`. Firestore stores its sha256, so the **manifest** only changes for players when the pointer flips. The **files** are stored by path and overwritten in place by `rclone sync`: publishing is safe only under `maintenance: true`, and rollback is a re-upload, not a pointer flip. Content addressing is proposed in [ADR-0012](docs/adr/0012-content-addressed-pack-files.md); never describe publishing as atomic until it lands.
+- **RAM** — `settings.java.useModpackRam` (default `true`) decides who wins in `buildLaunchCommand`: the modpack's `java.minRam`/`maxRam`, or the launcher-wide setting. RAM crosses the IPC boundary as **megabytes** only; the `'2G'`/`'4096M'` disk format is parsed by `ConfigManager.parseRamToMB` and never reaches the renderer. The settings slider is capped at 75% of `os.totalmem()`, and `setMaxRAM` pulls `minRAM` down with it — `-Xms` above `-Xmx` aborts the JVM before it prints anything
+- **ConfigManager** (main-side, persisted to `%APPDATA%/.nonamelauncher/config.json`; `~/Library/Application Support` or `~/.local/share` elsewhere) — Java settings, game resolution, selected account, auth database. The file carries a `CONFIG_VERSION` stamp; credentials are stored encrypted (see Authentication). `load()` never overwrites a file it failed to read — an unparseable one is moved to `config.json.corrupt-<timestamp>`
+  - **Two roots, and they are not the same thing** ([ADR-0004](docs/adr/0004-two-roots-launcher-and-data-directory.md)). `getLauncherDirectory()` is the fixed app root and must never depend on a setting; `getDataDirectory()` is what "Directorio de datos" governs, and everything bulky hangs off it — `common/`, `instances/`, `manifests/`, `<dataDir>/runtime/<arch>`. **Build new paths on `getDataDirectory()`** unless they belong next to the config
+  - `settings.launcher.dataDirectory` is `null` by default ("wherever the launcher lives"); an unusable stored path falls back to the default with a warning and is **not** rewritten
+- **helios-core** — Java detection/download, Minecraft asset downloading, authentication helpers
+
+Launcher directory layout: `common/` (shared assets, libraries, versions, java, forge), `manifests/<sha256>.json` (verified manifest cache), `instances/<serverId>/` (mods, natives, per-modpack game dir, plus `.nnl-state.json`).
+
+### Authentication
+
+`AuthManager` runs the Microsoft → XBL → XSTS → Minecraft chain through `helios-core/microsoft`, split in two halves: `exchangeAuthCode` / `exchangeRefreshToken` obtain the Microsoft token set, and `resolveMinecraftSession(msAccessToken)` walks it down to a playable session. The three callers compose them — `addMicrosoftAccount` (both), `refreshMSToken` (both), `refreshMCToken` (only the second, since the MS token is still good). Accounts live in `config.json` under `authenticationDatabase[uuid]` with two independent expiries (`expiresAt` for the MC token, `microsoft.expires_at` for the MS token).
+
+The three secrets — `accessToken`, `microsoft.access_token`, `microsoft.refresh_token` — are **not** on disk in the clear: `ConfigManager` folds them into one `secrets` blob encrypted with Electron's `safeStorage`, and the rest of the account stays readable. `safeStorage` needs `app.whenReady()`, which holds because `ConfigManager.load()` runs inside `createWindow()`.
+
+Rules when touching auth ([ADR-0007](docs/adr/0007-encrypt-account-secrets-with-safestorage.md)):
+
+- A **transient** failure (no network, 5xx) must never delete the account. helios-core does not throw for a failed request — it returns `responseStatus: ERROR` with got's `RequestError` attached — so `AuthManager.classifyRestError` reads that and tags the failure. Only a code in `TERMINAL_AUTH_CODES` (`src/shared/errorCodes.js`, checked with `isTerminalAuthCode`) justifies a logout; an unrecognised error deliberately does **not**.
+- `validateSelectedMicrosoftAccount` returns `{ ok, code, message }`, never a boolean.
+- The refresh is **scheduled from `expiresAt`**, not polled: `AuthManager.startTokenRefreshScheduler` arms a `setTimeout` 5 min before expiry, bounded to `[15 s, 30 min]`, backs off `[1, 2, 5, 10 min]` on a recoverable failure and notifies the renderer only on a terminal one. Starting is idempotent, and `powerMonitor.on('resume')` re-checks after a suspend. Re-arm it with `scheduleTokenRefresh()` after anything that changes the selected account.
+- Never send the Minecraft `accessToken` to the renderer; the renderer only needs `username`/`uuid`/`displayName`.
+- `microsoft.expires_at` is the expiry of the MS **access** token (~1 h), not of the refresh token (~90 days). Never treat it as "the session is over".
+- A decryption failure costs the session only: `purgeSession` clears `authenticationDatabase` and `selectedAccount` and leaves every setting alone. If `safeStorage.isEncryptionAvailable()` is false, credentials are **not persisted at all** rather than written in plaintext.
+- `usersAllowed` filtering in `firestoreService` is UX only ([ADR-0006](docs/adr/0006-usersallowed-is-ux-not-access-control.md)), and cannot currently be enforced in Security Rules either — the launcher has no Firebase identity, so `request.auth` is always `null`. See the stand-by entry in `TODO.md`.
+
+### Firestore → Main Process Bridge
+
+Firestore data is fetched in the renderer, then sent to main via `distro:setServerData`. DistributionManager.setServerData() wraps it as `{ rawServer }`.
+
+The renderer re-reads the modpack document in `useServers.prepareLaunch()` **when PLAY is pressed**, not when the list loads — otherwise a player who left the launcher open would never see a `maintenance` flag raised afterwards, nor a manifest published in the meantime. `LaunchManager` checks the flag again as defence in depth.
+
+### Launch Flow (`LaunchManager.launchMinecraft`)
+
+Every step reports through a single `progressCallback`; the renderer maps `type` to UI state in `LaunchContext`.
+
+```
+auth (validate/refresh MS token)
+  → manifest        (ManifestManager.fetch — sha256-verified against the Firestore pointer)
+  → validation      (DistributionManager.planSync — sha256 per file, size+mtime fast path)
+  → download_mods   (DistributionManager.applySync — orphan deletion + helios downloadQueue)
+  → download        (MinecraftDownloadManager — helios MojangIndexProcessor, returns the version manifest)
+  → java            (LaunchManager.ensureJava — validate → discover → download)
+  → modloader       (ModLoaderManager.installModLoader — Forge installer / Fabric Meta profile)
+  → download_libraries (LaunchManager.downloadModLoaderLibraries — loader-specific libs)
+  → launch          (buildLaunchCommand + child_process.spawn)
+  → started/stdout/stderr/exit
+```
+
+`started` is emitted on the child's `spawn` event (`LaunchManager.waitForSpawn`), never right
+after calling `spawn()`: a missing `javaw` only surfaces afterwards, and it must fail the launch
+through the normal `catch` (`GAME_SPAWN_FAILED`) instead of showing "playing" first.
+
+Arguments and libraries are filtered by `LaunchManager.rulesAllow`, which follows Mojang's
+semantics — with rules an entry starts **disallowed** and the **last** matching rule wins;
+`os.name`, `os.arch` and `os.version` are all checked. A placeholder with no value in
+`argContext` is never passed literally: the argument is dropped, and a bare `${x}` takes the
+`--flag` in front of it along (this is how `--clientId`/`--xuid` disappear).
+
+Invariants to preserve when touching this flow:
+
+- **Only one launch at a time.** `LaunchManager.launchInProgress` guards the preparation and `gameProcess != null` guards the rest; a second call is rejected with `LAUNCH_ALREADY_RUNNING` **before** the try, so it never emits `{type:'error'}` and tears down the UI of the launch that is actually running. `killGame()` does not clear `gameProcess` — the `close` handler is the only place that does. The renderer resynchronises after a reload through `launch:getStatus`
+
+- **Java must exist before any step that spawns a JVM.** The Forge installer needs one, which is why `ensureJava` runs before `installModLoader`.
+- The version string used for launching is `ModLoaderManager.getVersionString(manifest.loader, minecraftVersion)` (`1.20.1-forge-47.2.0`, `fabric-loader-x-y`, or the plain MC version); the *vanilla* version (`manifest.minecraft.version`) is what Mojang downloads and the client jar are keyed by. `loadVersionManifest` returns both — do not conflate them.
+- **The manifest is authoritative for launching.** `minecraftVersion` on the Firestore document is display-only — and currently displayed nowhere, since the caption under JUGAR shows only the name; never launch from it.
+- Never synthesize an empty `arguments` object when merging manifests: an empty array is truthy and silently disables the fallback branches.
+- Classpath entries are deduplicated by `group:artifact[:classifier]` and the loader's declaration wins over vanilla's.
+- Libraries come in two shapes — Mojang/Forge `downloads.artifact`, Fabric Maven `name` + `url`. Always go through `LaunchManager.resolveLibraryArtifact`, never read `downloads.artifact` directly.
+
+**Supported range: Minecraft 1.17+** ([ADR-0003](docs/adr/0003-minecraft-1-17-minimum.md)). `assertSupportedVersion` rejects anything older with `UNSUPPORTED_MC_VERSION`. Do not add half-support: older versions need natives extraction and the `minecraftArguments` path together, or not at all.
+
+#### Progress event contract ([ADR-0005](docs/adr/0005-single-progress-contract-and-phase-map.md))
+
+Every callback in the chain takes **one object**, `{ current, total, message }`. The managers underneath do not know which launch phase they are serving, so they never set `type`; `LaunchManager` is the only layer that adds it. `MinecraftDownloadManager` also carries its own sub-phase as `phase`.
+
+`launch:progress` carries a `type` that **must** have a matching `case` in `LaunchContext`'s switch **and** a slice in `renderer/services/launchPhases.js`, otherwise the step runs but the bar freezes on the previous message. Current set:
+
+| Group | Types |
+|-------|-------|
+| Phases (update the progress bar) | `auth`, `manifest`, `validation`, `download_mods`, `download`, `java`, `java_discover`, `java_download`, `java_extract`, `modloader`, `download_libraries`, `launch` |
+| Lifecycle | `started`, `exit`, `error` |
+| Game output (appended to the log viewer) | `stdout`, `stderr` |
+
+Adding a phase means touching `LaunchManager`, `LaunchContext` **and** `launchPhases.js` in the same change. A `type` must appear **exactly once** in the flow — `PHASE_RANGE` maps it to a fixed slice, so a repeated type makes the bar run backwards ([ADR-0005](docs/adr/0005-single-progress-contract-and-phase-map.md)).
+
+#### Mod loader installation
+
+helios-core does **not** install mod loaders — it only reads a version manifest that the distribution already provides. The loader is declared by the manifest (`loader: { type, version }`) and read there and nowhere else. Everything below is ours:
+
+- **Fabric** — no installer: the profile JSON is fetched from `meta.fabricmc.net` and written to `versions/<id>`. This is the only loader currently exercised end to end.
+- **Forge** — the installer jar would be published as an ordinary manifest file (`loader.installer.path`) and `ModLoaderManager.installForge` runs it (`--installClient <commonDir>`), generating the version JSON and running its binary-patching processors. Needs a JVM and `launcher_profiles.json`, both handled. **Not reachable today**: `tools/pack-publish` refuses non-Fabric packs, so this path has never run. Wire the generator before trusting it.
+- **NeoForge (planned)** — its installer is a fork of Forge's and accepts the same `--installClient`, so `installForge` works as-is; only the maven host (`maven.neoforged.net`) changes. The trap is the version id: `neoforge-21.1.72` for MC 1.20.2+, but `1.20.1-forge-47.1.106` for MC 1.20.1. Read `id` from `version.json` inside the installer jar instead of composing it from a template. `adm-zip` was dropped on 2026-11-05 because nothing imported it; add it back with NeoForge.
+
+### Java Handling
+
+`helios-core/java` (v2.3 API — check signatures before use, they changed in 2.x):
+
+- `validateSelectedJvm(rootDir, semverRange)` → `JvmDetails | null` (not `{ valid }`); pass a **root** dir via `ensureJavaDirIsRoot`, not the executable.
+- `discoverBestJvmInstallation(dataDir, semverRange)` scans system installs **and** `<dataDir>/runtime/<arch>`.
+- `latestOpenJDK(major, dataDir)` returns an `Asset` with `url`, `hash` (SHA256) and the `path` where it should land — use that `path` so downloaded JDKs live in the runtime dir and get rediscovered later.
+- `extractJdk(archivePath)` extracts next to the archive and returns the executable path (`javaw.exe` on Windows).
+
+The required Java major comes from the Mojang manifest (`javaVersion.majorVersion`), which `MinecraftDownloadManager.downloadMinecraft` returns; the MC→Java table in `getRequiredJavaVersion` is only a fallback. Ranges are bounded (`17.x`, not `>=17`) so a modpack built for 17 is never launched on 21.
+
+### Shared Utilities (`src/main/utils`)
+
+- `Logger` — one winston root logger; `getLogger(name)` returns a child labelled with the name. Console transport (coloured) plus, after `Logger.enableFileLogging(ConfigManager.getLogsDirectory())` in `main/index.js`, a file transport at `<launcherDir>/logs/launcher.log` rotating at 5 MB × 5 files. An `Error` argument is rendered as stack + `code` + cause chain (never `util.inspect` at unlimited depth, which dumped got's request headers), other objects at depth 3, and the final line goes through a token redactor. The redactor is a safety net: **never log a token, nor an object that may carry one**. helios-core's own internal loggers still use its console-only `LoggerUtil`.
+- `FileUtils` — `hashFile` / `validateLocalFile`, streaming. Every downloaded artifact is validated with it; never re-implement hashing with `readFileSync`. `validateLocalFile` with no expected hash accepts **any file that exists**, and helios writes downloads straight to their final path. So never pass it a null hash if one can be obtained: loader libraries without `sha1` (Fabric's `fabric-loader` and `intermediary`) get theirs from the maven via `LaunchManager.fetchPublishedSha1`.
+- `PathUtils` — `resolveInside` / `isSafeRelativePath`. Every path built from manifest, renderer or network data goes through `resolveInside`.
+- `HttpUtils` — `fetchWithTimeout` for small JSON/text requests. Never call bare `fetch` in main.
+- `MavenUtils` — `mavenToRelativePath` / `mavenToUrl` for Maven-coordinate libraries.
+- `PackPolicy` — `globToRegExp` / `resolvePolicy` / `strictRoots` for manifest ignore globs and per-path policies. **Deliberately duplicated** in `tools/pack-publish/generate.mjs`, which runs on plain node and cannot import these extensionless sources; change both together.
+
+## Styling
+
+Tailwind CSS v4 with `@theme` block in `App.css`. Key custom tokens:
+
+- Colors: `accent-green` (#4ade80), `accent-blue`, `accent-wine` (#7a1f3d, the kill button's hover), `bg-deep` (#050505), `panel-steel`, `sidebar-bg`, `sidebar-border`, `card-hover`
+- Fonts: `font-inter` only. **The theme key is `--font-inter`, not `--font-family-inter`** — Tailwind v4 namespaces families under `--font-*`, and a token in a namespace that does not exist generates no class and reports nothing. Inter is **self-hosted** through `@fontsource-variable/inter` (imported in `main.jsx`, family name `'Inter Variable'`); never reintroduce a CDN `@import`, `style-src` blocks it
+- Animation: `animate-blink` (cursor blink), `animate-fade-in-up` (modpack logo, pair it with `motion-reduce:animate-none`). The background crossfade is a plain opacity/scale transition in `DynamicBackground`, not a keyframe
+
+UI follows dark glassmorphism, in two flavours:
+
+- **Opaque surfaces** (dropdowns, status toasts): `bg-[rgba(20,20,22,0.95)] backdrop-blur-[20px] border border-white/10`
+- **The modal** (`components/common/Modal.jsx`): panel at `bg-[rgba(18,18,20,0.55)] backdrop-blur-[28px] backdrop-saturate-150` over an overlay that is only `bg-black/25` with **no blur of its own**. `backdrop-filter` blurs everything painted behind the element, the overlay's background included, so putting a solid scrim on the overlay leaves the panel blurring a flat wash and the glass disappears
+
+## Environment Variables
+
+All of them are read **at build time** from `.env` (or the environment, which wins); the running app never reads `.env` and `dotenv` is gone. Firebase config uses the `VITE_` prefix (inlined into the renderer). `MICROSOFT_CLIENT_ID` is validated and inlined into main by `electron.vite.config.mjs` as `__MICROSOFT_CLIENT_ID__`, read only through `src/main/constants.js`; `pnpm dev`/`pnpm build` stop if it is missing or not an Azure GUID.
+
+```
+MICROSOFT_CLIENT_ID=...
+VITE_FIREBASE_API_KEY=...
+VITE_FIREBASE_AUTH_DOMAIN=...
+VITE_FIREBASE_PROJECT_ID=...
+```
+
+## Key Conventions
+
+- All UI text is in **Spanish**; logs and code identifiers in English
+- Managers are static classes (no instantiation)
+- IPC channel names use colon notation: `category:action`
+- Skin avatars use minotar.net API
+- `usersAllowed` in Firestore filters by Minecraft **username** (not UUID)
+- Indentation: 4 spaces in `src/main/{managers,utils,windows}`, 2 spaces in `src/main/index.js`, `src/main/ipc`, `src/preload`, `src/shared` and the whole renderer — match the file you are editing
+- Error codes are shared constants in `src/shared/errorCodes.js`, never inline strings
+
+## Implementation Principles
+
+**DRY** — one mechanism per job.
+
+- Downloads go through `helios-core/dl` (`downloadQueue`, `downloadFile`): it already does retries and concurrency. Do not add another `got.stream` + `createWriteStream` loop — `got` is intentionally not a direct dependency anymore.
+- Mod-loader knowledge (detect type, resolve version, build version string) lives in `ModLoaderManager` only.
+- Constants shared by main and renderer (client id, launcher name/version) come from a single source, not per-file fallbacks. The launcher version is `package.json`, not a literal: the main process reads `app.getName()` / `app.getVersion()`, and the renderer gets `__APP_VERSION__`, inlined at build time by `electron.vite.config.mjs` because it is sandboxed and cannot read the file.
+- Adding an IPC call means touching all four layers (channels → handler → preload → ipcClient); if a channel is not present in all four, it is dead.
+
+**KISS** — the launcher is a pipeline, keep it readable.
+
+- Prefer small named steps over a single long function with flags. Mode parameters that change the meaning of the other arguments are a smell — split the function, the way `fullMicrosoftAuthFlow(code, authMode)` became `exchangeAuthCode` / `exchangeRefreshToken` / `resolveMinecraftSession`.
+- One progress-reporting shape for the whole chain: a single `{ current, total, message }` object. Do not add a `(current, total, msg)` signature back.
+- Fail loudly: never swallow a per-file download error with a `logger.warn` and continue into launch.
+
+**YAGNI** — delete instead of keeping "just in case".
+
+- The distribution.json path and `DownloadManager` are **gone**, along with `auth/PlayerInfo.jsx` and `server/ServerSelector.jsx`. `distro:setServerData` is the only distribution channel left. Do not reintroduce them.
+- Genuinely unused deps should be removed, not extended — but check what actually loads them first. `helios-distribution-types` looks unused because nothing in `src/` imports it; it is required at runtime by `helios-core/common` (→ `DistributionAPI` → `DistributionFactory`), which `AuthManager` imports for `RestResponseStatus`. helios-core only declares it as a **devDependency**, so the consumer has to provide it. Removing it once left the app unable to start from a clean install, and it stayed hidden for weeks because the existing `node_modules` still had the package on disk.
+- No new abstraction layer until there is a second caller.
+
+## Trust Boundaries and Known Gaps
+
+Treat two things as **untrusted input in the main process**: every argument that arrives over
+IPC (the renderer is sandboxed, but it is still the side an attacker reaches first), and every
+value that came from the network — the Firestore document, the manifest, Fabric Meta, Mojang
+version JSON. Hashes prove a file is the published one; they do not prove its contents are
+sane.
+
+For **new code** this means: validate type and range in the handler, not only in the UI; resolve
+every path built from such data inside its base directory and throw if it escapes (the orphan
+deletion in `DistributionManager.applySync` is the model); give every network `fetch` a timeout.
+
+The mechanisms for this exist and are the ones to reuse (branch `fix/p1-hardening`):
+
+- **Paths**: `PathUtils.resolveInside(base, rel)` throws `PATH_OUTSIDE_BASE`, and
+  `isSafeRelativePath` is the manifest-path rule. `ManifestManager.assertShape` rejects unsafe
+  paths with `MANIFEST_INVALID`, `DistributionManager.instanceDirFor(id)` validates modpack ids
+  (`MODPACK_INVALID`), and `ConfigManager.getVersionDirectory/getVersionJsonPath` is the only way
+  to build `versions/<id>`
+- **Network**: `HttpUtils.fetchWithTimeout(url, what, { timeoutMs })` for JSON/text requests
+  (`NETWORK_TIMEOUT` / `NETWORK_ERROR`); files still go through `helios-core/dl`
+- **Settings**: `config.ipc.js` validates every setter (`CONFIG_INVALID_VALUE`), and
+  `setJavaExecutable` only accepts an existing, absolute `java`/`javaw`
+- **Persistence**: `ConfigManager.save()` is atomic (tmp + fsync + rename) and **throws**
+  `CONFIG_SAVE_FAILED`, so callers must let it propagate or handle it; only `load()` uses the
+  swallowing `saveAfterLoad()`. `validateConfig` repairs wrong-typed keys one by one, and a
+  non-object root is quarantined
+- **Auth**: `validateSelectedMicrosoftAccount()` is single-flight (`validationInFlight`); the
+  body is `runAccountValidation()`
+- **Dev mode**: the dev renderer URL, DevTools and the relaxed CSP are gated on `app.isPackaged`
+- **Shell**: the renderer can only open the data and logs directories
+  (`shell:openDataDirectory`, `shell:openLogsDirectory`, no argument)
+- **Single instance**: `main/index.js` takes `app.requestSingleInstanceLock()` before anything
+  else; a second launch focuses the existing window and exits, so `config.json` and the log file
+  only ever have one writer
+- **Settings in the renderer**: `SettingsScreen.saveSettings(changes, persist, message)` shows the
+  change, awaits the IPC call and reverts with a status message if main rejects or cannot save
+  it. Never call `ipc.config.set*` fire-and-forget; typed values (resolution, RAM) are committed
+  on blur, not per keystroke
+
+Still open from the 2026-09-17 audit (tracked in `TODO.md`, 📋). Do not copy these patterns:
+
+- `settings.java.executable` holds both the user's choice and the auto-discovered JVM, so
+  `ensureJava` silently overwrites a manual choice (B7)
+
+## Gotchas
+
+- `helios-core` 2.x changed several signatures (see Java Handling). Read `node_modules/helios-core/dist/**/*.d.ts` before assuming an API shape.
+- `resources/icon.png` is the studio icon (1024×1024, transparent) and the app icon for every target. `resources/` is electron-vite's **public directory** for main: `import icon from '…/icon.png?asset&asarUnpack'` does not copy the file, it resolves to `../../resources/icon.png` next to the bundle (rewritten to `app.asar.unpacked`). That is why `electron-builder.yml` lists it under both `files` and `asarUnpack` — `buildResources` is excluded from the app otherwise, and the window icon would point at nothing.
+- `.env` is not bundled into the packaged app and nothing reads it at runtime. Anything the main process needs from it goes through a `define` in `electron.vite.config.mjs`, the way `__APP_VERSION__` and `__MICROSOFT_CLIENT_ID__` are done (declare the global in `eslint.config.mjs` too).
+- Only packages the **main process** `require`s at runtime belong in `dependencies` (`fs-extra`, `helios-core`, `helios-distribution-types`, `winston`) — `externalizeDepsPlugin` leaves exactly those out of the bundle and electron-builder ships them. Build-only tooling goes in `devDependencies`. `pnpm audit --prod` should stay at 0.
+- The working tree is CRLF (`core.autocrlf=true`). Scripted edits must match `\r\n`, and a `\uXXXX` escape typed into a tool call can arrive as the literal character — check regexes like `/^\uFEFF/` after writing them.
+- The TypeScript migration (TODO P5) does **not** depend on the ESM migration: electron-vite still emits the sandboxed preload as CJS from a `.ts` source.
+- `pnpm-lock.yaml` is the only lockfile; the stale `package-lock.json` has been removed.
+- Renderer bundle is ~1.2 MB, dominated by the Firebase SDK; only `getDoc`/`getDocs` are used, so `firebase/firestore/lite` is enough.
+
+## Commits
+
+Conventional Commits in **English**, one short subject line, one logical change per commit. No body unless it is genuinely needed, and **never a `Co-Authored-By` trailer**:
+
+```
+feat(launch): use per-modpack RAM settings
+fix(java): read required version from manifest
+refactor(distro): drop the distribution.json flow
+build: add portable Windows target
+```
+
+Scopes in use: `launch`, `java`, `auth`, `distro`, `servers`, `download`, `game`, `fabric`, `ui`, `config`.
+
+(UI text stays in Spanish — this rule is only about commits, code identifiers and logs.)

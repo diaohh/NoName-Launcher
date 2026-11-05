@@ -9,14 +9,14 @@ break.
 | File | Holds |
 |------|-------|
 | `docs/adr/` | The **why**. Written once, never rewritten — a decision that changes is *superseded* by a new ADR, so the reasoning that led to the old one survives |
-| `CLAUDE.md` | The **rule**, stated so it can be applied while editing, linking to its ADR for the reasoning |
+| `AGENTS.md` | The **rule**, stated so it can be applied while editing, linking to its ADR for the reasoning |
 | `TODO.md` | Work that is still pending. Not an archive |
 | `README.md` | The public face: what the launcher does and how to run it |
 
-`CLAUDE.md` is in `.gitignore` — it is local agent guidance and does not ship with the repo.
-Anything a contributor must know to not break the launcher therefore belongs **here or in the
-README**, not only there. When a rule exists in `CLAUDE.md` alone, it is invisible to everyone
-who clones the project.
+`AGENTS.md` is written for coding agents, but it is versioned and every contributor can read
+it. A local `CLAUDE.md` stays in `.gitignore` and only imports it. Anything a contributor must
+know to not break the launcher still belongs **here or in the README** as well: `AGENTS.md`
+states rules tersely, and the reasoning behind them is what an ADR is for.
 
 Write an ADR when a decision is **structural** (it constrains code that has not been written
 yet), **contested** (a reasonable person would pick differently), or **deferred** (the reason
@@ -61,8 +61,8 @@ ADRs 0001, 0007 and 0011 carry an addendum from the 2026-09-17 audit.
 
 ## Not written yet
 
-Decisions already taken and documented in prose in `CLAUDE.md` (which is gitignored, so they
-reach nobody who clones the repo), worth extracting when they are next touched:
+Decisions already taken and documented only as rules in `AGENTS.md` (formerly the gitignored
+`CLAUDE.md`), whose reasoning is worth extracting when they are next touched:
 
 - **State in the Context API, no Redux** — four providers, why the launcher's state is small
   enough and what `StatusContext` replaced.

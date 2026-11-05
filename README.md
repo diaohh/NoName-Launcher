@@ -172,7 +172,8 @@ pnpm lint    # ESLint (flat config) — the repo stays at 0 errors
 ```
 
 Design decisions and the reasoning behind the conventions below live in
-[docs/adr/](docs/adr/README.md).
+[docs/adr/](docs/adr/README.md). Coding agents read [AGENTS.md](AGENTS.md), which states the
+same rules in the form they need while editing.
 
 Two conventions are easy to break from outside and are worth reading before a first change:
 
