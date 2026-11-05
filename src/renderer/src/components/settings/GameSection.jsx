@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { ipc } from '../../services/ipcClient'
 import ToggleSwitch from './ToggleSwitch'
 
@@ -9,29 +10,51 @@ const PRESETS = [
   { label: '2560 x 1440', w: 2560, h: 1440 },
 ]
 
-export default function GameSection({ settings, onUpdate }) {
-  const handleWidthChange = (e) => {
-    const val = parseInt(e.target.value) || 0
-    onUpdate('gameWidth', val)
-    if (val >= 640) ipc.config.setGameWidth(val)
-  }
+const DIMENSIONS = {
+  gameWidth: { persist: (value) => ipc.config.setGameWidth(value), failure: 'No se ha podido guardar el ancho' },
+  gameHeight: { persist: (value) => ipc.config.setGameHeight(value), failure: 'No se ha podido guardar el alto' }
+}
 
-  const handleHeightChange = (e) => {
-    const val = parseInt(e.target.value) || 0
-    onUpdate('gameHeight', val)
-    if (val >= 480) ipc.config.setGameHeight(val)
+const inputClass = 'w-24 bg-white/5 border border-white/10 rounded px-3 py-2 text-sm text-white focus:border-accent-green focus:outline-none transition-colors duration-200 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none'
+
+export default function GameSection({ settings, onSave }) {
+  // What is being typed, per field, until it loses focus. Saving on every keystroke sent
+  // "1", "12", "128" on the way to "1280" — values main rightly rejects — and a width under
+  // 640 used to stay on screen while the disk kept the old one.
+  const [draft, setDraft] = useState({})
+
+  const editDimension = (key, text) => setDraft(prev => ({ ...prev, [key]: text }))
+
+  const commitDimension = (key) => {
+    if (draft[key] === undefined) return
+
+    const value = Number(draft[key])
+    setDraft(({ [key]: _committed, ...rest }) => rest)
+    if (value === settings[key]) return
+
+    // Range and integer checks live in main, which answers with the message to show.
+    const { persist, failure } = DIMENSIONS[key]
+    onSave({ [key]: value }, () => persist(value), failure)
   }
 
   const handlePreset = (preset) => {
-    onUpdate('gameWidth', preset.w)
-    onUpdate('gameHeight', preset.h)
-    ipc.config.setGameWidth(preset.w)
-    ipc.config.setGameHeight(preset.h)
+    setDraft({})
+    onSave(
+      { gameWidth: preset.w, gameHeight: preset.h },
+      async () => {
+        await ipc.config.setGameWidth(preset.w)
+        await ipc.config.setGameHeight(preset.h)
+      },
+      'No se ha podido guardar la resolucion'
+    )
   }
 
   const handleFullscreenToggle = (checked) => {
-    onUpdate('fullscreen', checked)
-    ipc.config.setFullscreen(checked)
+    onSave({ fullscreen: checked }, () => ipc.config.setFullscreen(checked), 'No se ha podido guardar la pantalla completa')
+  }
+
+  const blurOnEnter = (e) => {
+    if (e.key === 'Enter') e.currentTarget.blur()
   }
 
   const isActivePreset = (p) => settings.gameWidth === p.w && settings.gameHeight === p.h
@@ -43,20 +66,24 @@ export default function GameSection({ settings, onUpdate }) {
         <div className="flex items-center gap-2 mb-3">
           <input
             type="number"
-            value={settings.gameWidth}
-            onChange={handleWidthChange}
+            value={draft.gameWidth ?? settings.gameWidth}
+            onChange={(e) => editDimension('gameWidth', e.target.value)}
+            onBlur={() => commitDimension('gameWidth')}
+            onKeyDown={blurOnEnter}
             min={640}
             disabled={settings.fullscreen}
-            className="w-24 bg-white/5 border border-white/10 rounded px-3 py-2 text-sm text-white focus:border-accent-green focus:outline-none transition-colors duration-200 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+            className={inputClass}
           />
           <span className="text-white/40 text-sm">x</span>
           <input
             type="number"
-            value={settings.gameHeight}
-            onChange={handleHeightChange}
+            value={draft.gameHeight ?? settings.gameHeight}
+            onChange={(e) => editDimension('gameHeight', e.target.value)}
+            onBlur={() => commitDimension('gameHeight')}
+            onKeyDown={blurOnEnter}
             min={480}
             disabled={settings.fullscreen}
-            className="w-24 bg-white/5 border border-white/10 rounded px-3 py-2 text-sm text-white focus:border-accent-green focus:outline-none transition-colors duration-200 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+            className={inputClass}
           />
         </div>
         <div className="flex flex-wrap gap-2">

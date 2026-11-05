@@ -42,8 +42,26 @@ export default function SettingsScreen({ onBack }) {
     return () => { ignore = true }
   }, [showStatus])
 
+  /** For values main has already stored and answered with (RAM, data directory, Java path). */
   const updateSetting = (key, value) => {
     setSettings(prev => ({ ...prev, [key]: value }))
+  }
+
+  /**
+   * Shows `changes` at once and writes them through `persist`. If main rejects the value
+   * (CONFIG_INVALID_VALUE) or cannot write it (CONFIG_SAVE_FAILED), the screen goes back to
+   * what is actually stored and says why: it never shows a value the disk did not receive.
+   */
+  const saveSettings = async (changes, persist, failureMessage) => {
+    const previous = Object.fromEntries(Object.keys(changes).map(key => [key, settings[key]]))
+    setSettings(prev => ({ ...prev, ...changes }))
+
+    try {
+      await persist()
+    } catch (err) {
+      setSettings(prev => ({ ...prev, ...previous }))
+      showStatus(err.message || failureMessage, 'error')
+    }
   }
 
   if (!settings) {
@@ -84,14 +102,14 @@ export default function SettingsScreen({ onBack }) {
         <div className="max-w-[600px] space-y-10">
           <section>
             <h2 className="text-sm font-semibold text-white/50 uppercase tracking-widest mb-4">Java</h2>
-            <JavaSection settings={settings} onUpdate={updateSetting} />
+            <JavaSection settings={settings} onUpdate={updateSetting} onSave={saveSettings} />
           </section>
 
           <div className="border-t border-white/5" />
 
           <section>
             <h2 className="text-sm font-semibold text-white/50 uppercase tracking-widest mb-4">Juego</h2>
-            <GameSection settings={settings} onUpdate={updateSetting} />
+            <GameSection settings={settings} onSave={saveSettings} />
           </section>
 
           <div className="border-t border-white/5" />

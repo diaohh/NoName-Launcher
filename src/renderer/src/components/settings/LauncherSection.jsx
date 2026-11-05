@@ -12,12 +12,12 @@ export default function LauncherSection({ settings, onUpdate }) {
   const isDefault = settings.dataDirectory === settings.defaultDataDirectory
 
   const handlePickFolder = async () => {
-    const result = await ipc.dialog.openFolder({
-      title: 'Seleccionar directorio de datos'
-    })
-    if (!result) return
-
     try {
+      const result = await ipc.dialog.openFolder({
+        title: 'Seleccionar directorio de datos'
+      })
+      if (!result) return
+
       // The main process answers with the directory it actually adopted, so the input
       // never shows a path the launcher is not really using.
       const applied = await ipc.config.setDataDirectory(result)
