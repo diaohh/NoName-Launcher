@@ -6,6 +6,11 @@ directories:
 files:
   - out/**/*
   - "!out/**/*.map"
+  # buildResources is left out of the app by default. The window icon is read at runtime
+  # (`?asset&asarUnpack` in src/main/index.js), so it ships, outside the asar.
+  - resources/icon.png
+asarUnpack:
+  - resources/icon.png
 win:
   target:
     - nsis

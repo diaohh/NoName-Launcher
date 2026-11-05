@@ -1,5 +1,9 @@
 import { app, BrowserWindow, session, shell } from 'electron'
 import path from 'path'
+// `resources/` is electron-vite's public directory for main, so `?asset` resolves the icon
+// against it at runtime; `asarUnpack` points that path at app.asar.unpacked, where
+// electron-builder.yml leaves the folder as a real file on disk.
+import icon from '../../resources/icon.png?asset&asarUnpack'
 import { registerAllIPC } from './ipc'
 import ConfigManager from './managers/ConfigManager'
 
@@ -87,7 +91,7 @@ function createWindow() {
     width: 1000,
     height: 600,
     frame: true,
-    icon: path.join(__dirname, '../../resources/icon.png'),
+    icon,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       nodeIntegration: false,
