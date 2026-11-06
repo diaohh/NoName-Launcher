@@ -8,6 +8,7 @@ import PlayButton from '../launch/PlayButton'
 import LaunchOverlay from './LaunchOverlay'
 import ServersError from './ServersError'
 import SettingsScreen from '../settings/SettingsScreen'
+import AppLogo from '../common/AppLogo'
 
 export default function HomeScreen() {
   const { selectedServer, error, reload } = useServers()
@@ -30,8 +31,8 @@ export default function HomeScreen() {
           error
             ? <ServersError error={error} onRetry={reload} />
             : (
-              <h1 className="text-[3.5rem] font-black tracking-[-3px] uppercase font-inter">
-                NONAME<span className="text-accent-green animate-blink">_</span>
+              <h1>
+                <AppLogo className="w-[380px] max-w-[70%] mx-auto" />
               </h1>
             )
         )}

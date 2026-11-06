@@ -6,6 +6,7 @@ import LoginSection from './components/auth/LoginSection'
 import HomeScreen from './components/home/HomeScreen'
 import StatusMessage from './components/common/StatusMessage'
 import TitleBar from './components/common/TitleBar'
+import AppLogo from './components/common/AppLogo'
 
 function AppContent() {
   const { account, loading } = useAuth()
@@ -14,10 +15,10 @@ function AppContent() {
     return (
       <div className="w-full h-full flex items-center justify-center bg-bg-deep font-inter">
         <div className="text-center">
-          <h1 className="text-[3.5rem] font-black tracking-[-3px] uppercase text-white">
-            NONAME<span className="text-accent-green animate-blink">_</span>
+          <h1>
+            <AppLogo className="w-[340px] max-w-[70vw] mx-auto" />
           </h1>
-          <p className="text-white/30 text-sm tracking-[4px] mt-2">CARGANDO...</p>
+          <p className="text-white/30 text-sm tracking-[4px] mt-6">CARGANDO...</p>
         </div>
       </div>
     )
