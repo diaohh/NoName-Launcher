@@ -37,7 +37,7 @@ export default function KillGameButton() {
         onClick={() => setConfirming(true)}
         title="Cerrar Minecraft"
         aria-label="Cerrar Minecraft"
-        className="bg-[#2e2e33] text-white/50 border-none border-l border-l-black/20 py-[18px] px-6 rounded-r cursor-pointer transition-all duration-300 hover:bg-accent-wine hover:text-white hover:shadow-[0_0_28px_rgba(122,31,61,0.55)] active:bg-accent-wine flex items-center"
+        className="bg-[#2e2e33] text-white/50 border-none border-l border-l-black/20 py-[18px] pl-5 pr-7 rounded-r-full cursor-pointer transition-all duration-300 hover:bg-accent-wine hover:text-white hover:shadow-[0_0_28px_rgba(122,31,61,0.55)] active:bg-accent-wine flex items-center"
       >
         <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
           <path d="M4.5 4.5L13.5 13.5M13.5 4.5L4.5 13.5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />

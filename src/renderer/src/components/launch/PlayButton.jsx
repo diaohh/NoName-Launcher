@@ -55,10 +55,16 @@ export default function PlayButton() {
       }`}
     >
       {/* One control, two halves: while a game is running the play button squares off its
-          right edge so the kill button reads as part of it rather than as a second button. */}
+          right edge so the kill button closes the pill and reads as part of it rather than as a
+          second button. */}
       <div className="flex items-stretch justify-center">
+        {/* The colour is the modpack's optional `accentColor` (validated in firestoreService)
+            or the launcher's orange. It arrives at runtime, so it cannot be a Tailwind class —
+            those are generated at build time — and goes in as a CSS variable instead; the glow
+            is the same colour at 40% through color-mix, so one field drives both. */}
         <button
-          className={`bg-accent-green text-black border-none py-[18px] px-[80px] text-[1.2rem] font-black tracking-[2px] cursor-pointer transition-all duration-300 hover:scale-105 hover:shadow-[0_0_30px_rgba(74,222,128,0.4)] active:scale-100 disabled:opacity-60 disabled:cursor-not-allowed disabled:scale-100 disabled:shadow-none ${gameRunning ? 'rounded-l' : 'rounded'}`}
+          style={{ '--accent': selectedServer?.accentColor ?? 'var(--color-accent-orange)' }}
+          className={`bg-[var(--accent)] text-white border-none py-[18px] px-[120px] text-[1.2rem] font-black tracking-[2px] cursor-pointer transition-all duration-300 hover:scale-105 hover:shadow-[0_0_30px_color-mix(in_srgb,var(--accent)_40%,transparent)] active:scale-100 disabled:opacity-60 disabled:cursor-not-allowed disabled:scale-100 disabled:shadow-none ${gameRunning ? 'rounded-l-full' : 'rounded-full'}`}
           onClick={handlePlay}
           disabled={isDisabled}
         >
