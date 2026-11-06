@@ -39,6 +39,23 @@ function withTimeout(promise, ms = NETWORK_TIMEOUT_MS) {
   return Promise.race([promise, expiry]).finally(() => clearTimeout(timer))
 }
 
+const HEX_COLOR = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i
+
+/**
+ * A modpack document as the UI consumes it. The document is untrusted input, so the optional
+ * visual fields are checked here, once, instead of in every component that reads them.
+ *
+ * `accentColor` only accepts opaque `#rgb` / `#rrggbb`; anything else becomes `null` and the
+ * component falls back to the launcher's own accent.
+ */
+function toModpack(docSnap) {
+  const data = { id: docSnap.id, ...docSnap.data() }
+  data.accentColor = typeof data.accentColor === 'string' && HEX_COLOR.test(data.accentColor.trim())
+    ? data.accentColor.trim()
+    : null
+  return data
+}
+
 /**
  * Fetch all enabled modpacks, filtered by usersAllowed client-side
  * @param {string|null} username - Current player's username for filtering
@@ -56,7 +73,7 @@ export async function getModpacks(username) {
   const modpacks = []
 
   snapshot.forEach((docSnap) => {
-    const data = { id: docSnap.id, ...docSnap.data() }
+    const data = toModpack(docSnap)
 
     // Client-side filtering: empty usersAllowed = everyone can see
     const allowed = data.usersAllowed || []
@@ -80,5 +97,5 @@ export async function getModpacks(username) {
  */
 export async function getModpack(modpackId) {
   const docSnap = await withTimeout(getDoc(doc(db, 'modpacks', modpackId)))
-  return docSnap.exists() ? { id: docSnap.id, ...docSnap.data() } : null
+  return docSnap.exists() ? toModpack(docSnap) : null
 }
