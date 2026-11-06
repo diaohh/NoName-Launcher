@@ -8,10 +8,12 @@ A custom Minecraft launcher built with Electron, React, and Tailwind CSS. Featur
 
 - **Microsoft Authentication** — Full OAuth flow with automatic token refresh
 - **Modpack Distribution** — Catalogue in Firebase Firestore, files on a CDN verified by sha256. Per-user visibility lists hide packs in the UI; they are **not** access control (see below)
-- **Automatic Java Management** — Reads the required Java version from the Minecraft manifest, reuses a compatible JVM if one is installed, downloads it otherwise
+- **Automatic Java Management** — Reads the required Java version from the Minecraft manifest, reuses a compatible JVM if one is installed, downloads it otherwise. A Java picked by hand in Settings is always respected: a modpack that needs another version refuses to start instead of silently switching
 - **Fabric Support** — Loader profile resolved from the Fabric Meta API. Forge is implemented but not yet reachable end to end (see the loader table below)
 - **Per-Modpack Settings** — RAM allocation defined per modpack, used by default; a launcher-wide slider takes over when the per-modpack override is switched off in Settings
-- **Dynamic UI** — Modpack banners, player skin display via Minotar, glassmorphism dark theme
+- **Dynamic UI** — Modpack banners, player skin display via Minotar, glassmorphism dark theme with its own title bar
+- **Launch Feedback** — A progress bar for the preparation and a second one that follows the game to its title screen; the game log can be copied or saved from the logs dialog
+- **The Game Outlives the Launcher** — Closing the launcher never closes Minecraft; closing it mid-download asks first (see [ADR-0013](docs/adr/0013-the-game-outlives-the-launcher.md))
 - **Cross-Platform** — Windows (NSIS installer + portable), Linux (AppImage), macOS (DMG)
 
 ## Supported Minecraft Versions
@@ -135,7 +137,8 @@ Validate account (refresh Microsoft/Minecraft tokens if needed)
   → Resolve the required Java version from the version manifest, then reuse or download a JVM
   → Install the mod loader (Fabric Meta profile / Forge installer)
   → Download loader libraries
-  → Build the launch command and spawn the game
+  → Build the launch command and spawn the game (detached: it keeps running if the launcher closes)
+  → Follow the game output to its title screen (second progress bar)
 ```
 
 Everything runs in the main process and reports progress to the renderer over a single `launch:progress` event. Only one launch runs at a time — the main process refuses a second one rather than relying on the button being disabled.
@@ -152,6 +155,7 @@ The launcher root is `%APPDATA%/.nonamelauncher` on Windows (`~/Library/Applicat
 ```
 config.json          Launcher settings + account database
 logs/                launcher.log, rotated at 5 MB, five files kept (Settings → "Abrir carpeta de logs")
+running-game.json    The game started by the launcher, while it runs (stops a second one starting on top)
 ```
 
 Everything bulky lives under the **data directory**, which defaults to that same root and can be moved from Settings → Launcher:

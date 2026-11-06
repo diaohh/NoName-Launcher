@@ -77,7 +77,8 @@ Main Process (src/main/)          Preload (src/preload/)       Renderer (src/ren
     ├── config.ipc.js
     ├── distribution.ipc.js
     ├── launch.ipc.js
-    └── window.ipc.js
+    ├── logs.ipc.js (logs:export)
+    └── window.ipc.js (controls, maximize state, close guard)
 ```
 
 ### IPC Pattern
@@ -104,7 +105,7 @@ Events from main→renderer use `ipcRenderer.on` (e.g., launch progress, token e
 React Context API only (no Redux). Four providers wrap the app:
 
 - **AuthProvider** — Microsoft account, login/logout, token expiry monitoring
-- **LaunchProvider** — Launch state machine (`idle` → `preparing` → `playing`), progress tracking, game logs
+- **LaunchProvider** — Launch state machine (`idle` → `preparing` → `playing`), progress tracking, the second `startup` bar (`game_startup`), game logs (last 500 lines)
 - **ServersProvider** — Modpack list from Firestore, server selection, module loading
 - **StatusProvider** — Transient messages. `useStatus().showStatus(message, type)` with `type` `error` (default), `success` or `info`; a single `<StatusMessage />` host lives in `App.jsx` above every screen, so a message raised on the way out of one screen is still visible on the next. It is the **outermost** provider, so the others (AuthProvider tells the player why a session expired) can report through it
 
@@ -169,13 +170,32 @@ auth (validate/refresh MS token)
   → java            (LaunchManager.ensureJava — validate → discover → download)
   → modloader       (ModLoaderManager.installModLoader — Forge installer / Fabric Meta profile)
   → download_libraries (LaunchManager.downloadModLoaderLibraries — loader-specific libs)
-  → launch          (buildLaunchCommand + child_process.spawn)
-  → started/stdout/stderr/exit
+  → launch          (buildLaunchCommand + child_process.spawn, detached)
+  → started → game_startup (second bar) / stdout / stderr → exit
 ```
 
 `started` is emitted on the child's `spawn` event (`LaunchManager.waitForSpawn`), never right
 after calling `spawn()`: a missing `javaw` only surfaces afterwards, and it must fail the launch
 through the normal `catch` (`GAME_SPAWN_FAILED`) instead of showing "playing" first.
+
+**The game outlives the launcher** ([ADR-0013](docs/adr/0013-the-game-outlives-the-launcher.md)).
+It is spawned with `detached: true`: without it Windows puts the child in libuv's kill-on-close
+job object and closing the launcher killed the game unsaved (measured). On quit,
+`LaunchManager.releaseGame()` (`will-quit`) only destroys the pipes and `unref()`s the child.
+`running-game.json` next to `config.json` records `{ pid, gameDir }` from spawn to `close`;
+`findOrphanGame()` treats the record as live only if that PID's command line still contains the
+`gameDir`, and a launch (or a data directory change) over a live one is refused. Closing the
+window while a launch is being **prepared** is held in main (`window.ipc.js`) and confirmed by
+`CloseGuard` in the renderer; with a game running it closes without asking. Do not set
+`windowsHide: true` on the game spawn: Windows applies it to the JVM's first window, which is the
+game's.
+
+Game output is read **by lines** (`utils/GameOutput.readLines`, before any trim — a chunk can end
+mid-line), forwarded as `{ type: 'stdout' | 'stderr', lines: string[] }`, and fed to
+`utils/StartupTracker`, which turns milestones in the log into `game_startup`. The milestone table
+is heuristic and only calibrated against Fabric 1.20.x; the bar starts indeterminate, finishes
+after a quiet period past the late milestones, and gives up after 3 minutes. The tracker latches
+once `done` and is reset together with `gameProcess = null`.
 
 Arguments and libraries are filtered by `LaunchManager.rulesAllow`, which follows Mojang's
 semantics — with rules an entry starts **disallowed** and the **last** matching rule wins;
@@ -189,7 +209,7 @@ Invariants to preserve when touching this flow:
 
 - **Java must exist before any step that spawns a JVM.** The Forge installer needs one, which is why `ensureJava` runs before `installModLoader`.
 - The version string used for launching is `ModLoaderManager.getVersionString(manifest.loader, minecraftVersion)` (`1.20.1-forge-47.2.0`, `fabric-loader-x-y`, or the plain MC version); the *vanilla* version (`manifest.minecraft.version`) is what Mojang downloads and the client jar are keyed by. `loadVersionManifest` returns both — do not conflate them.
-- **The manifest is authoritative for launching.** `minecraftVersion` on the Firestore document is display-only — and currently displayed nowhere, since the caption under JUGAR shows only the name; never launch from it.
+- **The manifest is authoritative for launching.** `minecraftVersion` on the Firestore document is display-only — and currently displayed nowhere, since the caption under JUGAR shows only the name; never launch from it. Technical details (pack version, loader, mod list) are deliberately not shown to players: they are content creators, not modpack maintainers.
 - Never synthesize an empty `arguments` object when merging manifests: an empty array is truthy and silently disables the fallback branches.
 - Classpath entries are deduplicated by `group:artifact[:classifier]` and the loader's declaration wins over vanilla's.
 - Libraries come in two shapes — Mojang/Forge `downloads.artifact`, Fabric Maven `name` + `url`. Always go through `LaunchManager.resolveLibraryArtifact`, never read `downloads.artifact` directly.
@@ -206,9 +226,10 @@ Every callback in the chain takes **one object**, `{ current, total, message }`.
 |-------|-------|
 | Phases (update the progress bar) | `auth`, `manifest`, `validation`, `download_mods`, `download`, `java`, `java_discover`, `java_download`, `java_extract`, `modloader`, `download_libraries`, `launch` |
 | Lifecycle | `started`, `exit`, `error` |
-| Game output (appended to the log viewer) | `stdout`, `stderr` |
+| Game startup (second bar, `{ current, total, message, done }`, `current` null = indeterminate) | `game_startup` |
+| Game output (appended to the log viewer, `lines: string[]`) | `stdout`, `stderr` |
 
-Adding a phase means touching `LaunchManager`, `LaunchContext` **and** `launchPhases.js` in the same change. A `type` must appear **exactly once** in the flow — `PHASE_RANGE` maps it to a fixed slice, so a repeated type makes the bar run backwards ([ADR-0005](docs/adr/0005-single-progress-contract-and-phase-map.md)).
+Adding a phase means touching `LaunchManager`, `LaunchContext` **and** `launchPhases.js` in the same change. A `type` must appear **exactly once** in the flow — `PHASE_RANGE` maps it to a fixed slice, so a repeated type makes the bar run backwards ([ADR-0005](docs/adr/0005-single-progress-contract-and-phase-map.md)). `game_startup` is the one deliberate exception: it repeats, and it has **no** slice in `PHASE_RANGE` because it drives its own bar after the preparation is at 100% (`STARTUP_LABEL` in `launchPhases.js`).
 
 #### Mod loader installation
 
@@ -229,6 +250,18 @@ helios-core does **not** install mod loaders — it only reads a version manifes
 
 The required Java major comes from the Mojang manifest (`javaVersion.majorVersion`), which `MinecraftDownloadManager.downloadMinecraft` returns; the MC→Java table in `getRequiredJavaVersion` is only a fallback. Ranges are bounded (`17.x`, not `>=17`) so a modpack built for 17 is never launched on 21.
 
+`ensureJava` keeps the player's choice and the launcher's own apart (config v2):
+
+- `settings.java.executable` is **only** what the player picked in Ajustes. When set it is used
+  if it satisfies the major and the launch stops with `JAVA_MANUAL_INCOMPATIBLE` if not — it is
+  never replaced or overwritten. The v1 → v2 migration clears it, because a v1 value cannot tell
+  a choice from a leftover of auto-detection.
+- `settings.java.runtimes` caches what the launcher found or downloaded, keyed by major
+  (`{ "17": …, "21": … }`). Order: manual → cached runtime → `discoverJava` → `downloadJava`
+  (only if `autoDownload`). Discovery runs even with auto-download off.
+- Pass executables through `LaunchManager.javaRoot()`, not `ensureJavaDirIsRoot` directly: helios
+  only recognises the platform separator, so `C:/…/javaw.exe` never validated.
+
 ### Shared Utilities (`src/main/utils`)
 
 - `Logger` — one winston root logger; `getLogger(name)` returns a child labelled with the name. Console transport (coloured) plus, after `Logger.enableFileLogging(ConfigManager.getLogsDirectory())` in `main/index.js`, a file transport at `<launcherDir>/logs/launcher.log` rotating at 5 MB × 5 files. An `Error` argument is rendered as stack + `code` + cause chain (never `util.inspect` at unlimited depth, which dumped got's request headers), other objects at depth 3, and the final line goes through a token redactor. The redactor is a safety net: **never log a token, nor an object that may carry one**. helios-core's own internal loggers still use its console-only `LoggerUtil`.
@@ -236,6 +269,8 @@ The required Java major comes from the Mojang manifest (`javaVersion.majorVersio
 - `PathUtils` — `resolveInside` / `isSafeRelativePath`. Every path built from manifest, renderer or network data goes through `resolveInside`.
 - `HttpUtils` — `fetchWithTimeout` for small JSON/text requests. Never call bare `fetch` in main.
 - `MavenUtils` — `mavenToRelativePath` / `mavenToUrl` for Maven-coordinate libraries.
+- `GameOutput` — `readLines(stream, onLines)`: whole lines from a child's stdout/stderr, one callback per chunk.
+- `StartupTracker` — `STARTUP_MILESTONES` and `createStartupTracker(report)`, the heuristic behind the `game_startup` bar.
 - `PackPolicy` — `globToRegExp` / `resolvePolicy` / `strictRoots` for manifest ignore globs and per-path policies. **Deliberately duplicated** in `tools/pack-publish/generate.mjs`, which runs on plain node and cannot import these extensionless sources; change both together.
 
 ## Styling
@@ -249,7 +284,18 @@ Tailwind CSS v4 with `@theme` block in `App.css`. Key custom tokens:
 UI follows dark glassmorphism, in two flavours:
 
 - **Opaque surfaces** (dropdowns, status toasts): `bg-[rgba(20,20,22,0.95)] backdrop-blur-[20px] border border-white/10`
-- **The modal** (`components/common/Modal.jsx`): panel at `bg-[rgba(18,18,20,0.55)] backdrop-blur-[28px] backdrop-saturate-150` over an overlay that is only `bg-black/25` with **no blur of its own**. `backdrop-filter` blurs everything painted behind the element, the overlay's background included, so putting a solid scrim on the overlay leaves the panel blurring a flat wash and the glass disappears
+- **The modal** (`components/common/Modal.jsx`): panel at `bg-[rgba(18,18,20,0.55)] backdrop-blur-[28px] backdrop-saturate-150` over an overlay that is only `bg-black/25` with **no blur of its own**. `backdrop-filter` blurs everything painted behind the element, the overlay's background included, so putting a solid scrim on the overlay leaves the panel blurring a flat wash and the glass disappears. Extra header controls go in its `actions` prop (the log viewer's Copiar/Guardar)
+
+The window is **frameless** (`frame: false`): `components/common/TitleBar.jsx` is the title bar, a
+drag region (`[-webkit-app-region:drag]`, buttons opt out with `no-drag`) that sits at `z-[60]`,
+above the modal overlay, so the window stays movable and closable with a dialog open. `App.jsx`
+gives it the first row and the screens fill the rest — size screens with `h-full`/`w-full`,
+**never `h-screen`**, or they overflow the window by the bar's height. The Microsoft sign-in
+window keeps its native frame.
+
+The brand logo (raccoon + "NONAME LAUNCHER", white on transparent) is
+`assets/imgs/nonamelauncher-logo.png`, rendered through `components/common/AppLogo.jsx` on the
+loading and login screens and the home screen with no modpack selected; size it with a width. The window/app icon is still `resources/icon.png`.
 
 ## Environment Variables
 
@@ -332,11 +378,12 @@ The mechanisms for this exist and are the ones to reuse (branch `fix/p1-hardenin
   change, awaits the IPC call and reverts with a status message if main rejects or cannot save
   it. Never call `ipc.config.set*` fire-and-forget; typed values (resolution, RAM) are committed
   on blur, not per keystroke
+- **Exported logs**: `logs:export` takes the text from the renderer but never a path — the path is
+  whatever the native save dialog answered — and writes it through `Logger.redact`
+- **Process probing**: `LaunchManager.readCommandLine(pid)` interpolates the PID into a PowerShell
+  command, so it is only ever called with a PID already checked to be a positive integer
 
-Still open from the 2026-09-17 audit (tracked in `TODO.md`, 📋). Do not copy these patterns:
-
-- `settings.java.executable` holds both the user's choice and the auto-discovered JVM, so
-  `ensureJava` silently overwrites a manual choice (B7)
+Nothing app-side is still open from the 2026-09-17 audit; B1 (publishing) is in `TODO.md` P1.
 
 ## Gotchas
 
