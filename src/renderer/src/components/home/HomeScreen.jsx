@@ -18,7 +18,7 @@ export default function HomeScreen() {
   }
 
   return (
-    <div className="w-screen h-screen flex overflow-hidden font-inter text-white">
+    <div className="w-full h-full flex overflow-hidden font-inter text-white">
       <DynamicBackground bannerUrl={selectedServer?.banner} />
 
       <ServerSidebar />

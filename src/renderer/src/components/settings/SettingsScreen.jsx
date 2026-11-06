@@ -66,7 +66,7 @@ export default function SettingsScreen({ onBack }) {
 
   if (!settings) {
     return (
-      <div className="relative w-screen h-screen flex flex-col items-center justify-center gap-4 bg-[#1a1a1e] font-inter text-white">
+      <div className="relative w-full h-full flex flex-col items-center justify-center gap-4 bg-[#1a1a1e] font-inter text-white">
         {/* Same spot as in the loaded header, so the way out does not depend on the load. */}
         <div className="absolute top-8 right-8">
           <CloseButton onClick={onBack} />
@@ -90,7 +90,7 @@ export default function SettingsScreen({ onBack }) {
   }
 
   return (
-    <div className="w-screen h-screen flex flex-col overflow-hidden bg-[#1a1a1e] font-inter text-white">
+    <div className="w-full h-full flex flex-col overflow-hidden bg-[#1a1a1e] font-inter text-white">
       <div className="flex items-center justify-between gap-4 px-8 pt-8 pb-6">
         <h1 className="text-2xl font-black uppercase tracking-[-1px]">
           Configuracion

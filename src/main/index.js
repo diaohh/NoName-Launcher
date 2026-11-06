@@ -93,7 +93,9 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1000,
     height: 600,
-    frame: true,
+    // The title bar is drawn by the renderer (components/common/TitleBar.jsx), so it can sit
+    // on the same glass as the rest of the launcher.
+    frame: false,
     icon,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),

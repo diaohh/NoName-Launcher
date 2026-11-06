@@ -55,5 +55,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Window controls
   windowMinimize: () => ipcRenderer.send(Channels.WINDOW_MINIMIZE),
   windowMaximize: () => ipcRenderer.send(Channels.WINDOW_MAXIMIZE),
-  windowClose: () => ipcRenderer.send(Channels.WINDOW_CLOSE)
+  windowClose: () => ipcRenderer.send(Channels.WINDOW_CLOSE),
+  windowIsMaximized: () => ipcRenderer.invoke(Channels.WINDOW_IS_MAXIMIZED),
+  onWindowMaximizedChanged: subscribe(Channels.WINDOW_MAXIMIZED_CHANGED)
 })

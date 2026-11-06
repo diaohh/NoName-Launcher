@@ -21,7 +21,7 @@ export default function LoginSection() {
   }
 
   return (
-    <div className="auth-bg w-screen h-screen flex items-center justify-center overflow-hidden font-inter relative">
+    <div className="auth-bg w-full h-full flex items-center justify-center overflow-hidden font-inter relative">
       <div className="text-center relative">
         <div>
           <h1 className="font-black text-[4rem] tracking-[-3px] text-white uppercase font-inter">

@@ -5,13 +5,14 @@ import { StatusProvider } from './contexts/StatusContext'
 import LoginSection from './components/auth/LoginSection'
 import HomeScreen from './components/home/HomeScreen'
 import StatusMessage from './components/common/StatusMessage'
+import TitleBar from './components/common/TitleBar'
 
 function AppContent() {
   const { account, loading } = useAuth()
 
   if (loading) {
     return (
-      <div className="w-screen h-screen flex items-center justify-center bg-bg-deep font-inter">
+      <div className="w-full h-full flex items-center justify-center bg-bg-deep font-inter">
         <div className="text-center">
           <h1 className="text-[3.5rem] font-black tracking-[-3px] uppercase text-white">
             NONAME<span className="text-accent-green animate-blink">_</span>
@@ -40,14 +41,20 @@ function App() {
     <StatusProvider>
       <AuthProvider>
         <LaunchProvider>
-          <div className="relative w-screen h-screen">
-            <AppContent />
+          {/* The window is frameless: the title bar takes its row and every screen fills what
+              is left, so screens size themselves with h-full, never h-screen. */}
+          <div className="w-screen h-screen flex flex-col overflow-hidden bg-bg-deep">
+            <TitleBar />
 
-            {/* One host for the whole app: a message raised on the way out of a screen
-                — a failed login, a launch error that logs the player out — is still on
-                screen after the swap, and the settings screen can raise one at all. */}
-            <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-40 min-w-[300px] pointer-events-none">
-              <StatusMessage />
+            <div className="relative flex-1 min-h-0">
+              <AppContent />
+
+              {/* One host for the whole app: a message raised on the way out of a screen
+                  — a failed login, a launch error that logs the player out — is still on
+                  screen after the swap, and the settings screen can raise one at all. */}
+              <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-40 min-w-[300px] pointer-events-none">
+                <StatusMessage />
+              </div>
             </div>
           </div>
         </LaunchProvider>

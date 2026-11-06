@@ -63,6 +63,8 @@ export const ipc = {
   window: {
     minimize: () => window.electronAPI.windowMinimize(),
     maximize: () => window.electronAPI.windowMaximize(),
-    close: () => window.electronAPI.windowClose()
+    close: () => window.electronAPI.windowClose(),
+    isMaximized: invoke('windowIsMaximized'),
+    onMaximizedChanged: (cb) => window.electronAPI.onWindowMaximizedChanged(cb)
   }
 }
