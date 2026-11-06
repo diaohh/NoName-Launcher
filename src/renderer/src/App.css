@@ -27,6 +27,13 @@
   50% { opacity: 0; }
 }
 
+/* The status toast's countdown bar. Duration is set inline from StatusContext's VISIBLE_MS,
+   so the bar and the timer that closes the toast cannot drift apart. */
+@keyframes toast-timer {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+
 @keyframes fade-in-up {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }

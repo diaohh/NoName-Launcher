@@ -25,19 +25,26 @@ export function StatusProvider({ children }) {
 
   useEffect(() => clearTimers, [])
 
-  const showStatus = useCallback((message, type = 'error') => {
-    clearTimers()
-    setStatus({ message, type })
-    setVisible(true)
+  const idRef = useRef(0)
 
-    timersRef.current.push(setTimeout(() => {
-      setVisible(false)
-      timersRef.current.push(setTimeout(() => setStatus(null), FADE_MS))
-    }, VISIBLE_MS))
+  const dismissStatus = useCallback(() => {
+    clearTimers()
+    setVisible(false)
+    timersRef.current.push(setTimeout(() => setStatus(null), FADE_MS))
   }, [])
 
+  const showStatus = useCallback((message, type = 'error') => {
+    clearTimers()
+    // A fresh id per message, so the timer bar restarts even when the same text repeats.
+    idRef.current += 1
+    setStatus({ id: idRef.current, message, type, durationMs: VISIBLE_MS })
+    setVisible(true)
+
+    timersRef.current.push(setTimeout(dismissStatus, VISIBLE_MS))
+  }, [dismissStatus])
+
   return (
-    <StatusContext.Provider value={{ status, visible, showStatus }}>
+    <StatusContext.Provider value={{ status, visible, showStatus, dismissStatus }}>
       {children}
     </StatusContext.Provider>
   )
