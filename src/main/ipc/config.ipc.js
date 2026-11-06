@@ -68,7 +68,10 @@ function requireJavaExecutable(executable) {
 export function registerConfigIPC(mainWindow) {
   handle(Channels.CONFIG_GET_SETTINGS, async () => {
     return {
+      // Only the player's own choice; null means the launcher picks per modpack.
       javaExecutable: ConfigManager.getJavaExecutable(),
+      // What the launcher picked on its own, by Java major, so the screen can show it.
+      javaRuntimes: ConfigManager.getJavaRuntimes(),
       javaAutoDownload: ConfigManager.getJavaAutoDownload(),
       gameWidth: ConfigManager.getGameWidth(),
       gameHeight: ConfigManager.getGameHeight(),

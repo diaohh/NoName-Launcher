@@ -46,6 +46,9 @@ export const ERROR_CODE = {
   VERSION_JSON_MISSING: 'VERSION_JSON_MISSING',
   MC_DOWNLOAD_FAILED: 'MC_DOWNLOAD_FAILED',
   JAVA_UNAVAILABLE: 'JAVA_UNAVAILABLE',
+  // The Java chosen by hand in the settings is missing, or is not the major the modpack
+  // needs. A manual choice is never replaced behind the player's back, so the launch stops.
+  JAVA_MANUAL_INCOMPATIBLE: 'JAVA_MANUAL_INCOMPATIBLE',
   UNSUPPORTED_MODLOADER: 'UNSUPPORTED_MODLOADER',
   MODLOADER_FAILED: 'MODLOADER_FAILED',
   // The JVM could not be started at all: a missing or non-executable java.

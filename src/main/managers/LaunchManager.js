@@ -99,26 +99,86 @@ class LaunchManager {
         return `${majorVersion}.x`
     }
 
-    static async validateJava(requiredVersion) {
-        const javaPath = ConfigManager.getJavaExecutable()
-        if (!javaPath) return null
+    /**
+     * The JDK root of an executable path. helios' `ensureJavaDirIsRoot` only recognises the
+     * platform's own separator, so `C:/…/bin/javaw.exe` (a hand-edited config.json) came back
+     * unchanged and never validated; normalizing first makes both spellings work.
+     */
+    static javaRoot(executable) {
+        return ensureJavaDirIsRoot(path.normalize(executable))
+    }
+
+    /**
+     * The executable when it runs and satisfies the Java major, otherwise null. Never throws:
+     * a missing or broken runtime only means "not this one".
+     */
+    static async checkJava(executable, requiredVersion) {
+        if (!executable) return null
 
         try {
-            const javaRoot = ensureJavaDirIsRoot(javaPath)
-            const vResult = await validateSelectedJvm(javaRoot, this.javaSemverRange(requiredVersion))
-            if (vResult != null) {
-                logger.info(`Java validation successful: ${javaPath} (${vResult.semverStr})`)
-                return javaPath
+            const details = await validateSelectedJvm(this.javaRoot(executable), this.javaSemverRange(requiredVersion))
+            if (details != null) {
+                logger.info(`Java validation successful: ${executable} (${details.semverStr})`)
+                return executable
             }
-            logger.warn(`Java validation failed: ${javaPath} does not satisfy Java ${requiredVersion}`)
+            logger.info(`${executable} does not satisfy Java ${requiredVersion}`)
             return null
         } catch (err) {
-            logger.error('Java validation error:', err)
+            logger.warn(`Could not validate Java at ${executable}`, err)
             return null
         }
     }
 
+    /**
+     * A Java chosen in the settings is the player's decision: it is used when it fits and the
+     * launch stops when it does not. It used to be swapped for an auto-detected one without a
+     * word, and the setting overwritten with it, so the choice did not survive a single launch
+     * of a modpack on another major.
+     */
+    static async requireManualJava(executable, requiredVersion) {
+        if (await this.checkJava(executable, requiredVersion)) return executable
+
+        // Only for the message: which version the chosen one actually is, if it runs at all.
+        let actual = null
+        try {
+            actual = await validateSelectedJvm(this.javaRoot(executable), '*')
+        } catch {
+            // Reported below as a Java that cannot be used.
+        }
+
+        const error = new Error(actual
+            ? `El Java elegido en Ajustes es la version ${actual.semverStr} y este modpack necesita Java ${requiredVersion}. ` +
+              `Elige un Java ${requiredVersion} o quita la ruta para que el launcher use el adecuado.`
+            : `No se puede usar el Java elegido en Ajustes (${executable}). ` +
+              'Elige otro o quita la ruta para que el launcher use el adecuado.')
+        error.code = ERROR_CODE.JAVA_MANUAL_INCOMPATIBLE
+        throw error
+    }
+
+    /** A Java of that major already installed on the system or in `<dataDir>/runtime`, or null. */
+    static async discoverJava(version, progressCallback) {
+        if (progressCallback) progressCallback({ type: 'java_discover', message: `Buscando Java ${version} en el sistema...` })
+
+        const jvm = await discoverBestJvmInstallation(ConfigManager.getDataDirectory(), this.javaSemverRange(version))
+        if (jvm == null) return null
+
+        const execPath = javaExecFromRoot(jvm.path)
+        if (!fs.existsSync(execPath)) return null
+
+        logger.info(`Found existing Java: ${jvm.path} (${jvm.semverStr})`)
+        return execPath
+    }
+
     static async downloadJava(version, progressCallback) {
+        if (!ConfigManager.getJavaAutoDownload()) {
+            const error = new Error(
+                `No hay una instalacion valida de Java ${version} y la descarga automatica ` +
+                `esta desactivada. Activala en Ajustes o selecciona un Java ${version} manualmente.`
+            )
+            error.code = ERROR_CODE.JAVA_UNAVAILABLE
+            throw error
+        }
+
         const semverRange = this.javaSemverRange(version)
         // helios puts downloaded JDKs under `<dataDir>/runtime/<arch>` and rediscovers
         // them there, so they follow the configured data directory like every other
@@ -127,18 +187,6 @@ class LaunchManager {
         let archivePath = null
 
         try {
-            if (progressCallback) progressCallback({ type: 'java_discover', message: `Buscando Java ${version} en el sistema...` })
-            const existingJvm = await discoverBestJvmInstallation(dataDir, semverRange)
-            if (existingJvm != null) {
-                logger.info(`Found existing Java: ${existingJvm.path} (${existingJvm.semverStr})`)
-                const execPath = javaExecFromRoot(existingJvm.path)
-                if (fs.existsSync(execPath)) {
-                    ConfigManager.setJavaExecutable(execPath)
-                    ConfigManager.save()
-                    return execPath
-                }
-            }
-
             logger.info(`Downloading Java ${version}...`)
             if (progressCallback) progressCallback({ type: 'java_download', message: `Descargando Java ${version}...` })
 
@@ -177,8 +225,6 @@ class LaunchManager {
                 throw new Error(`El Java instalado no satisface la version requerida (${version})`)
             }
 
-            ConfigManager.setJavaExecutable(javaExecutable)
-            ConfigManager.save()
             logger.info(`Java ${installed.semverStr} installed at ${javaExecutable}`)
             return javaExecutable
         } catch (err) {
@@ -190,31 +236,42 @@ class LaunchManager {
         }
     }
 
+    /**
+     * The Java this launch runs on: the player's own choice when there is one, otherwise the
+     * runtime cached for this major, otherwise one discovered or downloaded — and that one is
+     * cached under its major, never written over the player's setting. Alternating modpacks on
+     * Java 17 and 21 used to rewrite `java.executable` on every launch.
+     */
     static async ensureJava(requiredVersion, progressCallback) {
-        const validJava = await this.validateJava(requiredVersion)
-        if (validJava) return validJava
+        const manual = ConfigManager.getJavaExecutable()
+        if (manual) return await this.requireManualJava(manual, requiredVersion)
 
-        if (!ConfigManager.getJavaAutoDownload()) {
-            const error = new Error(
-                `No hay una instalacion valida de Java ${requiredVersion} y la descarga automatica ` +
-                `esta desactivada. Activala en Ajustes o selecciona un Java ${requiredVersion} manualmente.`
-            )
-            error.code = ERROR_CODE.JAVA_UNAVAILABLE
-            throw error
-        }
+        const cached = await this.checkJava(ConfigManager.getJavaRuntime(requiredVersion), requiredVersion)
+        if (cached) return cached
 
+        let executable
         try {
-            return await this.downloadJava(requiredVersion, progressCallback)
+            executable = await this.discoverJava(requiredVersion, progressCallback)
+                ?? await this.downloadJava(requiredVersion, progressCallback)
         } catch (err) {
             // helios-core's JavaGuard reports in English. The original is kept as the
             // cause and is already in the log; the player gets a message they can read.
-            if (err.code === ERROR_CODE.JAVA_UNAVAILABLE || err.code === ERROR_CODE.CONFIG_SAVE_FAILED) throw err
+            if (err.code === ERROR_CODE.JAVA_UNAVAILABLE) throw err
 
             const error = new Error(`No se ha podido preparar Java ${requiredVersion}. Revisa los logs (Configuracion > Abrir carpeta de logs).`)
             error.code = ERROR_CODE.JAVA_UNAVAILABLE
             error.cause = err
             throw error
         }
+
+        ConfigManager.setJavaRuntime(requiredVersion, executable)
+        try {
+            ConfigManager.save()
+        } catch {
+            // Already logged by save(). The cache only saves a discovery next time; failing a
+            // launch that has its Java over it would be the wrong trade.
+        }
+        return executable
     }
 
     /**
