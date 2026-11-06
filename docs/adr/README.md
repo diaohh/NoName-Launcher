@@ -56,6 +56,7 @@ made — but only the marked alternatives distinguish what was actually rejected
 | [0010](0010-sandboxed-windows-and-a-webrequest-csp.md) | Sandbox both windows and apply the CSP through `webRequest` | Accepted |
 | [0011](0011-enforce-indentation-per-area.md) | Enforce the indentation each area already uses | Accepted |
 | [0012](0012-content-addressed-pack-files.md) | Store pack files in the bucket by content hash | Proposed |
+| [0013](0013-the-game-outlives-the-launcher.md) | Let the game outlive the launcher | Accepted |
 
 ADRs 0001, 0007 and 0011 carry an addendum from the 2026-09-17 audit.
 
