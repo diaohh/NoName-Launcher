@@ -58,7 +58,7 @@ made — but only the marked alternatives distinguish what was actually rejected
 | [0012](0012-content-addressed-pack-files.md) | Store pack files in the bucket by content hash | Proposed |
 | [0013](0013-the-game-outlives-the-launcher.md) | Let the game outlive the launcher | Accepted |
 
-ADRs 0001, 0007 and 0011 carry an addendum from the 2026-09-17 audit.
+ADRs 0001, 0007 and 0011 carry an addendum from the 2026-09-17 audit, and 0005 one from 2026-11-05.
 
 ## Not written yet
 
