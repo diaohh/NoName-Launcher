@@ -68,7 +68,10 @@ function requireJavaExecutable(executable) {
 export function registerConfigIPC(mainWindow) {
   handle(Channels.CONFIG_GET_SETTINGS, async () => {
     return {
+      // Only the player's own choice; null means the launcher picks per modpack.
       javaExecutable: ConfigManager.getJavaExecutable(),
+      // What the launcher picked on its own, by Java major, so the screen can show it.
+      javaRuntimes: ConfigManager.getJavaRuntimes(),
       javaAutoDownload: ConfigManager.getJavaAutoDownload(),
       gameWidth: ConfigManager.getGameWidth(),
       gameHeight: ConfigManager.getGameHeight(),
@@ -138,7 +141,7 @@ export function registerConfigIPC(mainWindow) {
   handle(Channels.CONFIG_SET_DATA_DIRECTORY, async (_event, dir) => {
     // Moving the root out from under a running game would leave it with open handles
     // into a directory the launcher no longer considers its own.
-    if (LaunchManager.gameProcess != null) {
+    if (await LaunchManager.isGameRunning()) {
       const error = new Error('Cierra Minecraft antes de cambiar el directorio de datos.')
       error.code = ERROR_CODE.CONFIG_GAME_RUNNING
       throw error

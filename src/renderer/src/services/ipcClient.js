@@ -57,12 +57,19 @@ export const ipc = {
     getStatus: invoke('launchGetStatus'),
     onProgress: (cb) => window.electronAPI.onLaunchProgress(cb)
   },
+  logs: {
+    export: invoke('logsExport')
+  },
   events: {
     onTokenExpired: (cb) => window.electronAPI.onTokenExpired(cb)
   },
   window: {
     minimize: () => window.electronAPI.windowMinimize(),
     maximize: () => window.electronAPI.windowMaximize(),
-    close: () => window.electronAPI.windowClose()
+    close: () => window.electronAPI.windowClose(),
+    isMaximized: invoke('windowIsMaximized'),
+    onMaximizedChanged: (cb) => window.electronAPI.onWindowMaximizedChanged(cb),
+    onCloseRequested: (cb) => window.electronAPI.onWindowCloseRequested(cb),
+    confirmClose: () => window.electronAPI.windowConfirmClose()
   }
 }

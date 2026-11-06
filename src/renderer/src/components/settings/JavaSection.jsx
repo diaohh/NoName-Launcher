@@ -64,6 +64,10 @@ export default function JavaSection({ settings, onUpdate, onSave }) {
 
   const ramDisabled = settings.useModpackRam
 
+  // What the launcher found or downloaded on its own, by major. Shown so "Automatico" is not
+  // a mystery; these are never written into the field above.
+  const runtimes = Object.entries(settings.javaRuntimes || {}).sort(([a], [b]) => Number(a) - Number(b))
+
   return (
     <div className="space-y-6">
       <div>
@@ -92,6 +96,21 @@ export default function JavaSection({ settings, onUpdate, onSave }) {
             </button>
           )}
         </div>
+        <p className="text-xs text-white/40 mt-1.5">
+          {settings.javaExecutable
+            ? 'Se usara siempre este Java. Si un modpack necesita otra version, no se lanzara hasta que lo cambies o lo quites.'
+            : 'Automatico: el launcher usa la version de Java que pide cada modpack y la descarga si hace falta.'}
+        </p>
+        {runtimes.length > 0 && (
+          <p className="text-xs text-white/30 mt-1">
+            {'Gestionados por el launcher: '}
+            {runtimes.map(([major, executable], i) => (
+              <span key={major} title={executable} className="select-text">
+                {i > 0 && ' · '}Java {major}
+              </span>
+            ))}
+          </p>
+        )}
       </div>
 
       <div className="flex items-center justify-between gap-4">

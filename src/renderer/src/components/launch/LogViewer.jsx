@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useLaunch } from '../../contexts/LaunchContext'
+import { useStatus } from '../../contexts/StatusContext'
+import { ipc } from '../../services/ipcClient'
 import Modal from '../common/Modal'
 
 const logColors = {
@@ -12,9 +14,33 @@ const logColors = {
 // Anything within this many pixels of the bottom counts as "following the tail".
 const AT_BOTTOM_SLACK = 24
 
+/**
+ * The lines as plain text, with a header saying where they came from: an exported log
+ * usually ends up in someone else's hands, and the launcher version is the first question.
+ */
+function logsAsText(logs) {
+  const header = `NoNameLauncher ${__APP_VERSION__} · ${new Date().toLocaleString()}`
+  const lines = logs.map(log => `[${log.timestamp}] ${log.message}`)
+  return [header, '', ...lines, ''].join('\n')
+}
+
+function HeaderButton({ onClick, disabled, children }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="bg-transparent border-none text-xs text-white/50 hover:text-white cursor-pointer px-2 py-1 rounded hover:bg-white/5 transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+    >
+      {children}
+    </button>
+  )
+}
+
 export default function LogViewer() {
   const { logs, gameRunning, launchState } = useLaunch()
+  const { showStatus } = useStatus()
   const [visible, setVisible] = useState(false)
+  const [saving, setSaving] = useState(false)
   const scrollRef = useRef(null)
   // Only follow the tail while the reader is already at the tail: forcing the bottom would
   // yank them away from the error they scrolled up to read, which is when logs get opened.
@@ -45,6 +71,29 @@ export default function LogViewer() {
 
   const handleClose = useCallback(() => setVisible(false), [])
 
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(logsAsText(logs))
+      showStatus('Logs copiados al portapapeles', 'success')
+    } catch (err) {
+      console.error('Failed to copy the logs:', err)
+      showStatus('No se han podido copiar los logs', 'error')
+    }
+  }
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      // Null when the player closed the save dialog, which needs no message.
+      const savedTo = await ipc.logs.export(logsAsText(logs))
+      if (savedTo) showStatus(`Logs guardados en ${savedTo}`, 'success')
+    } catch (err) {
+      showStatus(err.message || 'No se han podido guardar los logs', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   if (logs.length === 0 && !gameRunning && launchState !== 'error') return null
 
   // Past a hundred the exact count stops meaning anything and only makes the label jump.
@@ -59,7 +108,20 @@ export default function LogViewer() {
         Mostrar Logs ({counter})
       </button>
 
-      <Modal open={visible} onClose={handleClose} title="Logs" size="max-w-[820px]">
+      <Modal
+        open={visible}
+        onClose={handleClose}
+        title="Logs"
+        size="max-w-[820px]"
+        actions={
+          <>
+            <HeaderButton onClick={handleCopy} disabled={logs.length === 0}>Copiar</HeaderButton>
+            <HeaderButton onClick={handleSave} disabled={logs.length === 0 || saving}>
+              {saving ? 'Guardando...' : 'Guardar'}
+            </HeaderButton>
+          </>
+        }
+      >
         <div
           ref={scrollRef}
           onScroll={handleScroll}

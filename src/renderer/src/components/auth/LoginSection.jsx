@@ -2,6 +2,7 @@ import { useState } from "react"
 import { useAuth } from "../../contexts/AuthContext"
 import { useStatus } from "../../contexts/StatusContext"
 import minecraftIcon from "../../assets/imgs/minecraft_icon.png"
+import AppLogo from "../common/AppLogo"
 
 export default function LoginSection() {
   const { login } = useAuth()
@@ -21,16 +22,11 @@ export default function LoginSection() {
   }
 
   return (
-    <div className="auth-bg w-screen h-screen flex items-center justify-center overflow-hidden font-inter relative">
+    <div className="auth-bg w-full h-full flex items-center justify-center overflow-hidden font-inter relative">
       <div className="text-center relative">
-        <div>
-          <h1 className="font-black text-[4rem] tracking-[-3px] text-white uppercase font-inter">
-            NONAME<span className="text-accent-green animate-blink">_</span>
-          </h1>
-          <p className="text-[0.7rem] text-white/50 tracking-[8px] indent-[8px] font-normal mb-[50px] font-inter">
-            LAUNCHER
-          </p>
-        </div>
+        <h1 className="mb-[50px]">
+          <AppLogo className="w-[420px] max-w-[80vw] mx-auto" />
+        </h1>
 
         <div className="flex flex-col gap-5">
           <button

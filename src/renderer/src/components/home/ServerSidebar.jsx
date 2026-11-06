@@ -38,7 +38,7 @@ export default function ServerSidebar() {
 
   if (loading) {
     return (
-      <aside className="w-[100px] h-screen bg-sidebar-bg backdrop-blur-[20px] border-r border-sidebar-border flex flex-col items-center py-[30px] gap-5 z-10">
+      <aside className="w-[100px] h-full bg-sidebar-bg backdrop-blur-[20px] border-r border-sidebar-border flex flex-col items-center py-[30px] gap-5 z-10">
         <div className="w-[60px] h-[60px] rounded-xl bg-white/5 animate-pulse" />
         <div className="w-[60px] h-[60px] rounded-xl bg-white/5 animate-pulse" />
       </aside>
@@ -46,7 +46,7 @@ export default function ServerSidebar() {
   }
 
   return (
-    <aside className="w-[100px] h-screen bg-sidebar-bg backdrop-blur-[20px] border-r border-sidebar-border flex flex-col items-center py-[30px] gap-5 z-10">
+    <aside className="w-[100px] h-full bg-sidebar-bg backdrop-blur-[20px] border-r border-sidebar-border flex flex-col items-center py-[30px] gap-5 z-10">
       {servers.map(server => (
         <ServerIcon
           key={server.id}

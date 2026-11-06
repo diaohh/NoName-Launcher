@@ -48,6 +48,16 @@ export const PHASE_LABEL = {
 }
 
 /**
+ * Header of the second bar, which follows the game from `started` to its title screen.
+ *
+ * `game_startup` deliberately has no slice in PHASE_RANGE: when it arrives the preparation
+ * bar is already at 100%, so the startup gets a bar of its own, 0-100, driven by milestones
+ * in the game's output (main/utils/StartupTracker.js). It is also the one type that repeats,
+ * which is harmless precisely because it stays out of the phase map.
+ */
+export const STARTUP_LABEL = 'Arrancando Minecraft'
+
+/**
  * Overall completion for a progress event, or null when the phase is unknown — which is
  * the only case where the bar should still show an indeterminate pulse.
  *

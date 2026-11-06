@@ -55,3 +55,14 @@ loader libraries — so the second phase restarted the count.
   emitted twice.
 - **Indeterminate spinner for phases that cannot count.** Honest, but the launcher spends
   most of a first launch in those phases, and a spinner for four minutes reads as a hang.
+
+## Addendum (2026-11-05)
+
+- The type set gained `game_startup`, which drives a **second** bar, from `started` to the
+  title screen, fed by milestones in the game's output (`main/utils/StartupTracker.js`). It is
+  the one type that repeats and the one with no slice in `PHASE_RANGE`: it arrives after the
+  preparation bar has reached 100%, so it is measured on its own 0-100 scale and cannot make the
+  first bar run backwards. Its payload adds `done`, and `current` is null while no milestone
+  has been recognised (an indeterminate bar).
+- `stdout`/`stderr` now carry `lines: string[]` (whole lines, split before any trim) instead
+  of `data`, the raw chunk.

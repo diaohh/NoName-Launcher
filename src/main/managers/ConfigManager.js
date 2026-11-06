@@ -11,8 +11,12 @@ const logger = Logger.getLogger('ConfigManager')
 /**
  * Stamped into config.json so the file can be migrated between launcher releases.
  * A file without the field predates the stamp and is treated as version 0.
+ *
+ * - 1: account secrets encrypted with safeStorage.
+ * - 2: `java.executable` holds only the player's own choice; auto-detected runtimes moved
+ *   to `java.runtimes`. See `migrateJavaSelection`.
  */
-const CONFIG_VERSION = 1
+const CONFIG_VERSION = 2
 
 const isPlainObject = (value) => value != null && typeof value === 'object' && !Array.isArray(value)
 
@@ -62,6 +66,16 @@ class ConfigManager {
      */
     static getLogsDirectory() {
         return path.join(this.getLauncherDirectory(), 'logs')
+    }
+
+    /**
+     * Records the game the launcher started, so a launcher opened while that game is still
+     * running (it outlives the launcher, see LaunchManager) does not start a second one on top.
+     * Next to the config for the same reason as the logs: it describes the launcher, not the
+     * data, and a data directory change must not lose track of it.
+     */
+    static getRunningGamePath() {
+        return path.join(this.getLauncherDirectory(), 'running-game.json')
     }
 
     /**
@@ -135,7 +149,12 @@ class ConfigManager {
                 java: {
                     minRAM: '2G',
                     maxRAM: '4G',
+                    // The Java the player picked by hand, and nothing else. null means the
+                    // launcher chooses, per modpack, from `runtimes`.
                     executable: null,
+                    // Java major ("17", "21") -> executable the launcher found or downloaded
+                    // for it. A cache, rebuilt by discovery whenever an entry stops validating.
+                    runtimes: {},
                     autoDownload: true,
                     // Modpacks ship a RAM allocation tuned for their own mod list, so it
                     // wins by default; the settings slider only takes over when this is off.
@@ -183,6 +202,8 @@ class ConfigManager {
         this.config = this.validateConfig(parsed)
         this.config.version = CONFIG_VERSION
 
+        if (diskVersion < 2) this.migrateJavaSelection()
+
         const rewriteNeeded = this.hydrateSecrets()
 
         if (diskVersion !== CONFIG_VERSION) {
@@ -195,6 +216,22 @@ class ConfigManager {
 
         logger.info('Configuration loaded successfully')
         return this.config
+    }
+
+    /**
+     * Before v2 `java.executable` was written both by the settings screen and by every launch
+     * that found or downloaded a JVM, so a stored path cannot tell a choice from a leftover.
+     * Keeping it as a manual choice would pin most players to whatever Java their first
+     * modpack needed, and every modpack on another major would then refuse to start. It is
+     * dropped instead: discovery finds the same runtime again on the next launch, and the few
+     * players who did pick one by hand pick it again.
+     */
+    static migrateJavaSelection() {
+        const java = this.config.settings.java
+        if (java.executable) {
+            logger.info(`Config v2: forgetting the stored Java (${java.executable}), the launcher will pick one per modpack`)
+            java.executable = null
+        }
     }
 
     /**
@@ -494,6 +531,34 @@ class ConfigManager {
         return `${Math.round(megabytes)}M`
     }
     static setJavaExecutable(executable) { this.config.settings.java.executable = executable }
+
+    /**
+     * The runtime cached for a Java major, or null. The map is hand-editable like the rest of
+     * the file and `validateConfig` only checks that it is an object, so the entry is checked
+     * here; whether it still runs is the caller's job (`validateSelectedJvm`).
+     */
+    static getJavaRuntime(major) {
+        const entry = this.config.settings.java.runtimes[String(major)]
+        return typeof entry === 'string' && entry.length > 0 ? entry : null
+    }
+
+    /** Every cached runtime, keyed by major, for the settings screen. */
+    static getJavaRuntimes() {
+        return Object.fromEntries(
+            Object.keys(this.config.settings.java.runtimes)
+                .map(major => [major, this.getJavaRuntime(major)])
+                .filter(([, executable]) => executable != null)
+        )
+    }
+
+    static setJavaRuntime(major, executable) {
+        if (executable == null) {
+            delete this.config.settings.java.runtimes[String(major)]
+        } else {
+            this.config.settings.java.runtimes[String(major)] = executable
+        }
+    }
+
     static setJavaAutoDownload(autoDownload) { this.config.settings.java.autoDownload = autoDownload }
     /**
      * Points the game data at a new directory from the next path lookup onwards.

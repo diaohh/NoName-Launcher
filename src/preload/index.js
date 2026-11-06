@@ -49,11 +49,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   launchGetStatus: () => ipcRenderer.invoke(Channels.LAUNCH_GET_STATUS),
   onLaunchProgress: subscribe(Channels.LAUNCH_PROGRESS),
 
+  // Logs
+  logsExport: (text) => ipcRenderer.invoke(Channels.LOGS_EXPORT, text),
+
   // Token expiration event (main -> renderer)
   onTokenExpired: subscribe(Channels.AUTH_TOKEN_EXPIRED),
 
   // Window controls
   windowMinimize: () => ipcRenderer.send(Channels.WINDOW_MINIMIZE),
   windowMaximize: () => ipcRenderer.send(Channels.WINDOW_MAXIMIZE),
-  windowClose: () => ipcRenderer.send(Channels.WINDOW_CLOSE)
+  windowClose: () => ipcRenderer.send(Channels.WINDOW_CLOSE),
+  windowIsMaximized: () => ipcRenderer.invoke(Channels.WINDOW_IS_MAXIMIZED),
+  onWindowMaximizedChanged: subscribe(Channels.WINDOW_MAXIMIZED_CHANGED),
+  onWindowCloseRequested: subscribe(Channels.WINDOW_CLOSE_REQUESTED),
+  windowConfirmClose: () => ipcRenderer.send(Channels.WINDOW_CONFIRM_CLOSE)
 })

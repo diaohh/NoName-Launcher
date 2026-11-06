@@ -38,8 +38,17 @@ export const Channels = {
   LAUNCH_KILL: 'launch:kill',
   LAUNCH_GET_STATUS: 'launch:getStatus',
 
+  // Logs
+  LOGS_EXPORT: 'logs:export',
+
   // Window
   WINDOW_MINIMIZE: 'window:minimize',
   WINDOW_MAXIMIZE: 'window:maximize',
-  WINDOW_CLOSE: 'window:close'
+  WINDOW_CLOSE: 'window:close',
+  WINDOW_IS_MAXIMIZED: 'window:isMaximized',
+  WINDOW_MAXIMIZED_CHANGED: 'window:maximizedChanged',
+  // While a launch is being prepared main holds the close and asks the renderer first; the
+  // renderer answers with WINDOW_CONFIRM_CLOSE when the player still wants out.
+  WINDOW_CLOSE_REQUESTED: 'window:closeRequested',
+  WINDOW_CONFIRM_CLOSE: 'window:confirmClose'
 }
