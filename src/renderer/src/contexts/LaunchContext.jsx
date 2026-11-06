@@ -6,20 +6,28 @@ const LaunchContext = createContext()
 
 const IDLE_PROGRESS = { phase: '', message: '', current: 0, total: 0, percent: null }
 
+// The viewer keeps the tail only; the full game log is in the instance's own logs/latest.log.
+const MAX_LOG_LINES = 500
+
 export function LaunchProvider({ children }) {
   const [launchState, setLaunchState] = useState('idle')
   const [progress, setProgress] = useState(IDLE_PROGRESS)
   const [logs, setLogs] = useState([])
   const [gameRunning, setGameRunning] = useState(false)
   const [lastError, setLastError] = useState(null)
+  // The second bar, fed by milestones in the game's own output once the JVM is up:
+  // `{ percent, message, done }`, `percent` null while no milestone has been recognised. Null
+  // outside a startup — before the first `started`, and after a reload that found the game
+  // already running, when there is nothing left to measure.
+  const [startup, setStartup] = useState(null)
   // The bar must never retreat, whatever order the events arrive in.
   const maxPercentRef = useRef(0)
 
-  const addLog = useCallback((message, type) => {
-    setLogs(prev => {
-      const newLogs = [...prev, { message, type, timestamp: new Date().toLocaleTimeString() }]
-      return newLogs.slice(-500)
-    })
+  /** One line or several of the same kind: game output arrives a chunk of lines at a time. */
+  const addLog = useCallback((messages, type) => {
+    const timestamp = new Date().toLocaleTimeString()
+    const entries = [].concat(messages).map(message => ({ message, type, timestamp }))
+    setLogs(prev => [...prev, ...entries].slice(-MAX_LOG_LINES))
   }, [])
 
   // IPC subscription; the function onProgress hands back is the cleanup.
@@ -61,18 +69,25 @@ export function LaunchProvider({ children }) {
         case 'started':
           setLaunchState('playing')
           setGameRunning(true)
+          // Up front, so the bars do not blink out between `started` and the first report.
+          setStartup({ percent: null, message: 'Arrancando Java...', done: false })
           addLog(`Minecraft iniciado (PID: ${data.pid})`, 'system')
           break
+        case 'game_startup':
+          // A bar of its own, not a slice of PHASE_RANGE: the preparation is at 100% by now.
+          setStartup({ percent: data.current, message: data.message, done: Boolean(data.done) })
+          break
         case 'stdout':
-          addLog(data.data, 'info')
+          addLog(data.lines, 'info')
           break
         case 'stderr':
-          addLog(data.data, 'warn')
+          addLog(data.lines, 'warn')
           break
         case 'exit':
           addLog(`Minecraft cerrado (codigo: ${data.code})`, 'system')
           setLaunchState('idle')
           setGameRunning(false)
+          setStartup(null)
           break
         case 'error':
           addLog(data.error, 'error')
@@ -111,6 +126,7 @@ export function LaunchProvider({ children }) {
     setLaunchState('preparing')
     setLogs([])
     setLastError(null)
+    setStartup(null)
     maxPercentRef.current = 0
     setProgress({ ...IDLE_PROGRESS, message: 'Iniciando...' })
     try {
@@ -125,12 +141,13 @@ export function LaunchProvider({ children }) {
   const resetState = () => {
     setLaunchState('idle')
     setLastError(null)
+    setStartup(null)
     maxPercentRef.current = 0
     setProgress(IDLE_PROGRESS)
   }
 
   return (
-    <LaunchContext.Provider value={{ launchState, progress, logs, gameRunning, lastError, launch, resetState }}>
+    <LaunchContext.Provider value={{ launchState, progress, startup, logs, gameRunning, lastError, launch, resetState }}>
       {children}
     </LaunchContext.Provider>
   )

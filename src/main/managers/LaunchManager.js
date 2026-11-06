@@ -16,6 +16,8 @@ import { validateLocalFile } from '../utils/FileUtils'
 import { mavenToRelativePath, mavenToUrl } from '../utils/MavenUtils'
 import { resolveInside } from '../utils/PathUtils'
 import { fetchWithTimeout } from '../utils/HttpUtils'
+import { readLines } from '../utils/GameOutput'
+import { createStartupTracker } from '../utils/StartupTracker'
 import { ERROR_CODE } from '../../shared/errorCodes'
 
 const logger = Logger.getLogger('LaunchManager')
@@ -57,6 +59,9 @@ const BARE_PLACEHOLDER = /^\$\{[^}]+\}$/
 class LaunchManager {
 
     static gameProcess = null
+
+    /** Drives the second progress bar while the game starts up; null once it has exited. */
+    static startupTracker = null
 
     /**
      * Held for the length of the preparation, which is everything up to the spawn. Once the
@@ -801,17 +806,25 @@ class LaunchManager {
             logger.info('Minecraft process started, PID:', child.pid)
             if (progressCallback) progressCallback({ type: 'started', message: 'Minecraft iniciado correctamente', pid: child.pid })
 
-            child.stdout.on('data', (data) => {
-                const output = data.toString().trim()
-                if (progressCallback) progressCallback({ type: 'stdout', data: output })
+            // The second bar: `started` only means the OS started the JVM, and the window
+            // takes a while longer. Created after `started` so its first report lands after it.
+            this.startupTracker = createStartupTracker((progress) => {
+                if (progressCallback) progressCallback({ type: 'game_startup', ...progress })
             })
 
-            child.stderr.on('data', (data) => {
-                const output = data.toString().trim()
-                if (progressCallback) progressCallback({ type: 'stderr', data: output })
-            })
+            const forward = (type) => (lines) => {
+                this.startupTracker?.feed(lines)
+                if (progressCallback) progressCallback({ type, lines })
+            }
+            const flushStdout = readLines(child.stdout, forward('stdout'))
+            const flushStderr = readLines(child.stderr, forward('stderr'))
 
             child.on('close', (code) => {
+                flushStdout()
+                flushStderr()
+                // The latch goes with the process: the next game starts its bar from zero.
+                this.startupTracker?.dispose()
+                this.startupTracker = null
                 this.gameProcess = null
                 if (progressCallback) progressCallback({ type: 'exit', code })
             })
