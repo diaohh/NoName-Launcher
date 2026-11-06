@@ -38,6 +38,9 @@ export const Channels = {
   LAUNCH_KILL: 'launch:kill',
   LAUNCH_GET_STATUS: 'launch:getStatus',
 
+  // Logs
+  LOGS_EXPORT: 'logs:export',
+
   // Window
   WINDOW_MINIMIZE: 'window:minimize',
   WINDOW_MAXIMIZE: 'window:maximize',

@@ -10,10 +10,11 @@ import { createPortal } from 'react-dom'
  * @param {boolean} open
  * @param {() => void} onClose   Called by Escape, the backdrop and the close button.
  * @param {string} title
+ * @param {React.ReactNode} [actions] Extra controls in the header, left of the close button.
  * @param {React.ReactNode} [footer]  Action row pinned under the scrollable body.
  * @param {string} [size]        Tailwind max-width class for the panel.
  */
-export default function Modal({ open, onClose, title, footer, size = 'max-w-[560px]', children }) {
+export default function Modal({ open, onClose, title, actions, footer, size = 'max-w-[560px]', children }) {
   const panelRef = useRef(null)
 
   // The keyboard is outside the React tree, which is the whole reason this is an effect.
@@ -51,15 +52,18 @@ export default function Modal({ open, onClose, title, footer, size = 'max-w-[560
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 shrink-0">
           <h2 className="text-sm font-bold text-white uppercase tracking-widest">{title}</h2>
-          <button
-            onClick={onClose}
-            aria-label="Cerrar"
-            className="bg-transparent border-none text-white/40 hover:text-white cursor-pointer p-1 rounded hover:bg-white/5 transition-all duration-200"
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M4 4L12 12M12 4L4 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-1">
+            {actions}
+            <button
+              onClick={onClose}
+              aria-label="Cerrar"
+              className="bg-transparent border-none text-white/40 hover:text-white cursor-pointer p-1 rounded hover:bg-white/5 transition-all duration-200"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M4 4L12 12M12 4L4 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto">

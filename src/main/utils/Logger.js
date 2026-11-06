@@ -25,7 +25,7 @@ const REDACTIONS = [
     [/\beyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]+/g, '[redacted]']
 ]
 
-function redact(text) {
+export function redact(text) {
     return REDACTIONS.reduce((out, [pattern, replacement]) => out.replace(pattern, replacement), text)
 }
 

@@ -63,6 +63,9 @@ export const ERROR_CODE = {
   // Shell
   SHELL_OPEN_FAILED: 'SHELL_OPEN_FAILED',
 
+  // Logs
+  LOGS_EXPORT_FAILED: 'LOGS_EXPORT_FAILED',
+
   // Filesystem
   PATH_OUTSIDE_BASE: 'PATH_OUTSIDE_BASE',
 

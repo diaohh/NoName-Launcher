@@ -57,6 +57,9 @@ export const ipc = {
     getStatus: invoke('launchGetStatus'),
     onProgress: (cb) => window.electronAPI.onLaunchProgress(cb)
   },
+  logs: {
+    export: invoke('logsExport')
+  },
   events: {
     onTokenExpired: (cb) => window.electronAPI.onTokenExpired(cb)
   },

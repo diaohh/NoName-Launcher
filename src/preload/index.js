@@ -49,6 +49,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   launchGetStatus: () => ipcRenderer.invoke(Channels.LAUNCH_GET_STATUS),
   onLaunchProgress: subscribe(Channels.LAUNCH_PROGRESS),
 
+  // Logs
+  logsExport: (text) => ipcRenderer.invoke(Channels.LOGS_EXPORT, text),
+
   // Token expiration event (main -> renderer)
   onTokenExpired: subscribe(Channels.AUTH_TOKEN_EXPIRED),
 
