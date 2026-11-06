@@ -160,7 +160,7 @@ class ModLoaderManager {
                         resolve()
                         return
                     }
-                    const error = new Error(`El instalador de Forge ha fallado (codigo ${code}). Revisa los logs.`)
+                    const error = new Error(`El instalador de Forge ha fallado (codigo ${code}). Revisa los logs (Configuracion > Abrir carpeta de logs).`)
                     error.code = ERROR_CODE.MODLOADER_FAILED
                     reject(error)
                 })

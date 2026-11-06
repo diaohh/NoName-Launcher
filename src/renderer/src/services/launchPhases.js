@@ -26,6 +26,28 @@ export const PHASE_RANGE = {
 }
 
 /**
+ * What the progress bar's header says for each phase. The header used to print the raw
+ * `type` — "download_mods", "java_discover" — straight at the player.
+ *
+ * `download` rarely needs its entry: MinecraftDownloadManager sends its own sub-phase name,
+ * already in Spanish, and that is what the header shows instead.
+ */
+export const PHASE_LABEL = {
+  auth: 'Verificando cuenta',
+  manifest: 'Leyendo modpack',
+  validation: 'Validando archivos',
+  download_mods: 'Actualizando modpack',
+  download: 'Descargando Minecraft',
+  java: 'Preparando Java',
+  java_discover: 'Buscando Java',
+  java_download: 'Descargando Java',
+  java_extract: 'Instalando Java',
+  modloader: 'Instalando mod loader',
+  download_libraries: 'Descargando librerias',
+  launch: 'Iniciando Minecraft'
+}
+
+/**
  * Overall completion for a progress event, or null when the phase is unknown — which is
  * the only case where the bar should still show an indeterminate pulse.
  *

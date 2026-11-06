@@ -12,7 +12,6 @@ export function LaunchProvider({ children }) {
   const [logs, setLogs] = useState([])
   const [gameRunning, setGameRunning] = useState(false)
   const [lastError, setLastError] = useState(null)
-  const cleanupRef = useRef(null)
   // The bar must never retreat, whatever order the events arrive in.
   const maxPercentRef = useRef(0)
 
@@ -23,8 +22,9 @@ export function LaunchProvider({ children }) {
     })
   }, [])
 
+  // IPC subscription; the function onProgress hands back is the cleanup.
   useEffect(() => {
-    cleanupRef.current = ipc.launch.onProgress((data) => {
+    const unsubscribe = ipc.launch.onProgress((data) => {
       switch (data.type) {
         case 'auth':
         case 'manifest':
@@ -78,13 +78,14 @@ export function LaunchProvider({ children }) {
           addLog(data.error, 'error')
           setLastError({ code: data.code, message: data.error })
           setLaunchState('error')
+          // Errors only come out of the preparation, before any game is running; the kill
+          // button must not stay up next to a launch that never started.
+          setGameRunning(false)
           break
       }
     })
 
-    return () => {
-      if (cleanupRef.current) cleanupRef.current()
-    }
+    return unsubscribe
   }, [addLog])
 
   // The game lives in the main process, so a renderer reload loses every trace of it. Without

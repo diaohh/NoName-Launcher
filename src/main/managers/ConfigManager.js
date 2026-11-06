@@ -56,6 +56,15 @@ class ConfigManager {
     }
 
     /**
+     * `<launcherDir>/logs`. Next to the config rather than under the data directory: the
+     * logs describe the launcher, and they have to be found in the same place even when the
+     * data directory is the thing that broke.
+     */
+    static getLogsDirectory() {
+        return path.join(this.getLauncherDirectory(), 'logs')
+    }
+
+    /**
      * Where the game data goes: `common/`, `instances/`, the manifest cache and the JVMs
      * the launcher downloads. This is what the "Directorio de datos" setting governs.
      *

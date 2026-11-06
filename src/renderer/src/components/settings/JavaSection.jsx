@@ -5,7 +5,7 @@ import ToggleSwitch from './ToggleSwitch'
 
 const formatGB = (mb) => `${(mb / 1024).toFixed(1).replace(/\.0$/, '')} GB`
 
-export default function JavaSection({ settings, onUpdate }) {
+export default function JavaSection({ settings, onUpdate, onSave }) {
   const { showStatus } = useStatus()
   // Mirrors the input while it is being typed, so a half-written number is not written to
   // disk on every keystroke. Null means "show whatever the settings say".
@@ -17,18 +17,18 @@ export default function JavaSection({ settings, onUpdate }) {
   const currentRam = draftRam ?? settings.maxRamMB
 
   const handlePickJava = async () => {
-    const result = await ipc.dialog.openFile({
-      title: 'Seleccionar ejecutable de Java',
-      filters: [
-        { name: 'Java Executable', extensions: ['exe'] },
-        { name: 'All Files', extensions: ['*'] }
-      ]
-    })
-    if (!result) return
-
     // Main rejects anything that is not a java/javaw executable, so the field only changes
     // once the path has actually been accepted and stored.
     try {
+      const result = await ipc.dialog.openFile({
+        title: 'Seleccionar ejecutable de Java',
+        filters: [
+          { name: 'Java Executable', extensions: ['exe'] },
+          { name: 'All Files', extensions: ['*'] }
+        ]
+      })
+      if (!result) return
+
       await ipc.config.setJavaExecutable(result)
       onUpdate('javaExecutable', result)
     } catch (err) {
@@ -37,18 +37,15 @@ export default function JavaSection({ settings, onUpdate }) {
   }
 
   const handleClearJava = () => {
-    onUpdate('javaExecutable', null)
-    ipc.config.setJavaExecutable(null)
+    onSave({ javaExecutable: null }, () => ipc.config.setJavaExecutable(null), 'No se ha podido restablecer la ruta de Java')
   }
 
   const handleAutoDownloadToggle = (checked) => {
-    onUpdate('javaAutoDownload', checked)
-    ipc.config.setJavaAutoDownload(checked)
+    onSave({ javaAutoDownload: checked }, () => ipc.config.setJavaAutoDownload(checked), 'No se ha podido guardar la descarga automatica de Java')
   }
 
   const handleUseModpackRamToggle = (checked) => {
-    onUpdate('useModpackRam', checked)
-    ipc.config.setUseModpackRam(checked)
+    onSave({ useModpackRam: checked }, () => ipc.config.setUseModpackRam(checked), 'No se ha podido guardar la preferencia de RAM')
   }
 
   /** Persists on release, not on every pixel of the drag: each write hits config.json. */

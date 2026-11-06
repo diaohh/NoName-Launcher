@@ -25,7 +25,11 @@ export default [
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: 'module',
-      globals: { ...globals.node }
+      globals: {
+        ...globals.node,
+        // Inlined at build time by electron.vite.config.mjs.
+        __MICROSOFT_CLIENT_ID__: 'readonly'
+      }
     },
     plugins: { '@stylistic': stylistic },
     rules: {
@@ -44,7 +48,7 @@ export default [
 
   // 2 spaces: the entry point, the IPC layer, the preload and the shared constants.
   {
-    files: ['src/main/index.js', 'src/main/ipc/**/*.js', 'src/preload/**/*.js', 'src/shared/**/*.js'],
+    files: ['src/main/index.js', 'src/main/constants.js', 'src/main/ipc/**/*.js', 'src/preload/**/*.js', 'src/shared/**/*.js'],
     plugins: { '@stylistic': stylistic },
     rules: { '@stylistic/indent': ['error', 2, { SwitchCase: 1 }] }
   },

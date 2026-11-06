@@ -34,10 +34,12 @@ function AppContent() {
 }
 
 function App() {
+  // StatusProvider is outermost so every other provider can report through it: AuthProvider
+  // tells the player why a session ended instead of dropping them on the login screen.
   return (
-    <AuthProvider>
-      <LaunchProvider>
-        <StatusProvider>
+    <StatusProvider>
+      <AuthProvider>
+        <LaunchProvider>
           <div className="relative w-screen h-screen">
             <AppContent />
 
@@ -48,9 +50,9 @@ function App() {
               <StatusMessage />
             </div>
           </div>
-        </StatusProvider>
-      </LaunchProvider>
-    </AuthProvider>
+        </LaunchProvider>
+      </AuthProvider>
+    </StatusProvider>
   )
 }
 

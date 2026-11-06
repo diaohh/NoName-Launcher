@@ -1,8 +1,14 @@
-import './env'
 import { app, BrowserWindow, session, shell } from 'electron'
 import path from 'path'
+// `resources/` is electron-vite's public directory for main, so `?asset` resolves the icon
+// against it at runtime; `asarUnpack` points that path at app.asar.unpacked, where
+// electron-builder.yml leaves the folder as a real file on disk.
+import icon from '../../resources/icon.png?asset&asarUnpack'
 import { registerAllIPC } from './ipc'
 import ConfigManager from './managers/ConfigManager'
+import Logger from './utils/Logger'
+
+const logger = Logger.getLogger('Main')
 
 let mainWindow
 
@@ -88,7 +94,7 @@ function createWindow() {
     width: 1000,
     height: 600,
     frame: true,
-    icon: path.join(__dirname, '../../resources/icon.png'),
+    icon,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       nodeIntegration: false,
@@ -116,19 +122,51 @@ function createWindow() {
   })
 }
 
-app.whenReady().then(() => {
-  applyContentSecurityPolicy()
-  createWindow()
+/** Brings the existing window forward when the player opens the launcher a second time. */
+function focusMainWindow() {
+  if (!mainWindow) {
+    if (app.isReady()) createWindow()
+    return
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow()
+function startLauncher() {
+  // Before anything else is logged, so the file has the whole run. Lives next to config.json,
+  // not under the data directory: see ConfigManager.getLogsDirectory.
+  Logger.enableFileLogging(ConfigManager.getLogsDirectory())
+  logger.info(
+    `${app.getName()} ${app.getVersion()} starting, Electron ${process.versions.electron}, ` +
+    `${process.platform} ${process.arch}${app.isPackaged ? '' : ', development'}`
+  )
+
+  app.on('second-instance', focusMainWindow)
+
+  app.whenReady().then(() => {
+    applyContentSecurityPolicy()
+    createWindow()
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow()
+      }
+    })
+  })
+
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') {
+      app.quit()
     }
   })
-})
+}
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit()
-  }
-})
+// One launcher at a time. A second process would write config.json behind the first one's
+// back, and could sync the same instance directory concurrently — `launchInProgress` only
+// guards a single process. The second launch hands over to the first and exits.
+if (app.requestSingleInstanceLock()) {
+  startLauncher()
+} else {
+  app.quit()
+}
