@@ -6,6 +6,7 @@ import LoginSection from './components/auth/LoginSection'
 import HomeScreen from './components/home/HomeScreen'
 import StatusMessage from './components/common/StatusMessage'
 import TitleBar from './components/common/TitleBar'
+import CloseGuard from './components/common/CloseGuard'
 import AppLogo from './components/common/AppLogo'
 
 function AppContent() {
@@ -57,6 +58,8 @@ function App() {
                 <StatusMessage />
               </div>
             </div>
+
+            <CloseGuard />
           </div>
         </LaunchProvider>
       </AuthProvider>

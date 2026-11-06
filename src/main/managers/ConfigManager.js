@@ -69,6 +69,16 @@ class ConfigManager {
     }
 
     /**
+     * Records the game the launcher started, so a launcher opened while that game is still
+     * running (it outlives the launcher, see LaunchManager) does not start a second one on top.
+     * Next to the config for the same reason as the logs: it describes the launcher, not the
+     * data, and a data directory change must not lose track of it.
+     */
+    static getRunningGamePath() {
+        return path.join(this.getLauncherDirectory(), 'running-game.json')
+    }
+
+    /**
      * Where the game data goes: `common/`, `instances/`, the manifest cache and the JVMs
      * the launcher downloads. This is what the "Directorio de datos" setting governs.
      *

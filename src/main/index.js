@@ -6,6 +6,7 @@ import path from 'path'
 import icon from '../../resources/icon.png?asset&asarUnpack'
 import { registerAllIPC } from './ipc'
 import ConfigManager from './managers/ConfigManager'
+import LaunchManager from './managers/LaunchManager'
 import Logger from './utils/Logger'
 
 const logger = Logger.getLogger('Main')
@@ -155,6 +156,12 @@ function startLauncher() {
         createWindow()
       }
     })
+  })
+
+  // The game was spawned detached and keeps running; this only lets go of its pipes so the
+  // launcher can exit (ADR-0013).
+  app.on('will-quit', () => {
+    LaunchManager.releaseGame()
   })
 
   app.on('window-all-closed', () => {

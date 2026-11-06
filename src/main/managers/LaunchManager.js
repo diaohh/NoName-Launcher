@@ -31,6 +31,9 @@ const MIN_SUPPORTED_MINOR = 17
 /** A `.sha1` file is 40 bytes; if it takes longer than this the maven is not answering. */
 const SHA1_TIMEOUT_MS = 15 * 1000
 
+/** PowerShell's first start on a cold machine is slow; past this the orphan check gives way. */
+const ORPHAN_CHECK_TIMEOUT_MS = 15 * 1000
+
 /**
  * The launcher features version manifests can condition arguments on. Anything not listed
  * is off — demo mode, Quick Play — which is what keeps those argument blocks out.
@@ -675,6 +678,16 @@ class LaunchManager {
         this.launchInProgress = true
 
         try {
+            // The game outlives the launcher, so one may still be running from a previous
+            // session that this process knows nothing about. Syncing the instance under it
+            // would rewrite jars it has open; starting a second one would fight over saves.
+            const orphan = await this.findOrphanGame()
+            if (orphan) {
+                const error = new Error('Minecraft sigue abierto desde una sesion anterior del launcher. Cierralo antes de volver a jugar.')
+                error.code = ERROR_CODE.LAUNCH_ALREADY_RUNNING
+                throw error
+            }
+
             if (progressCallback) progressCallback({ type: 'auth', message: 'Validando cuenta...' })
 
             const validation = await AuthManager.validateSelectedMicrosoftAccount()
@@ -793,8 +806,12 @@ class LaunchManager {
             await fs.ensureDir(path.join(instanceDir, 'natives'))
 
             const normalizedJavaPath = path.normalize(javaPath)
+            // Detached, so the game outlives the launcher (ADR-0013). Without it Windows puts
+            // the child in libuv's kill-on-close job object, and closing the launcher killed
+            // the game with everything that had not been saved. `windowsHide` stays off: it
+            // reaches the JVM as the show flag of its first window, which is the game's own.
             const child = child_process.spawn(normalizedJavaPath, args, {
-                cwd: instanceDir, detached: false, windowsHide: false
+                cwd: instanceDir, detached: true, windowsHide: false
             })
 
             // `spawn` returns before the OS has tried to start anything; a missing javaw only
@@ -803,6 +820,7 @@ class LaunchManager {
             await this.waitForSpawn(child, normalizedJavaPath)
 
             this.gameProcess = child
+            this.recordRunningGame(child.pid, instanceDir)
             logger.info('Minecraft process started, PID:', child.pid)
             if (progressCallback) progressCallback({ type: 'started', message: 'Minecraft iniciado correctamente', pid: child.pid })
 
@@ -826,6 +844,7 @@ class LaunchManager {
                 this.startupTracker?.dispose()
                 this.startupTracker = null
                 this.gameProcess = null
+                this.clearRunningGame()
                 if (progressCallback) progressCallback({ type: 'exit', code })
             })
 
@@ -884,6 +903,114 @@ class LaunchManager {
         logger.info('Killing Minecraft, PID:', this.gameProcess.pid)
         this.gameProcess.kill()
         return true
+    }
+
+    /**
+     * Lets go of the game when the launcher quits. It was spawned detached, so it keeps
+     * running; what goes are the pipes and the handle, which would otherwise hold the event
+     * loop open. Java swallows the broken pipe (`PrintStream` only sets its error flag), which
+     * was measured with a JVM writing to both streams after its parent exited.
+     *
+     * `running-game.json` stays on disk: it is what stops the next session from starting a
+     * second game on top of this one (see `findOrphanGame`).
+     */
+    static releaseGame() {
+        const child = this.gameProcess
+        if (!child) return
+
+        logger.info(`Launcher quitting, leaving Minecraft running (PID ${child.pid})`)
+        this.startupTracker?.dispose()
+        this.startupTracker = null
+        child.removeAllListeners('close')
+        child.stdout?.destroy()
+        child.stderr?.destroy()
+        child.unref()
+    }
+
+    /**
+     * True while this launcher has a game running, or one survives from a previous session.
+     * What `config:setDataDirectory` checks before moving the root out from under it.
+     */
+    static async isGameRunning() {
+        return this.gameProcess != null || await this.findOrphanGame() != null
+    }
+
+    static recordRunningGame(pid, gameDir) {
+        try {
+            fs.writeJsonSync(ConfigManager.getRunningGamePath(), { pid, gameDir, startedAt: Date.now() })
+        } catch (err) {
+            // Only the guard against a second game after a relaunch is lost.
+            logger.warn('Could not record the running game', err)
+        }
+    }
+
+    static clearRunningGame() {
+        try {
+            fs.removeSync(ConfigManager.getRunningGamePath())
+        } catch (err) {
+            logger.warn('Could not clear the running game record', err)
+        }
+    }
+
+    /**
+     * The game a previous launcher session left running, or null.
+     *
+     * A PID alone proves nothing once its process is gone: the OS hands the number out again,
+     * and refusing to launch because some unrelated program inherited it would block the player
+     * for no reason. So the process must also carry the instance directory on its command line,
+     * which only a Minecraft started by this launcher does (`--gameDir`). A record that fails
+     * either check is stale and deleted. When the command line cannot be read at all the guard
+     * gives way rather than block: the cost is the behaviour from before it existed.
+     *
+     * @returns {Promise<{pid: number, gameDir: string} | null>}
+     */
+    static async findOrphanGame() {
+        let record
+        try {
+            record = fs.readJsonSync(ConfigManager.getRunningGamePath())
+        } catch {
+            return null
+        }
+
+        const valid = Number.isInteger(record?.pid) && record.pid > 0 && typeof record.gameDir === 'string'
+        if (valid && this.isProcessAlive(record.pid)) {
+            const commandLine = await this.readCommandLine(record.pid)
+            if (commandLine?.includes(record.gameDir)) {
+                logger.info(`Minecraft from a previous session is still running (PID ${record.pid})`)
+                return { pid: record.pid, gameDir: record.gameDir }
+            }
+        }
+
+        this.clearRunningGame()
+        return null
+    }
+
+    static isProcessAlive(pid) {
+        try {
+            process.kill(pid, 0)
+            return true
+        } catch (err) {
+            // EPERM: it exists, it just belongs to someone else.
+            return err.code === 'EPERM'
+        }
+    }
+
+    /** The full command line of a process, or null when it cannot be read. */
+    static readCommandLine(pid) {
+        const [file, args] = process.platform === 'win32'
+            ? ['powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`]]
+            : ['ps', ['-p', String(pid), '-o', 'args=']]
+
+        return new Promise((resolve) => {
+            child_process.execFile(file, args, { timeout: ORPHAN_CHECK_TIMEOUT_MS, windowsHide: true, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => {
+                if (err) {
+                    logger.warn(`Could not read the command line of PID ${pid}`, err)
+                    resolve(null)
+                    return
+                }
+                resolve(stdout)
+            })
+        })
     }
 
     /**

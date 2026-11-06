@@ -141,7 +141,7 @@ export function registerConfigIPC(mainWindow) {
   handle(Channels.CONFIG_SET_DATA_DIRECTORY, async (_event, dir) => {
     // Moving the root out from under a running game would leave it with open handles
     // into a directory the launcher no longer considers its own.
-    if (LaunchManager.gameProcess != null) {
+    if (await LaunchManager.isGameRunning()) {
       const error = new Error('Cierra Minecraft antes de cambiar el directorio de datos.')
       error.code = ERROR_CODE.CONFIG_GAME_RUNNING
       throw error
