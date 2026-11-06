@@ -100,9 +100,10 @@ export default function LogViewer() {
   const counter = logs.length > 99 ? '+99' : logs.length
 
   return (
-    <div className="mt-2">
+    <>
+      {/* It sits straight on the banner, with no scrim behind it, hence a glass pill of its own. */}
       <button
-        className="text-white/30 text-xs hover:text-white/60 transition-colors cursor-pointer bg-transparent border-none"
+        className="text-white/50 text-xs px-3 py-1.5 rounded-full bg-black/35 backdrop-blur-md border border-white/10 hover:text-white hover:bg-black/50 transition-colors cursor-pointer"
         onClick={handleOpen}
       >
         Mostrar Logs ({counter})
@@ -138,6 +139,6 @@ export default function LogViewer() {
           )}
         </div>
       </Modal>
-    </div>
+    </>
   )
 }

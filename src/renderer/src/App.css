@@ -6,6 +6,7 @@
   --color-accent-green: #4ade80;
   --color-accent-blue: #3b82f6;
   --color-accent-wine: #7a1f3d;
+  --color-accent-orange: #d87943;
   --color-bg-deep: #050505;
   --color-panel-steel: #1a1a1c;
   --color-sidebar-bg: rgba(255, 255, 255, 0.03);
@@ -24,6 +25,13 @@
 @keyframes blink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }
+}
+
+/* The status toast's countdown bar. Duration is set inline from StatusContext's VISIBLE_MS,
+   so the bar and the timer that closes the toast cannot drift apart. */
+@keyframes toast-timer {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
 }
 
 @keyframes fade-in-up {

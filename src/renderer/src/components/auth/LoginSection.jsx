@@ -1,8 +1,8 @@
 import { useState } from "react"
 import { useAuth } from "../../contexts/AuthContext"
 import { useStatus } from "../../contexts/StatusContext"
-import minecraftIcon from "../../assets/imgs/minecraft_icon.png"
 import AppLogo from "../common/AppLogo"
+import LoginIcon from "./LoginIcon"
 
 export default function LoginSection() {
   const { login } = useAuth()
@@ -30,11 +30,11 @@ export default function LoginSection() {
 
         <div className="flex flex-col gap-5">
           <button
-            className="bg-white/5 text-white border border-white/10 py-4 px-8 rounded inline-flex items-center justify-center gap-3 font-medium text-[0.9rem] transition-all duration-300 w-full backdrop-blur-[10px] hover:bg-white/10 hover:border-accent-green hover:shadow-[0_0_25px_rgba(74,222,128,0.2)] hover:-translate-y-0.5 disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none font-inter cursor-pointer"
+            className="bg-white/5 text-white border border-white/10 py-4 px-8 rounded-full inline-flex items-center justify-center gap-3 font-medium text-[0.9rem] transition-all duration-300 w-full backdrop-blur-[10px] hover:bg-white/10 hover:border-accent-orange hover:shadow-[0_0_25px_rgba(216,121,67,0.35)] hover:-translate-y-0.5 disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none font-inter cursor-pointer"
             onClick={handleLogin}
             disabled={loggingIn}
           >
-            <img src={minecraftIcon} className="w-5 h-5 object-contain" alt="Minecraft" />
+            <LoginIcon />
             {loggingIn ? "AUTENTICANDO..." : "INICIA SESIÓN CON MICROSOFT"}
           </button>
         </div>

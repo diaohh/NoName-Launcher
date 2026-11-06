@@ -66,3 +66,17 @@ loader libraries — so the second phase restarted the count.
   has been recognised (an indeterminate bar).
 - `stdout`/`stderr` now carry `lines: string[]` (whole lines, split before any trim) instead
   of `data`, the raw chunk.
+
+## Addendum (2026-11-06)
+
+- The two bars are back to **one**, shown as four steps (`LAUNCH_STEPS` in `launchPhases.js`:
+  Verificar, Descargar, Preparar, Iniciar). Stacked, the second bar covered JUGAR and its kill
+  button during the game's startup, and the first one sat at 100% doing nothing next to it.
+- Each step's stretch fills 0–100 on its own, instead of one continuous bar weighted by
+  `PHASE_RANGE`. Those weights cannot be right for both a cold instance (downloads dominate) and
+  a warm one (the game's startup dominates), and a continuous bar would leap to ~70% and then
+  stall for the whole startup on every warm launch.
+- The contract above is unchanged: payloads, the once-only rule and the slices all stand. The
+  preparation steps are cuts across `PHASE_RANGE` and a phase belongs to the step its floor falls
+  in, so the slices remain the only table a new phase has to be added to. `game_startup` is the
+  last step, still on its own scale and still outside `PHASE_RANGE`.

@@ -8,10 +8,12 @@ import { useState } from 'react'
  * Mount it with `key={url}` so the loaded/failed state starts over for each modpack.
  * A logo that fails to load shows nothing rather than a broken image.
  *
- * The height cap keeps the vertically centred stack (logo, mb-3, one line of description)
- * clear of the play button, whose top sits 213px above the bottom edge:
- * logo + 32px <= 100vh - 2 * (213px + 12px gap), hence 100vh - 490px. The 110px floor is
- * what that yields at the default 600px window; 55vh stops it growing without bound.
+ * It is a flex item in HomeScreen's column, in the box that takes whatever height the play
+ * button and the launch tracker leave: `min-h-0` lets it shrink below its natural height and
+ * `object-contain` scales the artwork down inside it, so the logo always fills the free space
+ * and can never reach the button. It used to be capped with a height computed from the
+ * button's fixed offset, which pinned it to 110px in the default 1000x600 window. 55vh only
+ * stops a square logo from taking over a tall screen.
  */
 export default function ModpackLogo({ url, name }) {
   const [loaded, setLoaded] = useState(false)
@@ -25,7 +27,7 @@ export default function ModpackLogo({ url, name }) {
       alt={name}
       onLoad={() => setLoaded(true)}
       onError={() => setFailed(true)}
-      className={`mb-3 w-[min(75%,1000px)] h-auto max-h-[clamp(110px,calc(100vh-490px),55vh)] object-contain drop-shadow-[0_4px_16px_rgba(0,0,0,0.5)] ${
+      className={`mb-3 min-h-0 w-[min(75%,1000px)] h-auto max-h-[55vh] object-contain drop-shadow-[0_4px_16px_rgba(0,0,0,0.5)] ${
         loaded ? 'animate-fade-in-up motion-reduce:animate-none' : 'opacity-0'
       }`}
     />

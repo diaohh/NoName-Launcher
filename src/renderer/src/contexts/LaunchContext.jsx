@@ -4,7 +4,9 @@ import { phasePercent } from '../services/launchPhases'
 
 const LaunchContext = createContext()
 
-const IDLE_PROGRESS = { phase: '', message: '', current: 0, total: 0, percent: null }
+// `type` is the launch phase, which places the event on the tracker; `phase` is what the
+// header names, and for `download` it is MinecraftDownloadManager's own sub-phase instead.
+const IDLE_PROGRESS = { type: '', phase: '', message: '', current: 0, total: 0, percent: null }
 
 // The viewer keeps the tail only; the full game log is in the instance's own logs/latest.log.
 const MAX_LOG_LINES = 500
@@ -15,7 +17,7 @@ export function LaunchProvider({ children }) {
   const [logs, setLogs] = useState([])
   const [gameRunning, setGameRunning] = useState(false)
   const [lastError, setLastError] = useState(null)
-  // The second bar, fed by milestones in the game's own output once the JVM is up:
+  // The tracker's last step, fed by milestones in the game's own output once the JVM is up:
   // `{ percent, message, done }`, `percent` null while no milestone has been recognised. Null
   // outside a startup — before the first `started`, and after a reload that found the game
   // already running, when there is nothing left to measure.
@@ -58,6 +60,7 @@ export function LaunchProvider({ children }) {
             }
 
             return {
+              type: data.type,
               phase: newPhase,
               message: data.message,
               current,
@@ -74,7 +77,7 @@ export function LaunchProvider({ children }) {
           addLog(`Minecraft iniciado (PID: ${data.pid})`, 'system')
           break
         case 'game_startup':
-          // A bar of its own, not a slice of PHASE_RANGE: the preparation is at 100% by now.
+          // A step of its own, not a slice of PHASE_RANGE: the preparation is at 100% by now.
           setStartup({ percent: data.current, message: data.message, done: Boolean(data.done) })
           break
         case 'stdout':
@@ -131,7 +134,7 @@ export function LaunchProvider({ children }) {
     setProgress({ ...IDLE_PROGRESS, message: 'Iniciando...' })
     try {
       await ipc.launch.game()
-      setProgress({ phase: 'Completado', message: 'Minecraft iniciado!', current: 100, total: 100, percent: 100 })
+      setProgress(prev => ({ ...prev, phase: 'Completado', message: 'Minecraft iniciado!', current: 100, total: 100, percent: 100 }))
     } catch (err) {
       setLaunchState('error')
       throw err

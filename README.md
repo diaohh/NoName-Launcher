@@ -12,7 +12,7 @@ A custom Minecraft launcher built with Electron, React, and Tailwind CSS. Featur
 - **Fabric Support** — Loader profile resolved from the Fabric Meta API. Forge is implemented but not yet reachable end to end (see the loader table below)
 - **Per-Modpack Settings** — RAM allocation defined per modpack, used by default; a launcher-wide slider takes over when the per-modpack override is switched off in Settings
 - **Dynamic UI** — Modpack banners, player skin display via Minotar, glassmorphism dark theme with its own title bar
-- **Launch Feedback** — A progress bar for the preparation and a second one that follows the game to its title screen; the game log can be copied or saved from the logs dialog
+- **Launch Feedback** — One progress bar split into steps (verify, download, prepare, start), each checked as the launch moves past it, the last one following the game to its title screen; the game log can be copied or saved from the logs dialog
 - **The Game Outlives the Launcher** — Closing the launcher never closes Minecraft; closing it mid-download asks first (see [ADR-0013](docs/adr/0013-the-game-outlives-the-launcher.md))
 - **Cross-Platform** — Windows (NSIS installer + portable), Linux (AppImage), macOS (DMG)
 
@@ -99,7 +99,8 @@ A custom Minecraft launcher built with Electron, React, and Tailwind CSS. Featur
    | `minecraftVersion` | string | **Display only.** The manifest is authoritative for launching |
    | `icon` | string (URL) | Sidebar icon |
    | `banner` | string (URL) | Full-window background. **Art only, no text**: it is centred on the window and cropped, so a title drawn into it never lines up with the play button |
-   | `logo` | string (URL) | Optional transparent title image, centred on the play button's axis |
+   | `logo` | string (URL) | Optional transparent title image, centred on the play button's axis and scaled to the space the window leaves |
+   | `accentColor` | string | Optional `#rgb` / `#rrggbb` for the play button and the progress bar; anything else falls back to the launcher's orange |
    | `isPublic` | boolean | Must be `true` to be queryable |
    | `enabled` | boolean | Toggle modpack visibility |
    | `usersAllowed` | string[] | Minecraft **usernames** allowed to see the modpack |
@@ -138,7 +139,7 @@ Validate account (refresh Microsoft/Minecraft tokens if needed)
   → Install the mod loader (Fabric Meta profile / Forge installer)
   → Download loader libraries
   → Build the launch command and spawn the game (detached: it keeps running if the launcher closes)
-  → Follow the game output to its title screen (second progress bar)
+  → Follow the game output to its title screen (the last step of the progress bar)
 ```
 
 Everything runs in the main process and reports progress to the renderer over a single `launch:progress` event. Only one launch runs at a time — the main process refuses a second one rather than relying on the button being disabled.
