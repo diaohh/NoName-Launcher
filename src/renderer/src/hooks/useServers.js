@@ -10,9 +10,10 @@ const UNKNOWN_MESSAGE = 'No se ha podido cargar la lista de modpacks.'
 /**
  * Turns a failed read into something the player can act on.
  *
- * Firestore reports an unreachable backend as `unavailable`, and the race in
- * `firestoreService` reports its own giving-up as FIRESTORE_TIMEOUT; both mean "no network"
- * to the player. Firebase's own messages are in English, so only the code is read and the
+ * Firestore lite reports a request that never got an HTTP answer (no network, DNS, refused
+ * connection) as `unknown`, a backend that answered 503 as `unavailable`, and the race in
+ * `firestoreService` reports its own giving-up as FIRESTORE_TIMEOUT; all three mean
+ * "no network" to the player. Firebase's own messages are in English, so only the code is read and the
  * text is ours — the original goes to the console.
  *
  * These codes never cross the IPC boundary, which is why they deliberately do not live in
@@ -21,6 +22,7 @@ const UNKNOWN_MESSAGE = 'No se ha podido cargar la lista de modpacks.'
 function describeError(err) {
   const isNetwork = err?.code === FIRESTORE_TIMEOUT
     || err?.code === 'unavailable'
+    || err?.code === 'unknown'
     || navigator.onLine === false
 
   return {

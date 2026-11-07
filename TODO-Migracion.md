@@ -58,9 +58,12 @@ reglas) se habra pasado antes a un ADR, a `AGENTS.md` o a `TODO.md`.
 
 Independientes entre si y de lo demas; pueden ir antes o intercalados.
 
-- [ ] `firebase/firestore/lite`: cambiar `getFirestore` en `services/firebase.js` y los imports
+- [x] `firebase/firestore/lite`: cambiar `getFirestore` en `services/firebase.js` y los imports
   de `services/firestoreService.js`. Comprobar que solo se usan `doc`/`collection`/`getDoc`/
-  `getDocs` (y lo que haya de query) y medir el bundle del renderer antes y despues
+  `getDocs` (y lo que haya de query) y medir el bundle del renderer antes y despues —
+  06/11/2026, `ts/f0-quick-wins`. Chunk inicial 1.235,90 → 911,82 kB. Probado contra el
+  Firestore real (lista + documento). La carrera de 12 s se queda: lite no tiene plazo propio, y
+  un fallo de red llega como `unknown`, que `useServers` ahora cuenta como "sin red"
 - [ ] S7, parte barata: `partition` propia para la ventana de login (`windows/msftAuth.js`) y
   limpiar su sesion al cerrar sesion en `AuthManager`
 - [ ] S9: addendum fechado en ADR-0007 (el `accessToken` viaja en la linea de comandos del juego)

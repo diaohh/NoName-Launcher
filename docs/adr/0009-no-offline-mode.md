@@ -67,3 +67,11 @@ and retries indefinitely — every Firestore read is raced against a 12 s timeou
 - **A global offline banner over the whole app.** *(reconstructed)* `navigator.onLine` reports
   the adapter, not reachability, and a launcher behind a captive portal is "online". The
   failure is reported where it actually happened instead.
+
+## Addendum (2026-11-06)
+
+- The renderer moved to `firebase/firestore/lite`, and the prediction above was wrong: the race
+  is still needed. Lite does not queue, but its REST call is a bare `fetch` with no deadline, so
+  a connection that stalls instead of being refused still hangs. The 12 s timeout stays.
+- With lite, a request that never got an HTTP answer rejects with code `unknown` rather than
+  `unavailable`; `useServers.describeError` counts both as "no network".

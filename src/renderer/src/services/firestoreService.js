@@ -7,7 +7,7 @@ import {
   query,
   where,
   orderBy,
-} from 'firebase/firestore'
+} from 'firebase/firestore/lite'
 
 /** Code carried by the rejection `withTimeout` produces. Never crosses the IPC boundary. */
 export const FIRESTORE_TIMEOUT = 'FIRESTORE_TIMEOUT'
@@ -17,13 +17,11 @@ const NETWORK_TIMEOUT_MS = 12000
 /**
  * Racing a Firestore read against the clock.
  *
- * The full Firebase SDK does not reject when the device is offline: it queues the read and
- * retries for as long as it takes, so with no connection the launcher sits on "Cargando..."
- * forever instead of reporting anything. This cannot cancel the request underneath — it only
- * stops waiting for it — but it does turn silence into an error the UI can show.
- *
- * Moving to `firebase/firestore/lite` (a plain REST call, which fails on its own) would make
- * this unnecessary; that is tracked in the P5 bundle-size item.
+ * `firebase/firestore/lite` is a plain `fetch` with no deadline: a refused connection fails at
+ * once, but one that stalls (captive portal, a firewall that drops packets) hangs for as long
+ * as the socket does, and the launcher would sit on "Cargando..." with it. This cannot cancel
+ * the request underneath — it only stops waiting for it — but it does turn silence into an
+ * error the UI can show.
  */
 function withTimeout(promise, ms = NETWORK_TIMEOUT_MS) {
   let timer

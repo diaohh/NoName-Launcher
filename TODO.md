@@ -19,7 +19,7 @@ Nada pendiente. Cerrado el 05/11/2026: icono (`resources/icon.png`, el del estud
 
 ## P3 — Limpieza de codigo
 
-- [ ] **`useIpcResource` — el tercer llamante ya existe** — `AuthContext`, `SettingsScreen` y, desde el 06/11/2026, `SkinManagerScreen` reimplementan cada uno su maquina loading/error para un fetch al montar ([ADR-0008](docs/adr/0008-useeffect-only-for-external-systems.md)). El gestor de skins no se migro en su lote para no mezclar un refactor con la feature, y su carga no es del todo generica: post-procesa las texturas (miniaturas, modelo detectado) y vuelve a leer tras un guardado fallido sin perder la eleccion del jugador, asi que el hook tendria que aceptar un loader arbitrario y exponer `reload`. Hacerlo como cambio aparte, migrando los tres. Descartada una libreria de fetching: el renderer ya carga ~1.2 MB de Firebase y P5 lo quiere **mas pequeño**; React Query se volvio a valorar para el gestor de skins y tampoco compensa todavia ([ADR-0014](docs/adr/0014-skins-through-main-as-data-urls.md))
+- [ ] **`useIpcResource` — el tercer llamante ya existe** — `AuthContext`, `SettingsScreen` y, desde el 06/11/2026, `SkinManagerScreen` reimplementan cada uno su maquina loading/error para un fetch al montar ([ADR-0008](docs/adr/0008-useeffect-only-for-external-systems.md)). El gestor de skins no se migro en su lote para no mezclar un refactor con la feature, y su carga no es del todo generica: post-procesa las texturas (miniaturas, modelo detectado) y vuelve a leer tras un guardado fallido sin perder la eleccion del jugador, asi que el hook tendria que aceptar un loader arbitrario y exponer `reload`. Hacerlo como cambio aparte, migrando los tres. Descartada una libreria de fetching: el chunk inicial del renderer ya pesa ~0.9 MB y conviene que no crezca; React Query se volvio a valorar para el gestor de skins y tampoco compensa todavia ([ADR-0014](docs/adr/0014-skins-through-main-as-data-urls.md))
 
 ## P4 — Funcionalidades faltantes
 
@@ -35,8 +35,9 @@ Cada item lleva anotado lo que le falta para poder empezarse. Cerrado el 05/11/2
 
 ## P5 — Mantenimiento y evolucion
 
+Cerrado el 06/11/2026: `firebase/firestore/lite` (el chunk inicial del renderer baja de 1.236 a 912 kB; `pnpm audit` no cambia, porque cuenta las dependencias instaladas del paquete `firebase`, no lo que entra en el bundle).
+
 - [ ] 🔍 **Electron 37 → 44** — la 37 esta fuera de soporte y se acumulan CVEs de Chromium. 📋 Estado al 17/09/2026: la ultima es la **44.4.2**, y `pnpm audit` da 33 avisos solo en `electron` 37.1.0, de un total de 132 (3 criticos, 74 altos)
-- [ ] 🔍 **`firebase/firestore/lite`** — solo se usan `getDoc`/`getDocs`; el bundle del renderer son ~1.2 MB casi todos de Firebase. 📋 Ademas saca del bundle grpc/protobuf, que son los 2 avisos **criticos** de `pnpm audit` (protobufjs, websocket-driver)
 - [ ] 🔍 **Actualizaciones menores** — 📋 versiones al 17/09/2026: react 19.3.0, firebase 12.19.0, electron-builder 26.15.3 (arrastra la mayoria de avisos de tar/minimatch/xmldom), postcss 8.5.28, tailwindcss 4.3.3, vite 6 → 8, `@vitejs/plugin-react` 4 → 6
 - [ ] 📋 **OAuth: PKCE y sesion propia para el login (S7)** — el flujo no usa PKCE ni `state`; la ventana embebida lo mitiga, pero RFC 8252 lo recomienda para clientes publicos. `MicrosoftAuth.getAccessToken` de helios no acepta `code_verifier`, asi que haria falta un canje propio. Mas barato y con efecto inmediato: dar a la ventana de login una `partition` propia y limpiarla al cerrar sesion, para que las cookies de Microsoft no sobrevivan al logout ni compartan sesion con el launcher
 - [ ] 📋 **Podar caches (B16)** — `manifests/<hash>.json` y los JDK de `runtime/` no se borran nunca. Conservar el manifest actual de cada modpack y los JDK que use algun modpack
