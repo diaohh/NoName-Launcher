@@ -47,13 +47,13 @@ Package manager is **pnpm** (not npm or yarn). `package.json` lists `pnpm.onlyBu
 
 A change is done when `pnpm lint` and `pnpm typecheck` report 0 errors, `pnpm test` is green and `pnpm build` compiles — checked **before committing**, not after every edit. `pnpm build` alone only proves the bundle compiles, and launching the game end-to-end needs a Microsoft account plus a Firestore modpack, so anything touching Electron or the launch is also tried by hand (`pnpm dev`, and `pnpm package` for what only shows up packaged).
 
-**Tests** run on Vitest with their own `vitest.config.mjs` (electron-vite's config builds three targets and is not reused). They sit **next to the file they cover** (`X.test.js` beside `X.js`, renamed together when the file moves to TypeScript), with no `test/` folder and **no coverage target**: coverage is minimal on purpose, limited to what fails silently and what the migration rewrites. A test pins a rule of this file, not an implementation detail.
+**Tests** run on Vitest with their own `vitest.config.mjs` (electron-vite's config builds three targets and is not reused). They sit **next to the file they cover** (`X.test.ts` beside `X.ts`; a `.js` file still being migrated keeps a `.test.js`, renamed together with it), with no `test/` folder and **no coverage target**: coverage is minimal on purpose, limited to what fails silently and what the migration rewrites. A test pins a rule of this file, not an implementation detail — and what the compiler already enforces (a phase without a slice, a channel missing from a layer) is not tested twice.
 
-- `electron` is aliased to `src/main/testing/electron.js`, a stub with only what the code under test touches (`safeStorage`, `app`, `powerMonitor`). `safeStorageControl` switches it to no keyring, an undecryptable blob or a slow encryption; reset it in `afterEach`.
-- `src/main/testing/tempLauncher.js` → `createTempLauncher()` points `ConfigManager` at a fresh temp directory on the default config, writes `config.json` and synthetic version manifests into `common/versions/**`, and `cleanup()` resets the static state. It is the one shared helper; add to it instead of starting another.
+- `electron` is aliased to `src/main/testing/electron.ts`, a stub with only what the code under test touches (`safeStorage`, `app`, `powerMonitor`). `safeStorageControl` switches it to no keyring, an undecryptable blob or a slow encryption; reset it in `afterEach`.
+- `src/main/testing/tempLauncher.ts` → `createTempLauncher()` points `ConfigManager` at a fresh temp directory on the default config, writes `config.json` and synthetic version manifests into `common/versions/**`, and `cleanup()` resets the static state. It is the one shared helper; add to it instead of starting another.
 - `__MICROSOFT_CLIENT_ID__` and `__APP_VERSION__` are defined by the Vitest config, not read from `.env`.
 
-For something a test cannot reach — a real request to Mojang, Fabric Meta or Microsoft — a throwaway script still works: bundle it with `./node_modules/.bin/esbuild ./script.mjs --bundle --platform=node --format=esm --outfile=out.mjs --alias:electron=./src/main/testing/electron.js --banner:js="import{createRequire as __cr}from'module';const require=__cr(import.meta.url);"` and run `node out.mjs`. The script must sit inside the project (esbuild resolves dependencies from the importing file's directory). Keep it out of the repo.
+For something a test cannot reach — a real request to Mojang, Fabric Meta or Microsoft — a throwaway script still works: bundle it with `./node_modules/.bin/esbuild ./script.mjs --bundle --platform=node --format=esm --outfile=out.mjs --alias:electron=./src/main/testing/electron.ts --banner:js="import{createRequire as __cr}from'module';const require=__cr(import.meta.url);"` and run `node out.mjs`. The script must sit inside the project (esbuild resolves dependencies from the importing file's directory). Keep it out of the repo.
 
 ## Architecture
 
@@ -61,44 +61,55 @@ For something a test cannot reach — a real request to Mojang, Fabric Meta or M
 
 ```
 Main Process (src/main/)          Preload (src/preload/)       Renderer (src/renderer/src/)
-├── index.js (BrowserWindow)      └── index.js (contextBridge)  ├── App.jsx (providers)
+├── index.ts (BrowserWindow)      └── index.ts (contextBridge)  ├── App.jsx (providers)
 ├── managers/                                                    ├── contexts/ (Auth, Launch, Servers, Status)
-│   ├── AuthManager.js                                          ├── services/
-│   ├── ConfigManager.js                                        │   ├── ipcClient.js
-│   ├── DistributionManager.js                                  │   ├── firebase.js
-│   ├── LaunchManager.js                                        │   └── firestoreService.js
-│   ├── ManifestManager.js                                      ├── hooks/useServers.js
-│   ├── ModLoaderManager.js                                     └── components/{feature}/
-│   ├── MinecraftDownloadManager.js
-│   └── SkinManager.js (Mojang profile, skin vault)
-├── constants.js (build-time MICROSOFT_CLIENT_ID)
+│   ├── AuthManager.ts                                          ├── services/
+│   ├── ConfigManager.ts                                        │   ├── ipcClient.ts
+│   ├── DistributionManager.ts                                  │   ├── launchPhases.ts
+│   ├── LaunchManager.ts                                        │   ├── firebase.js
+│   ├── ManifestManager.ts                                      │   └── firestoreService.js
+│   ├── ModLoaderManager.ts                                     ├── hooks/useServers.js
+│   ├── MinecraftDownloadManager.ts                             └── components/{feature}/
+│   └── SkinManager.ts (Mojang profile, skin vault)
+├── types/ (config.json, pack manifest, Mojang version JSON)
+├── windows/msftAuth.ts (Microsoft sign-in window)
+├── constants.ts (build-time MICROSOFT_CLIENT_ID)
 └── ipc/
-    ├── result.js (handle() + envelope)
-    ├── auth.ipc.js
-    ├── config.ipc.js
-    ├── distribution.ipc.js
-    ├── launch.ipc.js
-    ├── logs.ipc.js (logs:export)
-    ├── skins.ipc.js (skins:*)
-    └── window.ipc.js (controls, maximize state, close guard)
+    ├── index.ts (the handler map)
+    ├── result.ts (handle() + envelope, listen(), emit())
+    ├── auth.ipc.ts
+    ├── config.ipc.ts
+    ├── distribution.ipc.ts
+    ├── launch.ipc.ts
+    ├── logs.ipc.ts (logs:export)
+    ├── skins.ipc.ts (skins:*)
+    └── window.ipc.ts (controls, maximize state, close guard)
+
+Shared (src/shared/, bundled into all three)
+├── channels.ts · errorCodes.ts · LauncherError.ts
+├── ipcContract.ts (what every channel carries)
+├── launchProgress.ts (the launch:progress union)
+└── modpack.ts · skins.ts
 ```
 
 ### IPC Pattern
 
-All main↔renderer communication follows this chain:
+Every channel is declared once, in `src/shared/ipcContract.ts`, and the layers are typed against it: a layer that lacks a channel, or takes or returns something else for it, **does not compile**. Adding a call touches:
 
-1. **src/shared/channels.js** — Define constant: `CONFIG_SET_FULLSCREEN: 'config:setFullscreen'`
-2. **\*.ipc.js** — Register handler: `ipcMain.handle(Channels.CONFIG_SET_FULLSCREEN, ...)`
-3. **preload/index.js** — Expose via contextBridge: `configSetFullscreen: (val) => ipcRenderer.invoke(Channels.CONFIG_SET_FULLSCREEN, val)`. The preload imports `Channels` from `src/shared/channels.js` like the handlers do — never write a channel name as a string literal there. A handler that receives data must validate it itself (see Trust Boundaries)
-4. **ipcClient.js** — Wrap for React: `ipc.config.setFullscreen: (val) => window.electronAPI.configSetFullscreen(val)`
+1. **src/shared/channels.ts** — the name: `CONFIG_SET_FULLSCREEN: 'config:setFullscreen'`
+2. **src/shared/ipcContract.ts** — what it carries, in one of three contracts: `InvokeContract` (renderer → main with an answer, `[Channels.CONFIG_SET_FULLSCREEN]: (value: boolean) => void`), `SendContract` (fire and forget) or `EventContract` (main → renderer, channel → payload); plus its preload method name in `BridgeMethods`. A name in `Channels` that no contract declares fails `UndeclaredChannels`
+3. **main/ipc/\*.ipc.ts** — the handler, as an entry of the map the file returns (`satisfies Partial<InvokeHandlers>`): `[Channels.CONFIG_SET_FULLSCREEN]: async (_event, value) => …`. `ipc/index.ts` spreads every file's map into one `InvokeHandlers`, which needs a handler per invoke channel, and registers it with `handleAll`. Send channels are registered with `listen()` and events go out with `emit()`, all from `ipc/result.ts` — never `ipcMain.handle`, `ipcMain.on` or `webContents.send` directly
+4. **preload/index.ts** — `configSetFullscreen: invoke(Channels.CONFIG_SET_FULLSCREEN)`, in an object typed `ElectronAPI`, which needs a method for every entry of `BridgeMethods` (`UnbridgedChannels`). It imports `Channels` like the handlers do — never write a channel name as a string literal there
+5. **renderer/services/ipcClient.ts** — `ipc.config.setFullscreen: invoke('configSetFullscreen')`. `UnwrappedMethods` fails if a bridge method has no wrapper
 
-Events from main→renderer use `ipcRenderer.on` (e.g., launch progress, token expiry).
+**Handler arguments arrive as `unknown`** (`Untrusted<Args>` in `result.ts`): the contract says what the renderer means to send, not what main may assume, so the handler checks type and range itself (see Trust Boundaries) before passing anything on.
 
 **Errors cross the boundary in an envelope, never as a thrown `Error`** — Electron would serialize it to a string and lose `error.code` ([ADR-0002](docs/adr/0002-ipc-error-envelope.md)):
 
-- Every handler is registered through `handle()` from `main/ipc/result.js`, which answers `{ ok: true, data }` or `{ ok: false, code, message }`. Do not call `ipcMain.handle` directly.
-- `ipcClient.js` unwraps it and rebuilds a real `Error` carrying `.code`, so renderer `try/catch` keeps working and callers branch on the code.
-- Codes live in `src/shared/errorCodes.js`, imported by **both** processes. Never compare against a literal copied into the renderer, and never branch on message text.
+- Every handler goes through `handle()` from `main/ipc/result.ts`, which answers `{ ok: true, data }` or `{ ok: false, code, message }` (`IpcResult<T>`). The code is `errorCodeOf(err)`: a code that is not one of the launcher's (node's `ENOENT`) travels as `UNKNOWN`.
+- `ipcClient.ts` unwraps it and rebuilds a `LauncherError` carrying `.code`, so renderer `try/catch` keeps working and callers branch on the code.
+- Codes live in `src/shared/errorCodes.ts` (`ErrorCode` is the union of them), imported by **both** processes. Never compare against a literal copied into the renderer, and never branch on message text.
+- **Main throws `LauncherError(code, message, cause?)`** from `src/shared/LauncherError.ts`, never an `Error` with `.code` assigned afterwards. Telling a launcher failure from a foreign one is `err instanceof LauncherError && err.code === …`.
 
 `src/shared/` is bundled into the main, preload and renderer bundles, so anything there must stay dependency-free.
 
@@ -148,11 +159,11 @@ The three secrets — `accessToken`, `microsoft.access_token`, `microsoft.refres
 
 Rules when touching auth ([ADR-0007](docs/adr/0007-encrypt-account-secrets-with-safestorage.md)):
 
-- A **transient** failure (no network, 5xx) must never delete the account. helios-core does not throw for a failed request — it returns `responseStatus: ERROR` with got's `RequestError` attached — so `AuthManager.classifyRestError` reads that and tags the failure. Only a code in `TERMINAL_AUTH_CODES` (`src/shared/errorCodes.js`, checked with `isTerminalAuthCode`) justifies a logout; an unrecognised error deliberately does **not**.
+- A **transient** failure (no network, 5xx) must never delete the account. helios-core does not throw for a failed request — it returns `responseStatus: ERROR` with got's `RequestError` attached — so `AuthManager.classifyRestError` reads that and tags the failure. Only a code in `TERMINAL_AUTH_CODES` (`src/shared/errorCodes.ts`, checked with `isTerminalAuthCode`) justifies a logout; an unrecognised error deliberately does **not**.
 - `validateSelectedMicrosoftAccount` returns `{ ok, code, message }`, never a boolean.
 - The refresh is **scheduled from `expiresAt`**, not polled: `AuthManager.startTokenRefreshScheduler` arms a `setTimeout` 5 min before expiry, bounded to `[15 s, 30 min]`, backs off `[1, 2, 5, 10 min]` on a recoverable failure and notifies the renderer only on a terminal one. Starting is idempotent, and `powerMonitor.on('resume')` re-checks after a suspend. Re-arm it with `scheduleTokenRefresh()` after anything that changes the selected account.
 - Never send the Minecraft `accessToken` to the renderer; the renderer only needs `username`/`uuid`/`displayName`.
-- The Microsoft sign-in window runs in its own **in-memory** partition (`msft-auth` in `windows/msftAuth.js`), never in the default session, and the logout handler empties it. Microsoft's cookies are a live web session for the player's account: they must not reach the disk nor outlive a logout. `purgeLegacyAuthCookies` removes the ones older versions left in the default session.
+- The Microsoft sign-in window runs in its own **in-memory** partition (`msft-auth` in `windows/msftAuth.ts`), never in the default session, and the logout handler empties it. Microsoft's cookies are a live web session for the player's account: they must not reach the disk nor outlive a logout. `purgeLegacyAuthCookies` removes the ones older versions left in the default session.
 - `microsoft.expires_at` is the expiry of the MS **access** token (~1 h), not of the refresh token (~90 days). Never treat it as "the session is over".
 - A decryption failure costs the session only: `purgeSession` clears `authenticationDatabase` and `selectedAccount` and leaves every setting alone. If `safeStorage.isEncryptionAvailable()` is false, credentials are **not persisted at all** rather than written in plaintext.
 - `usersAllowed` filtering in `firestoreService` is UX only ([ADR-0006](docs/adr/0006-usersallowed-is-ux-not-access-control.md)), and cannot currently be enforced in Security Rules either — the launcher has no Firebase identity, so `request.auth` is always `null`. See the stand-by entry in `TODO.md`.
@@ -191,7 +202,7 @@ job object and closing the launcher killed the game unsaved (measured). On quit,
 `running-game.json` next to `config.json` records `{ pid, gameDir }` from spawn to `close`;
 `findOrphanGame()` treats the record as live only if that PID's command line still contains the
 `gameDir`, and a launch (or a data directory change) over a live one is refused. Closing the
-window while a launch is being **prepared** is held in main (`window.ipc.js`) and confirmed by
+window while a launch is being **prepared** is held in main (`window.ipc.ts`) and confirmed by
 `CloseGuard` in the renderer; with a game running it closes without asking. Do not set
 `windowsHide: true` on the game spawn: Windows applies it to the JVM's first window, which is the
 game's.
@@ -226,7 +237,7 @@ Invariants to preserve when touching this flow:
 
 Every callback in the chain takes **one object**, `{ current, total, message }`. The managers underneath do not know which launch phase they are serving, so they never set `type`; `LaunchManager` is the only layer that adds it. `MinecraftDownloadManager` also carries its own sub-phase as `phase`.
 
-`launch:progress` carries a `type` that **must** have a matching `case` in `LaunchContext`'s switch **and** a slice in `renderer/services/launchPhases.js`, otherwise the step runs but the bar freezes on the previous message. Current set:
+`launch:progress` carries `LaunchProgress` (`src/shared/launchProgress.ts`), a **discriminated union** on `type`: one event shape per group below, and `LaunchManager`'s callback is typed against it. A preparation phase is a `PhaseType`, and `PHASE_RANGE` / `PHASE_LABEL` in `renderer/services/launchPhases.ts` are `Record<PhaseType, …>`, so a phase without a slice **does not compile**. It still needs a matching `case` in `LaunchContext`'s switch (checked by hand until the renderer is TypeScript), otherwise the step runs but the bar freezes on the previous message. Current set:
 
 | Group | Types |
 |-------|-------|
@@ -235,7 +246,7 @@ Every callback in the chain takes **one object**, `{ current, total, message }`.
 | Game startup (the tracker's last step, `{ current, total, message, done }`, `current` null = indeterminate) | `game_startup` |
 | Game output (appended to the log viewer, `lines: string[]`) | `stdout`, `stderr` |
 
-Adding a phase means touching `LaunchManager`, `LaunchContext` **and** `launchPhases.js` in the same change. A `type` must appear **exactly once** in the flow — `PHASE_RANGE` maps it to a fixed slice, so a repeated type makes the bar run backwards ([ADR-0005](docs/adr/0005-single-progress-contract-and-phase-map.md)). `game_startup` is the one deliberate exception: it repeats, and it has **no** slice in `PHASE_RANGE` because it drives the last step on its own 0–100 scale after the preparation is at 100% (`STARTUP_LABEL` in `launchPhases.js`).
+Adding a phase means touching `PhaseType`, `LaunchManager`, `LaunchContext` **and** `launchPhases.ts` in the same change. A `type` must appear **exactly once** in the flow — `PHASE_RANGE` maps it to a fixed slice, so a repeated type makes the bar run backwards ([ADR-0005](docs/adr/0005-single-progress-contract-and-phase-map.md)). `game_startup` is the one deliberate exception: it repeats, and it has **no** slice in `PHASE_RANGE` because it drives the last step on its own 0–100 scale after the preparation is at 100% (`STARTUP_LABEL` in `launchPhases.ts`).
 
 The player sees **one** bar, `components/launch/ProgressBar.jsx`, split into the four points of `LAUNCH_STEPS` (Verificar, Descargar, Preparar, Iniciar): the stretch of the step in progress fills 0–100 and the ones behind it are checked. The preparation steps are **cuts across `PHASE_RANGE`** (`until`, which must fall on a phase boundary), not weights of their own, and `launchStep(type, percent)` places a phase by the step its floor falls in — so a new phase with a slice joins a step without a third table. Phases a launch skips just never arrive; their step is checked when a later one starts. `progress.type` is what places an event on the tracker; `progress.phase` is only the header text.
 
@@ -272,7 +283,7 @@ The required Java major comes from the Mojang manifest (`javaVersion.majorVersio
 
 ### Shared Utilities (`src/main/utils`)
 
-- `Logger` — one winston root logger; `getLogger(name)` returns a child labelled with the name. Console transport (coloured) plus, after `Logger.enableFileLogging(ConfigManager.getLogsDirectory())` in `main/index.js`, a file transport at `<launcherDir>/logs/launcher.log` rotating at 5 MB × 5 files. An `Error` argument is rendered as stack + `code` + cause chain (never `util.inspect` at unlimited depth, which dumped got's request headers), other objects at depth 3, and the final line goes through a token redactor. The redactor is a safety net: **never log a token, nor an object that may carry one**. helios-core's own internal loggers still use its console-only `LoggerUtil`.
+- `Logger` — one winston root logger; `getLogger(name)` returns a child labelled with the name. Console transport (coloured) plus, after `Logger.enableFileLogging(ConfigManager.getLogsDirectory())` in `main/index.ts`, a file transport at `<launcherDir>/logs/launcher.log` rotating at 5 MB × 5 files. An `Error` argument is rendered as stack + `code` + cause chain (never `util.inspect` at unlimited depth, which dumped got's request headers), other objects at depth 3, and the final line goes through a token redactor. The redactor is a safety net: **never log a token, nor an object that may carry one**. helios-core's own internal loggers still use its console-only `LoggerUtil`.
 - `FileUtils` — `hashFile` / `validateLocalFile`, streaming. Every downloaded artifact is validated with it; never re-implement hashing with `readFileSync`. `validateLocalFile` with no expected hash accepts **any file that exists**, and helios writes downloads straight to their final path. So never pass it a null hash if one can be obtained: loader libraries without `sha1` (Fabric's `fabric-loader` and `intermediary`) get theirs from the maven via `LaunchManager.fetchPublishedSha1`. `writeFileAtomicSync` (tmp + fsync + rename) is the one atomic writer, shared by `config.json` and the skin vault.
 - `PathUtils` — `resolveInside` / `isSafeRelativePath`. Every path built from manifest, renderer or network data goes through `resolveInside`.
 - `HttpUtils` — `fetchWithTimeout` for small JSON/text requests. Never call bare `fetch` in main.
@@ -280,6 +291,8 @@ The required Java major comes from the Mojang manifest (`javaVersion.majorVersio
 - `GameOutput` — `readLines(stream, onLines)`: whole lines from a child's stdout/stderr, one callback per chunk.
 - `StartupTracker` — `STARTUP_MILESTONES` and `createStartupTracker(report)`, the heuristic behind the `game_startup` bar.
 - `PackPolicy` — `globToRegExp` / `resolvePolicy` / `strictRoots` for manifest ignore globs and per-path policies. **Deliberately duplicated** in `tools/pack-publish/generate.mjs`, which runs on plain node and cannot import these extensionless sources; change both together.
+
+The data shapes main reads from disk and the network live in `src/main/types/` — `config.ts` (`config.json`, in memory and as written), `manifest.ts` (the pack manifest) and `minecraft.ts` (Mojang version JSON and Fabric's profile, only the fields that are read). They are types, not proof: what arrives as `unknown` becomes one of them through a guard (`ManifestManager.assertShape`, `ConfigManager.validateConfig`, `DistributionManager.parseServerData`, `SkinManager.parseProfile`), never through a bare cast.
 
 ## Styling
 
@@ -317,7 +330,7 @@ loading and login screens and the home screen with no modpack selected; size it 
 
 ## Environment Variables
 
-All of them are read **at build time** from `.env` (or the environment, which wins); the running app never reads `.env` and `dotenv` is gone. Firebase config uses the `VITE_` prefix (inlined into the renderer). `MICROSOFT_CLIENT_ID` is validated and inlined into main by `electron.vite.config.mjs` as `__MICROSOFT_CLIENT_ID__`, read only through `src/main/constants.js`; `pnpm dev`/`pnpm build` stop if it is missing or not an Azure GUID.
+All of them are read **at build time** from `.env` (or the environment, which wins); the running app never reads `.env` and `dotenv` is gone. Firebase config uses the `VITE_` prefix (inlined into the renderer). `MICROSOFT_CLIENT_ID` is validated and inlined into main by `electron.vite.config.mjs` as `__MICROSOFT_CLIENT_ID__`, read only through `src/main/constants.ts`; `pnpm dev`/`pnpm build` stop if it is missing or not an Azure GUID.
 
 ```
 MICROSOFT_CLIENT_ID=...
@@ -334,8 +347,8 @@ VITE_FIREBASE_PROJECT_ID=...
 - The avatar is drawn from the worn skin texture (`components/common/SkinHead.jsx`, CSS only); minotar.net is gone ([ADR-0014](docs/adr/0014-skins-through-main-as-data-urls.md))
 - `usersAllowed` in Firestore filters by Minecraft **username** (not UUID)
 - **New files are TypeScript** (`.ts`/`.tsx`, `strict`), [ADR-0015](docs/adr/0015-incremental-typescript-migration.md). Existing `.js`/`.jsx` files are converted one at a time by the migration (`git mv` plus types, no refactor in the same commit); `allowJs` lets both live together, and JavaScript is not type-checked
-- Indentation: 4 spaces in `src/main/{managers,utils,windows,testing}`, 2 spaces in the files at the root of `src/main` (`index`, `constants`, `env.d.ts`), `src/main/ipc`, `src/preload`, `src/shared` and the whole renderer — for `.ts`/`.tsx` exactly as for `.js`/`.jsx`. Match the file you are editing
-- Error codes are shared constants in `src/shared/errorCodes.js`, never inline strings
+- Indentation: 4 spaces in `src/main/{managers,utils,windows,testing,types}`, 2 spaces in the files at the root of `src/main` (`index`, `constants`, `env.d.ts`), `src/main/ipc`, `src/preload`, `src/shared` and the whole renderer — for `.ts`/`.tsx` exactly as for `.js`/`.jsx`. Match the file you are editing
+- Error codes are shared constants in `src/shared/errorCodes.ts`, never inline strings, and main throws them as `LauncherError`
 
 ## Implementation Principles
 
@@ -344,7 +357,7 @@ VITE_FIREBASE_PROJECT_ID=...
 - Downloads go through `helios-core/dl` (`downloadQueue`, `downloadFile`): it already does retries and concurrency. Do not add another `got.stream` + `createWriteStream` loop — `got` is intentionally not a direct dependency anymore.
 - Mod-loader knowledge (detect type, resolve version, build version string) lives in `ModLoaderManager` only.
 - Constants shared by main and renderer (client id, launcher name/version) come from a single source, not per-file fallbacks. The launcher version is `package.json`, not a literal: the main process reads `app.getName()` / `app.getVersion()`, and the renderer gets `__APP_VERSION__`, inlined at build time by `electron.vite.config.mjs` because it is sandboxed and cannot read the file.
-- Adding an IPC call means touching all four layers (channels → handler → preload → ipcClient); if a channel is not present in all four, it is dead.
+- Adding an IPC call means touching every layer (channels → contract → handler → preload → ipcClient); the contract in `ipcContract.ts` makes a missing one a compile error rather than a dead channel.
 
 **KISS** — the launcher is a pipeline, keep it readable.
 
@@ -379,7 +392,7 @@ The mechanisms for this exist and are the ones to reuse (branch `fix/p1-hardenin
   to build `versions/<id>`
 - **Network**: `HttpUtils.fetchWithTimeout(url, what, { timeoutMs })` for JSON/text requests
   (`NETWORK_TIMEOUT` / `NETWORK_ERROR`); files still go through `helios-core/dl`
-- **Settings**: `config.ipc.js` validates every setter (`CONFIG_INVALID_VALUE`), and
+- **Settings**: `config.ipc.ts` validates every setter (`CONFIG_INVALID_VALUE`), and
   `setJavaExecutable` only accepts an existing, absolute `java`/`javaw`
 - **Persistence**: `ConfigManager.save()` is atomic (tmp + fsync + rename), asynchronous and
   **rejects** with `CONFIG_SAVE_FAILED`, so callers must `await` it and let it propagate or
@@ -392,7 +405,7 @@ The mechanisms for this exist and are the ones to reuse (branch `fix/p1-hardenin
 - **Dev mode**: the dev renderer URL, DevTools and the relaxed CSP are gated on `app.isPackaged`
 - **Shell**: the renderer can only open the data and logs directories
   (`shell:openDataDirectory`, `shell:openLogsDirectory`, no argument)
-- **Single instance**: `main/index.js` takes `app.requestSingleInstanceLock()` before anything
+- **Single instance**: `main/index.ts` takes `app.requestSingleInstanceLock()` before anything
   else; a second launch focuses the existing window and exits, so `config.json` and the log file
   only ever have one writer
 - **Settings in the renderer**: `SettingsScreen.saveSettings(changes, persist, message)` shows the
@@ -402,7 +415,7 @@ The mechanisms for this exist and are the ones to reuse (branch `fix/p1-hardenin
 - **Exported logs**: `logs:export` takes the text from the renderer but never a path — the path is
   whatever the native save dialog answered — and writes it through `Logger.redact`
 - **Skins**: same rule for `skins:import`, whose path comes from the native open dialog;
-  `skins.ipc.js` checks vault ids (`/^[0-9a-f]{64}$/`), names (`cleanSkinName`, 32 chars) and the
+  `skins.ipc.ts` checks vault ids (`/^[0-9a-f]{64}$/`), names (`cleanSkinName`, 32 chars) and the
   save choice. Profile bodies are parsed by `SkinManager.parseProfile`, and a texture URL is only
   followed on `textures.minecraft.net`, over https
 - **Process probing**: `LaunchManager.readCommandLine(pid)` interpolates the PID into a PowerShell
@@ -419,7 +432,7 @@ Nothing app-side is still open from the 2026-09-17 audit; B1 (publishing) is in 
 - The working tree is CRLF (`core.autocrlf=true`). Scripted edits must match `\r\n`, and a `\uXXXX` escape typed into a tool call can arrive as the literal character — check regexes like `/^\uFEFF/` after writing them.
 - The TypeScript migration (TODO P5) does **not** depend on the ESM migration: electron-vite still emits the sandboxed preload as CJS from a `.ts` source.
 - TypeScript is pinned to **6.0.x** (`~6.0.3`): `typescript-eslint` 8 supports `<6.1`, and TypeScript 7 (the native compiler, `latest` on npm) has no API it can use yet. Do not bump it on its own. TypeScript 6 also defaults `types` to `[]`, which is why both tsconfigs list theirs explicitly (`node` for main, `vite/client` for the renderer).
-- Build-time globals are declared twice on purpose: for ESLint in `eslint.config.mjs` and for the type checker in `src/main/env.d.ts` / `src/renderer/src/env.d.ts`. A new `define` in `electron.vite.config.mjs` goes in both, and in `vitest.config.mjs` if tested code reads it. `window.electronAPI` is typed loosely there until the IPC contract map exists (`TODO-Migracion.md`, Fase 4).
+- Build-time globals are declared twice on purpose: for ESLint in `eslint.config.mjs` and for the type checker in `src/main/env.d.ts` / `src/renderer/src/env.d.ts`. A new `define` in `electron.vite.config.mjs` goes in both, and in `vitest.config.mjs` if tested code reads it. `window.electronAPI` is typed in the renderer's `env.d.ts` as the contract's `ElectronAPI`.
 - The renderer's entry is `index.html` in its `root` (`src/renderer`), found by vite on its own. Do not add `build.rollupOptions.input` back: written as `./src/renderer/index.html` it resolved against that root, the dev dependency scan failed, and deps were pre-bundled on the fly with two copies of React ("Invalid hook call"). vite 8 bundles with Rolldown; `rollupOptions` is only an alias of `rolldownOptions` now.
 - Since Electron 43 a file dialog with no `defaultPath` opens in Downloads, not where the OS last left it. Pass one when there is an obvious starting point (the data directory picker starts at the current data directory).
 - The sandboxed preload (Electron 45+) can only `require('electron')`, and has no `Buffer`, `setImmediate` or Node shims. Use Web APIs there.

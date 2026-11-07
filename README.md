@@ -192,13 +192,14 @@ without checking them, so `pnpm typecheck` is the only thing that does.
 
 - **The code is moving to TypeScript** ([ADR-0015](docs/adr/0015-incremental-typescript-migration.md)).
   New files are `.ts`/`.tsx` with `strict` on; existing JavaScript is converted file by file
-  and is not type-checked until then.
-- **Tests sit next to the file they cover** (`ConfigManager.test.js` beside `ConfigManager.js`)
+  and is not type-checked until then. The main process, the preload and `src/shared` are
+  already TypeScript; the renderer is next.
+- **Tests sit next to the file they cover** (`ConfigManager.test.ts` beside `ConfigManager.ts`)
   and run on node through Vitest, with `electron` replaced by a stub
-  (`src/main/testing/electron.js`). Coverage is deliberately small: a test is worth adding when
+  (`src/main/testing/electron.ts`). Coverage is deliberately small: a test is worth adding when
   the behaviour would otherwise fail without anyone noticing.
-- **Indentation depends on the area** — 4 spaces in `src/main/managers`, `utils`, `windows` and
-  `testing`, 2 everywhere else, `.ts` included. ESLint enforces it
+- **Indentation depends on the area** — 4 spaces in `src/main/managers`, `utils`, `windows`,
+  `testing` and `types`, 2 everywhere else, `.ts` included. ESLint enforces it
   ([ADR-0011](docs/adr/0011-enforce-indentation-per-area.md)).
 
 Design decisions and the reasoning behind the conventions below live in
@@ -207,13 +208,16 @@ same rules in the form they need while editing.
 
 Two conventions are easy to break from outside and are worth reading before a first change:
 
-- **Adding an IPC call means touching four layers** — `src/shared/channels.js`, the
-  `*.ipc.js` handler, `src/preload/index.js`, and `src/renderer/src/services/ipcClient.js`.
-  A channel missing from any of them is dead code. The handlers and the preload both read the
-  names from `channels.js`, so a rename cannot leave them out of step.
+- **Every IPC call is declared in `src/shared/ipcContract.ts`** — the name in
+  `src/shared/channels.ts`, what it takes and returns in the contract, then the handler in its
+  `*.ipc.ts` map, the method in `src/preload/index.ts` and the wrapper in
+  `src/renderer/src/services/ipcClient.ts`. Each layer is typed against the contract, so one
+  that misses the channel does not compile. Handlers get their arguments as `unknown` and
+  validate them: the renderer is not trusted.
 - **Errors cross the IPC boundary in a `{ ok, code, message }` envelope**, never as a thrown
-  `Error`. Handlers register through `handle()` from `src/main/ipc/result.js`; codes are
-  shared constants in `src/shared/errorCodes.js`. Never branch on message text.
+  `Error`. Handlers are registered from one map through `handleAll()` in
+  `src/main/ipc/result.ts`; main throws `LauncherError` with a code from
+  `src/shared/errorCodes.ts`. Never branch on message text.
 
 ### Gotchas
 
@@ -233,7 +237,7 @@ Two conventions are easy to break from outside and are worth reading before a fi
   is imported as `resources/icon.png?asset&asarUnpack`, which resolves to a path next to the
   bundle rather than copying the file, so `electron-builder.yml` has to ship it explicitly
   (`files` + `asarUnpack`). The same file is the installer/executable icon.
-- **Logs go through `src/main/utils/Logger.js`**, one winston logger with a console and a
+- **Logs go through `src/main/utils/Logger.ts`**, one winston logger with a console and a
   rotating file transport. Error objects are written as stack, code and cause chain, and
   anything that looks like a token is redacted — but that is a safety net: never log a token,
   or an object that may carry one. helios-core's own internal loggers still write to the
