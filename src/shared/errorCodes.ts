@@ -2,7 +2,7 @@
  * Error codes shared by the main process and the renderer.
  *
  * They travel across IPC inside the `{ ok, code, message }` envelope built by
- * `main/ipc/result.js` and are turned back into a real Error by `services/ipcClient.js`.
+ * `main/ipc/result` and are turned back into a `LauncherError` by `services/ipcClient`.
  * Both ends must read them from here: a renderer comparing against its own copy of a
  * literal silently stops matching the day the main process renames one — which is
  * exactly the failure mode the substring matching in PlayButton used to have.
@@ -85,6 +85,19 @@ export const ERROR_CODE = {
   NETWORK_ERROR: 'NETWORK_ERROR',
 
   UNKNOWN: 'UNKNOWN'
+} as const
+
+/** Every code the launcher can report: the union of the values above. */
+export type ErrorCode = typeof ERROR_CODE[keyof typeof ERROR_CODE]
+
+const KNOWN_CODES: ReadonlySet<unknown> = new Set(Object.values(ERROR_CODE))
+
+/**
+ * Whether a value is one of the launcher's own codes. Errors from node or a library carry
+ * codes of their own (`ENOENT`, `ECONNRESET`), which mean nothing to the renderer.
+ */
+export function isErrorCode(value: unknown): value is ErrorCode {
+  return KNOWN_CODES.has(value)
 }
 
 /**
@@ -99,8 +112,11 @@ export const TERMINAL_AUTH_CODES = [
   ERROR_CODE.AUTH_NO_XBOX_ACCOUNT,
   ERROR_CODE.AUTH_XBL_BANNED,
   ERROR_CODE.AUTH_UNDER_18
-]
+] as const
 
-export function isTerminalAuthCode(code) {
-  return TERMINAL_AUTH_CODES.includes(code)
+export type TerminalAuthCode = typeof TERMINAL_AUTH_CODES[number]
+
+/** Takes anything: the renderer asks it of whatever a `catch` caught. */
+export function isTerminalAuthCode(code: unknown): code is TerminalAuthCode {
+  return (TERMINAL_AUTH_CODES as readonly unknown[]).includes(code)
 }

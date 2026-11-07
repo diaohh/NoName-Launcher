@@ -60,4 +60,7 @@ export const Channels = {
   // renderer answers with WINDOW_CONFIRM_CLOSE when the player still wants out.
   WINDOW_CLOSE_REQUESTED: 'window:closeRequested',
   WINDOW_CONFIRM_CLOSE: 'window:confirmClose'
-}
+} as const
+
+/** Any channel name. What each one carries is in `ipcContract`. */
+export type Channel = typeof Channels[keyof typeof Channels]
