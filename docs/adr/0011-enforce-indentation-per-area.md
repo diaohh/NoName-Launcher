@@ -66,3 +66,13 @@ rewritten anyway and the reformat rides along with a change that has its own rea
 The `DynamicBackground.jsx` warning mentioned above is gone: the effect it pointed at was
 removed when the banner started loading through a hidden `<img>`, and the repo is at 0 errors
 and 0 warnings.
+
+## Addendum (2026-11-07)
+
+The unification deferred to "the `typescript-eslint` sweep in P5" is withdrawn: the TypeScript
+migration converts files with `git mv` plus types and nothing else, so a reformat riding along
+would still bury their history, which was the reason not to do it in the first place. The two
+`@stylistic/indent` globs now match `.ts`/`.tsx` too, and a converted file keeps the width of
+its area. `src/main/testing/` (the test support) joins the 4-space area, and the 2-space glob
+for the root of `src/main` became `src/main/*.{js,ts}` so new top-level files such as
+`env.d.ts` are covered. See [ADR-0015](0015-incremental-typescript-migration.md).

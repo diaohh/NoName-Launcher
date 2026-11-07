@@ -77,3 +77,16 @@ so a single parse error silently wiped every setting the player had.
   written by `encryptString` decrypts with `decryptStringAsync`, so no re-encryption or config
   migration is needed. The decision stands; only `ConfigManager.load`/`save` become async.
   Tracked in `TODO-Migracion.md`, and Electron stays on 45 until it lands.
+
+## Addendum (2026-11-07)
+
+- The move to the asynchronous API is done. `ConfigManager` uses `isAsyncEncryptionAvailable`,
+  `encryptStringAsync` and `decryptStringAsync`; `load()` and `save()` return promises and
+  every caller awaits them. A blob that `decryptStringAsync` flags with `shouldReEncrypt` (its
+  key was rotated) makes `load()` rewrite the file, the same way a v0 account does.
+- Saves are now serialized: an asynchronous encryption let two overlapping saves finish out of
+  order and put the older config on disk. Each `save()` waits for the previous one and encodes
+  the config as it is when its turn comes; a failed save still rejects with
+  `CONFIG_SAVE_FAILED` for its own caller and does not block the next.
+- The rules above are unchanged — no plaintext fallback, a decryption failure costs only the
+  session — and are now covered by `ConfigManager.test.js`. Electron is no longer held at 45.

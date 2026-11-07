@@ -122,16 +122,17 @@ bisecar. Rama `ts/f1-electron`.
   06/11/2026: 172 avisos (3 criticos) → 41 (2 criticos, `protobufjs` y `websocket-driver`, que
   vienen del SDK completo de Firestore instalado como dependencia de `firebase` y no entran en
   el bundle). `--prod` a 0
-- [ ] Prueba de humo manual en `pnpm dev` **y** en el instalador de `pnpm package`
+- [x] Prueba de humo manual en `pnpm dev` **y** en el instalador de `pnpm package`
   (`pnpm dev` arranca, descifra la sesion guardada por Electron 37 y valida el token;
-  `pnpm package` genera instalador y portable con Electron 45.2.3):
-  - [ ] login Microsoft, reinicio del launcher con la sesion guardada (`safeStorage`)
-  - [ ] lanzar un modpack Fabric de punta a punta, ver logs, matar el juego
-  - [ ] cerrar el launcher con el juego abierto (el juego sobrevive, ADR-0013) y durante la
+  `pnpm package` genera instalador y portable con Electron 45.2.3) — 07/11/2026, validada a
+  mano por el usuario sobre `migration` (`d08dd65`, PR #10):
+  - [x] login Microsoft, reinicio del launcher con la sesion guardada (`safeStorage`)
+  - [x] lanzar un modpack Fabric de punta a punta, ver logs, matar el juego
+  - [x] cerrar el launcher con el juego abierto (el juego sobrevive, ADR-0013) y durante la
         preparacion (confirmacion de `CloseGuard`)
-  - [ ] segunda instancia enfoca la primera
-  - [ ] gestor de skins: importar, guardar skin/capa, borrar a la papelera
-  - [ ] ajustes: RAM, Java manual, directorio de datos (el selector abre en el actual)
+  - [x] segunda instancia enfoca la primera
+  - [x] gestor de skins: importar, guardar skin/capa, borrar a la papelera
+  - [x] ajustes: RAM, Java manual, directorio de datos (el selector abre en el actual)
 
 **Documentacion**
 - [x] `AGENTS.md`: "Electron 37" en la cabecera del proyecto y cualquier gotcha nuevo —
@@ -148,32 +149,49 @@ bisecar. Rama `ts/f1-electron`.
 Los tests se escriben **contra el comportamiento actual**, sin cambiar codigo. Son la red de
 seguridad de las Fases 4–7: un archivo convertido a TS tiene que pasar los mismos tests.
 
-- [ ] Añadir `vitest` (devDependency) y el script `pnpm test`
-- [ ] `vitest.config.mjs` propio: la config de electron-vite es multi-objetivo y no se puede
+- [x] Añadir `vitest` (devDependency) y el script `pnpm test` — 07/11/2026,
+  `2d8a21c`. Vitest 5.1 (admite vite 6–8); tambien `pnpm test:watch`
+- [x] `vitest.config.mjs` propio: la config de electron-vite es multi-objetivo y no se puede
   reutilizar tal cual. Alias de `electron` a un stub de pruebas (`safeStorage`,
-  `app.getPath`…), el mismo truco que la receta de esbuild de `AGENTS.md`
-- [ ] Tests **junto al fuente** (`X.test.js` al lado de `X.js`), que se renombran a `.test.ts`
-  con el archivo que prueban. Sin carpeta `test/` ni objetivo de cobertura
-- [ ] Un unico helper compartido: `ConfigManager.launcherDir` en un directorio temporal con
-  `getDefaultConfig()` y escritura de manifests sinteticos en `common/versions/**`
-- [ ] Tests — **cobertura minima a proposito**: solo lo que hoy falla en silencio o lo que la
-  migracion toca de lleno. Pocos casos por archivo, los que fijan cada regla de `AGENTS.md`:
-  - [ ] `LaunchManager.test.js`: `rulesAllow` (ultima regla gana, `os.*`), y
+  `app.getPath`…), el mismo truco que la receta de esbuild de `AGENTS.md` — 07/11/2026,
+  `2d8a21c`. Stub en `src/main/testing/electron.js`, con `safeStorageControl` para
+  forzar sin keyring o un blob indescifrable (el cifrado lento llega con la 2b, `4671505`,
+  cuando el stub pasa a la API asincrona). Define tambien `__MICROSOFT_CLIENT_ID__` y
+  `__APP_VERSION__`
+- [x] Tests **junto al fuente** (`X.test.js` al lado de `X.js`), que se renombran a `.test.ts`
+  con el archivo que prueban. Sin carpeta `test/` ni objetivo de cobertura — 07/11/2026,
+  `2d8a21c`. El soporte (stub y helper) vive en `src/main/testing/`, zona de 4
+  espacios
+- [x] Un unico helper compartido: `ConfigManager.launcherDir` en un directorio temporal con
+  `getDefaultConfig()` y escritura de manifests sinteticos en `common/versions/**` —
+  07/11/2026, `2d8a21c`: `createTempLauncher()` en `src/main/testing/tempLauncher.js`
+- [x] Tests — **cobertura minima a proposito**: solo lo que hoy falla en silencio o lo que la
+  migracion toca de lleno. Pocos casos por archivo, los que fijan cada regla de `AGENTS.md`
+  — 07/11/2026, `2d8a21c`:
+  - [x] `LaunchManager.test.js`: `rulesAllow` (ultima regla gana, `os.*`), y
         `buildLaunchCommand` (placeholder sin valor se lleva su `--flag`, dedupe del classpath
-        con el loader ganando, RAM del modpack vs global)
-  - [ ] `ConfigManager.test.js`: migracion v1→v2, `validateConfig` repara una clave mal tipada,
-        sin keyring no se persisten credenciales
-  - [ ] `AuthManager.test.js`: `classifyRestError` — un error transitorio no es terminal
-  - [ ] `PathUtils.test.js`: `resolveInside` rechaza la salida de la base
-  - [ ] `launchPhases.test.js`: todo `type` de fase tiene franja y `launchStep` no retrocede
+        con el loader ganando, RAM del modpack vs global). Tambien el suelo de RAM del modpack
+        que no supera el techo
+  - [x] `ConfigManager.test.js`: migracion v1→v2, `validateConfig` repara una clave mal tipada,
+        sin keyring no se persisten credenciales. Añadidos, porque protegen la Fase 2b: los
+        secretos no llegan en claro al disco y vuelven al cargar, un blob indescifrable solo
+        cuesta la sesion, y (ya de la 2b, `4671505`) dos `save()` solapados no se pisan
+  - [x] `AuthManager.test.js`: `classifyRestError` — un error transitorio no es terminal (sin
+        red, 5xx, 429), `invalid_grant` si lo es y un 4xx desconocido no
+  - [x] `PathUtils.test.js`: `resolveInside` rechaza la salida de la base
+  - [x] `launchPhases.test.js`: todo `type` de fase tiene franja y `launchStep` no retrocede.
+        Los `type` se leen del fuente de `LaunchManager` (glob de vite, `.js` o `.ts`) hasta
+        que la union de la Fase 4 lo haga el compilador
 - [~] Descartados por ahora (06/11/2026, cobertura minima): `loadVersionManifest`,
   `resolveLibraryArtifact`, `assertShape`, `PackPolicy`, `GameOutput`, `StartupTracker`,
   `SkinManager.parseProfile`, `toModpack`. Se añaden si la migracion de su archivo los pide
 
 **Documentacion**
-- [ ] `AGENTS.md`: "Commands" con `pnpm test`; "Verifying Changes" pasa de la receta de esbuild a
-  Vitest (la receta se queda solo para lo que necesite una red real)
-- [ ] `README.md`: seccion de contribucion con `pnpm test`
+- [x] `AGENTS.md`: "Commands" con `pnpm test`; "Verifying Changes" pasa de la receta de esbuild a
+  Vitest (la receta se queda solo para lo que necesite una red real) — 07/11/2026
+- [x] `README.md`: seccion de contribucion con `pnpm test` — 07/11/2026, "Contributing" dentro
+  de "Development"
+- [x] `docs/adr/README.md`: fuera "No test runner" de las decisiones sin ADR — 07/11/2026
 
 ---
 
@@ -184,21 +202,33 @@ elimina. Va **despues** de la Fase 2 porque los tests de `ConfigManager` (cifrad
 son justo los que protegen este cambio, y **antes** de la Fase 5, para tipar `ConfigManager` ya
 asincrono.
 
-- [ ] `isEncryptionAvailable` → `await safeStorage.isAsyncEncryptionAvailable()`,
+- [x] `isEncryptionAvailable` → `await safeStorage.isAsyncEncryptionAvailable()`,
   `encryptString` → `encryptStringAsync`, `decryptString` → `decryptStringAsync` (devuelve
-  `{ result }`). Los blobs actuales se descifran con la API nueva: sin migracion de config
-- [ ] `ConfigManager.load()` y `save()` pasan a `async`; revisar **todos** los llamantes
+  `{ result }`). Los blobs actuales se descifran con la API nueva: sin migracion de config —
+  07/11/2026, `4671505`. Un blob con `shouldReEncrypt` hace que `load()` reescriba
+  el archivo, igual que una cuenta v0
+- [x] `ConfigManager.load()` y `save()` pasan a `async`; revisar **todos** los llamantes
   (`createWindow`, handlers IPC, `AuthManager`), que hoy cuentan con que `save()` lanza
-  `CONFIG_SAVE_FAILED` de forma sincrona
-- [ ] Que dos `save()` concurrentes no se pisen: hoy son sincronos y no pueden solaparse;
-  asincronos si (serializarlos en una cola o en una promesa encadenada)
-- [ ] Tests de la Fase 2 en verde y prueba de humo de login + reinicio con sesion guardada
+  `CONFIG_SAVE_FAILED` de forma sincrona — 07/11/2026, `4671505`. Llamantes:
+  `config.ipc.js` (8), `AuthManager` (alta, dos refrescos y `removeAccount`, que pasa a
+  `async` igual que su llamante en `auth.ipc.js` y en `runAccountValidation`),
+  `DistributionManager.setServerData` (pasa a `async`) y `LaunchManager.ensureJava`.
+  `createWindow` espera a `load()` y se protege para no abrir dos ventanas si llega una
+  segunda instancia o un `activate` mientras carga
+- [x] Que dos `save()` concurrentes no se pisen: hoy son sincronos y no pueden solaparse;
+  asincronos si (serializarlos en una cola o en una promesa encadenada) — 07/11/2026,
+  `4671505`. Promesa encadenada (`pendingSave`): cada `save()` espera al anterior
+  y serializa la config tal como esta en su turno; uno que falla rechaza para su llamante y
+  no bloquea a los siguientes. Cubierto en `ConfigManager.test.js`
+- [x] Tests de la Fase 2 en verde y prueba de humo de login + reinicio con sesion guardada —
+  07/11/2026: 34 tests en verde en `4671505`; prueba de humo validada a mano por el usuario
 
 **Documentacion**
-- [ ] `AGENTS.md`: "Authentication" (quitar la nota de Electron 45) y "Persistence" en Trust
-  Boundaries (`save()` asincrono)
-- [ ] ADR-0007: addendum con el cambio hecho
-- [ ] `TODO.md`/este archivo: Electron deja de estar bloqueado en la 45
+- [x] `AGENTS.md`: "Authentication" (quitar la nota de Electron 45) y "Persistence" en Trust
+  Boundaries (`save()` asincrono) — 07/11/2026
+- [x] ADR-0007: addendum con el cambio hecho — 07/11/2026
+- [x] `TODO.md`/este archivo: Electron deja de estar bloqueado en la 45 — 07/11/2026 (la
+  subida a la 46 no se hace aqui; queda libre para cuando toque)
 
 ---
 
@@ -207,31 +237,53 @@ asincrono.
 Al terminar esta fase el proyecto compila y pasa el typecheck **sin haber convertido ningun
 archivo de logica**. Desde aqui, **todo archivo nuevo nace en `.ts`/`.tsx`**.
 
-- [ ] **ADR-0015** (Proposed → Accepted): migracion incremental con `allowJs`, `strict` en todo
+- [x] **ADR-0015** (Proposed → Accepted): migracion incremental con `allowJs`, `strict` en todo
   `.ts`, validadores en runtime para los datos externos, `LauncherError`, sin libreria de
-  esquemas (o con ella, si se decide otra cosa)
-- [ ] Deps: `typescript`, `@types/node`, `@types/react`, `@types/react-dom`, `typescript-eslint`
-- [ ] `tsconfig.json` con referencias + `tsconfig.node.json` (main, preload, shared) +
+  esquemas (o con ella, si se decide otra cosa) — 07/11/2026, en el commit de documentacion
+  de `ts/f2-f3-vitest-typescript` (la infraestructura que describe es `f91d49b`). Nace
+  `Accepted`, **sin** libreria de esquemas, y fija TypeScript en 6.0.x (ver abajo)
+- [x] Deps: `typescript`, `@types/node`, `@types/react`, `@types/react-dom`, `typescript-eslint`
+  — 07/11/2026, `f91d49b`. **TypeScript `~6.0.3`, no la 7**: `typescript-eslint`
+  8.72 admite `<6.1` y la 7 (compilador nativo, `latest` en npm) no le sirve todavia.
+  `@types/node` en la 22, la version local de Node
+- [x] `tsconfig.json` con referencias + `tsconfig.node.json` (main, preload, shared) +
   `tsconfig.web.json` (renderer, shared). `allowJs: true`, `checkJs: false`, `strict: true`,
-  `noEmit` (compila electron-vite; `tsc` solo comprueba)
-- [ ] Script `pnpm typecheck` (`tsc --noEmit` sobre los dos proyectos) — electron-vite **no**
-  comprueba tipos, solo los elimina
-- [ ] Declaraciones globales: `__MICROSOFT_CLIENT_ID__`, `__APP_VERSION__`, `window.electronAPI`,
-  imports `?asset&asarUnpack` (tipos de `electron-vite/node`) y de imagenes (`vite/client`)
-- [ ] `eslint.config.mjs`: bloques para `**/*.{ts,tsx}` con `typescript-eslint`, manteniendo las
-  reglas actuales (sin `;`, comillas simples, `no-unused-vars` con `^_`)
-- [ ] **Indentacion: se conserva la de cada zona** (decidido el 06/11/2026, sin reformateo). Los
+  `noEmit` (compila electron-vite; `tsc` solo comprueba) — 07/11/2026, `f91d49b`.
+  Los dos proyectos llevan `composite: true` para que el editor acepte las referencias, y
+  `noEmit` va en el script (`--noEmit --composite false`), como en la plantilla de
+  electron-vite. El proyecto web no tiene tipos de node (el renderer va en sandbox)
+- [x] Script `pnpm typecheck` (`tsc --noEmit` sobre los dos proyectos) — electron-vite **no**
+  comprueba tipos, solo los elimina — 07/11/2026, `f91d49b` (`typecheck:node` y
+  `typecheck:web` por separado)
+- [x] Declaraciones globales: `__MICROSOFT_CLIENT_ID__`, `__APP_VERSION__`, `window.electronAPI`,
+  imports `?asset&asarUnpack` (tipos de `electron-vite/node`) y de imagenes (`vite/client`) —
+  07/11/2026, `f91d49b`: `src/main/env.d.ts` y `src/renderer/src/env.d.ts`.
+  `window.electronAPI` va con un tipo laxo hasta el mapa de contratos de la Fase 4
+- [x] `eslint.config.mjs`: bloques para `**/*.{ts,tsx}` con `typescript-eslint`, manteniendo las
+  reglas actuales (sin `;`, comillas simples, `no-unused-vars` con `^_`) — 07/11/2026,
+  `f91d49b`. `recommended` de `typescript-eslint` limitado a `**/*.{ts,tsx}`; el
+  estilo sigue saliendo de los bloques por zona
+- [x] **Indentacion: se conserva la de cada zona** (decidido el 06/11/2026, sin reformateo). Los
   globs de 4 espacios (`managers`/`utils`/`windows`) y de 2 (el resto) pasan a cubrir tambien
   `.ts`/`.tsx`, asi que un archivo convertido mantiene su ancho. ADR-0011 sigue en pie; su
-  "unificar en el barrido de `typescript-eslint`" se retira con un addendum fechado
-- [ ] Comprobar que `pnpm build` y `pnpm package` siguen produciendo lo mismo (preload en CJS)
+  "unificar en el barrido de `typescript-eslint`" se retira con un addendum fechado —
+  07/11/2026, `f91d49b`. `src/main/testing` entra en la zona de 4 (ya en `2d8a21c`), y la
+  raiz de `src/main` pasa a `src/main/*.{js,ts}` (cubre `env.d.ts`)
+- [x] Comprobar que `pnpm build` y `pnpm package` siguen produciendo lo mismo (preload en CJS)
+  — 07/11/2026: `pnpm build` en cada commit de la rama, mismo chunk inicial (1.003 kB) y
+  preload en CJS (`require("electron")`); `pnpm package` validado a mano por el usuario
 
 **Documentacion**
-- [ ] `AGENTS.md`: comandos (`pnpm typecheck`), regla "archivos nuevos en TS", la regla de
+- [x] `AGENTS.md`: comandos (`pnpm typecheck`), regla "archivos nuevos en TS", la regla de
   indentacion aplicada tambien a `.ts`/`.tsx`, y que el typecheck es parte del criterio de "hecho"
-- [ ] ADR-0011: addendum (la unificacion no se hace en el barrido de TS)
-- [ ] `docs/adr/README.md`: fila de ADR-0015
-- [ ] `eslint.config.mjs`: el comentario de cabecera sobre la indentacion (ya no apunta a P5)
+  — 07/11/2026. Tambien dos Gotchas: TypeScript fijado en 6.0 y los globales declarados en
+  ESLint **y** en `env.d.ts`
+- [x] ADR-0011: addendum (la unificacion no se hace en el barrido de TS) — 07/11/2026
+- [x] `docs/adr/README.md`: fila de ADR-0015 — 07/11/2026
+- [x] `eslint.config.mjs`: el comentario de cabecera sobre la indentacion (ya no apunta a P5) —
+  07/11/2026 (no apuntaba a P5; ahora dice que los globs cubren `.ts`/`.tsx`)
+- [x] `README.md`: contribucion con `pnpm typecheck` y la regla de archivos nuevos en TS —
+  07/11/2026
 
 ---
 

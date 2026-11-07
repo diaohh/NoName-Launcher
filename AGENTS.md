@@ -33,6 +33,8 @@ deleted when the migration closes.
 ```bash
 pnpm dev          # Start dev server (electron-vite)
 pnpm lint         # ESLint (flat config, must stay at 0 errors)
+pnpm test         # Vitest, once (pnpm test:watch to keep it running)
+pnpm typecheck    # tsc --noEmit on the node and web projects (electron-vite never checks types)
 pnpm build        # Build for production
 pnpm package      # Build + create Windows NSIS installer
 pnpm package:linux  # AppImage
@@ -43,24 +45,15 @@ Package manager is **pnpm** (not npm or yarn). `package.json` lists `pnpm.onlyBu
 
 ## Verifying Changes
 
-There is no test runner. `pnpm build` only proves the bundle compiles, and launching the game end-to-end needs a Microsoft account plus a Firestore modpack, so for launch/Java/loader logic use a throwaway script instead:
+A change is done when `pnpm lint` and `pnpm typecheck` report 0 errors, `pnpm test` is green and `pnpm build` compiles — checked **before committing**, not after every edit. `pnpm build` alone only proves the bundle compiles, and launching the game end-to-end needs a Microsoft account plus a Firestore modpack, so anything touching Electron or the launch is also tried by hand (`pnpm dev`, and `pnpm package` for what only shows up packaged).
 
-1. Write a script that imports the managers directly, points `ConfigManager.launcherDir` at a temp dir and sets `ConfigManager.config = ConfigManager.getDefaultConfig()`.
-2. Write synthetic manifests into `<tmp>/common/versions/**` and call the real function (`buildLaunchCommand`, `loadVersionManifest`, …), asserting on the result.
-3. Node cannot run the sources directly — imports are extensionless. Bundle first:
+**Tests** run on Vitest with their own `vitest.config.mjs` (electron-vite's config builds three targets and is not reused). They sit **next to the file they cover** (`X.test.js` beside `X.js`, renamed together when the file moves to TypeScript), with no `test/` folder and **no coverage target**: coverage is minimal on purpose, limited to what fails silently and what the migration rewrites. A test pins a rule of this file, not an implementation detail.
 
-```bash
-./node_modules/.bin/esbuild ./script.mjs --bundle --platform=node --format=esm --outfile=out.mjs \
-  --banner:js="import{createRequire as __cr}from'module';const require=__cr(import.meta.url);"
-node out.mjs
-```
+- `electron` is aliased to `src/main/testing/electron.js`, a stub with only what the code under test touches (`safeStorage`, `app`, `powerMonitor`). `safeStorageControl` switches it to no keyring, an undecryptable blob or a slow encryption; reset it in `afterEach`.
+- `src/main/testing/tempLauncher.js` → `createTempLauncher()` points `ConfigManager` at a fresh temp directory on the default config, writes `config.json` and synthetic version manifests into `common/versions/**`, and `cleanup()` resets the static state. It is the one shared helper; add to it instead of starting another.
+- `__MICROSOFT_CLIENT_ID__` and `__APP_VERSION__` are defined by the Vitest config, not read from `.env`.
 
-Two things the recipe needs in practice:
-
-- **The entry point must sit inside the project.** esbuild resolves `fs-extra`, `helios-core` and friends from the importing file's directory, so a script left in a temp dir fails to bundle. Copy it to the repo root, run, delete.
-- **Anything reaching `ConfigManager` now imports `electron`** (for `safeStorage`), which plain node cannot load. Stub it: write a module exporting a fake `safeStorage` (`isEncryptionAvailable`/`encryptString`/`decryptString`) and bundle with `--alias:electron=./stub.mjs`. Driving that stub is how the encryption, the v0 migration, the undecryptable-blob purge and the no-keyring path were verified.
-
-This is how the classpath dedupe, vanilla-jar resolution, version guards, the config/secret handling and the auth error classification were verified. Keep such scripts out of the repo unless a real test setup is added.
+For something a test cannot reach — a real request to Mojang, Fabric Meta or Microsoft — a throwaway script still works: bundle it with `./node_modules/.bin/esbuild ./script.mjs --bundle --platform=node --format=esm --outfile=out.mjs --alias:electron=./src/main/testing/electron.js --banner:js="import{createRequire as __cr}from'module';const require=__cr(import.meta.url);"` and run `node out.mjs`. The script must sit inside the project (esbuild resolves dependencies from the importing file's directory). Keep it out of the repo.
 
 ## Architecture
 
@@ -151,7 +144,7 @@ Launcher directory layout: `common/` (shared assets, libraries, versions, java, 
 
 `AuthManager` runs the Microsoft → XBL → XSTS → Minecraft chain through `helios-core/microsoft`, split in two halves: `exchangeAuthCode` / `exchangeRefreshToken` obtain the Microsoft token set, and `resolveMinecraftSession(msAccessToken)` walks it down to a playable session. The three callers compose them — `addMicrosoftAccount` (both), `refreshMSToken` (both), `refreshMCToken` (only the second, since the MS token is still good). Accounts live in `config.json` under `authenticationDatabase[uuid]` with two independent expiries (`expiresAt` for the MC token, `microsoft.expires_at` for the MS token).
 
-The three secrets — `accessToken`, `microsoft.access_token`, `microsoft.refresh_token` — are **not** on disk in the clear: `ConfigManager` folds them into one `secrets` blob encrypted with Electron's `safeStorage`, and the rest of the account stays readable. `safeStorage` needs `app.whenReady()`, which holds because `ConfigManager.load()` runs inside `createWindow()`. `ConfigManager` still uses the **synchronous** `safeStorage` methods, deprecated in Electron 45 and **removed in 46**: moving to `encryptStringAsync`/`decryptStringAsync` is pending in `TODO-Migracion.md` (existing blobs decrypt with the async API), and Electron must not go past 45 until it lands.
+The three secrets — `accessToken`, `microsoft.access_token`, `microsoft.refresh_token` — are **not** on disk in the clear: `ConfigManager` folds them into one `secrets` blob encrypted with Electron's `safeStorage`, and the rest of the account stays readable. `safeStorage` needs `app.whenReady()`, which holds because `ConfigManager.load()` runs inside `createWindow()`. Only the **asynchronous** methods are used (`isAsyncEncryptionAvailable`, `encryptStringAsync`, `decryptStringAsync`; the synchronous ones were removed in Electron 46), so `load()` and `save()` return promises: **await them**. A blob `decryptStringAsync` flags with `shouldReEncrypt` is rewritten on load.
 
 Rules when touching auth ([ADR-0007](docs/adr/0007-encrypt-account-secrets-with-safestorage.md)):
 
@@ -340,7 +333,8 @@ VITE_FIREBASE_PROJECT_ID=...
 - IPC channel names use colon notation: `category:action`
 - The avatar is drawn from the worn skin texture (`components/common/SkinHead.jsx`, CSS only); minotar.net is gone ([ADR-0014](docs/adr/0014-skins-through-main-as-data-urls.md))
 - `usersAllowed` in Firestore filters by Minecraft **username** (not UUID)
-- Indentation: 4 spaces in `src/main/{managers,utils,windows}`, 2 spaces in `src/main/index.js`, `src/main/ipc`, `src/preload`, `src/shared` and the whole renderer — match the file you are editing
+- **New files are TypeScript** (`.ts`/`.tsx`, `strict`), [ADR-0015](docs/adr/0015-incremental-typescript-migration.md). Existing `.js`/`.jsx` files are converted one at a time by the migration (`git mv` plus types, no refactor in the same commit); `allowJs` lets both live together, and JavaScript is not type-checked
+- Indentation: 4 spaces in `src/main/{managers,utils,windows,testing}`, 2 spaces in the files at the root of `src/main` (`index`, `constants`, `env.d.ts`), `src/main/ipc`, `src/preload`, `src/shared` and the whole renderer — for `.ts`/`.tsx` exactly as for `.js`/`.jsx`. Match the file you are editing
 - Error codes are shared constants in `src/shared/errorCodes.js`, never inline strings
 
 ## Implementation Principles
@@ -387,10 +381,12 @@ The mechanisms for this exist and are the ones to reuse (branch `fix/p1-hardenin
   (`NETWORK_TIMEOUT` / `NETWORK_ERROR`); files still go through `helios-core/dl`
 - **Settings**: `config.ipc.js` validates every setter (`CONFIG_INVALID_VALUE`), and
   `setJavaExecutable` only accepts an existing, absolute `java`/`javaw`
-- **Persistence**: `ConfigManager.save()` is atomic (tmp + fsync + rename) and **throws**
-  `CONFIG_SAVE_FAILED`, so callers must let it propagate or handle it; only `load()` uses the
-  swallowing `saveAfterLoad()`. `validateConfig` repairs wrong-typed keys one by one, and a
-  non-object root is quarantined
+- **Persistence**: `ConfigManager.save()` is atomic (tmp + fsync + rename), asynchronous and
+  **rejects** with `CONFIG_SAVE_FAILED`, so callers must `await` it and let it propagate or
+  handle it; only `load()` uses the swallowing `saveAfterLoad()`. Saves are serialized: each
+  waits for the previous one and encodes the config as it is when its turn comes, so an older
+  state can never land on top of a newer one. `validateConfig` repairs wrong-typed keys one by
+  one, and a non-object root is quarantined
 - **Auth**: `validateSelectedMicrosoftAccount()` is single-flight (`validationInFlight`); the
   body is `runAccountValidation()`
 - **Dev mode**: the dev renderer URL, DevTools and the relaxed CSP are gated on `app.isPackaged`
@@ -418,10 +414,12 @@ Nothing app-side is still open from the 2026-09-17 audit; B1 (publishing) is in 
 
 - `helios-core` 2.x changed several signatures (see Java Handling). Read `node_modules/helios-core/dist/**/*.d.ts` before assuming an API shape.
 - `resources/icon.png` is the studio icon (1024×1024, transparent) and the app icon for every target. `resources/` is electron-vite's **public directory** for main: `import icon from '…/icon.png?asset&asarUnpack'` does not copy the file, it resolves to `../../resources/icon.png` next to the bundle (rewritten to `app.asar.unpacked`). That is why `electron-builder.yml` lists it under both `files` and `asarUnpack` — `buildResources` is excluded from the app otherwise, and the window icon would point at nothing.
-- `.env` is not bundled into the packaged app and nothing reads it at runtime. Anything the main process needs from it goes through a `define` in `electron.vite.config.mjs`, the way `__APP_VERSION__` and `__MICROSOFT_CLIENT_ID__` are done (declare the global in `eslint.config.mjs` too).
+- `.env` is not bundled into the packaged app and nothing reads it at runtime. Anything the main process needs from it goes through a `define` in `electron.vite.config.mjs`, the way `__APP_VERSION__` and `__MICROSOFT_CLIENT_ID__` are done (declare the global in `eslint.config.mjs` and in the matching `env.d.ts` too).
 - Only packages the **main process** `require`s at runtime belong in `dependencies` (`fs-extra`, `helios-core`, `helios-distribution-types`, `winston`) — `externalizeDepsPlugin` leaves exactly those out of the bundle and electron-builder ships them. Build-only tooling goes in `devDependencies`. `pnpm audit --prod` should stay at 0.
 - The working tree is CRLF (`core.autocrlf=true`). Scripted edits must match `\r\n`, and a `\uXXXX` escape typed into a tool call can arrive as the literal character — check regexes like `/^\uFEFF/` after writing them.
 - The TypeScript migration (TODO P5) does **not** depend on the ESM migration: electron-vite still emits the sandboxed preload as CJS from a `.ts` source.
+- TypeScript is pinned to **6.0.x** (`~6.0.3`): `typescript-eslint` 8 supports `<6.1`, and TypeScript 7 (the native compiler, `latest` on npm) has no API it can use yet. Do not bump it on its own. TypeScript 6 also defaults `types` to `[]`, which is why both tsconfigs list theirs explicitly (`node` for main, `vite/client` for the renderer).
+- Build-time globals are declared twice on purpose: for ESLint in `eslint.config.mjs` and for the type checker in `src/main/env.d.ts` / `src/renderer/src/env.d.ts`. A new `define` in `electron.vite.config.mjs` goes in both, and in `vitest.config.mjs` if tested code reads it. `window.electronAPI` is typed loosely there until the IPC contract map exists (`TODO-Migracion.md`, Fase 4).
 - The renderer's entry is `index.html` in its `root` (`src/renderer`), found by vite on its own. Do not add `build.rollupOptions.input` back: written as `./src/renderer/index.html` it resolved against that root, the dev dependency scan failed, and deps were pre-bundled on the fly with two copies of React ("Invalid hook call"). vite 8 bundles with Rolldown; `rollupOptions` is only an alias of `rolldownOptions` now.
 - Since Electron 43 a file dialog with no `defaultPath` opens in Downloads, not where the OS last left it. Pass one when there is an obvious starting point (the data directory picker starts at the current data directory).
 - The sandboxed preload (Electron 45+) can only `require('electron')`, and has no `Buffer`, `setImmediate` or Node shims. Use Web APIs there.
