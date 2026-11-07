@@ -39,6 +39,12 @@ reglas) se habra pasado antes a un ADR, a `AGENTS.md` o a `TODO.md`.
 - **Tamaño**: ~8.800 lineas en `src/` — main 4.989, renderer 3.575, preload 74, shared 177. La
   estimacion del 17/09/2026 (5–8 dias) se hizo sobre ~4.700; extrapolando, **9–14 dias
   efectivos**. Es una extrapolacion, se corrige al cerrar la Fase 4 con datos reales.
+- **Reestimacion (07/11/2026, al cerrar las Fases 4 y 5)**: las dos se hicieron juntas en una
+  sesion, muy por debajo de la extrapolacion. Tipar fue lo de menos; el tiempo se fue en los
+  guardas de los datos externos y en el mapa de handlers. Tras ellas: main 5.846 lineas (crece
+  con los tipos y los guardas), shared 686 (contratos), preload 91. Queda el renderer, 3.642
+  lineas en 41 archivos, casi todo JSX con props sencillas, y el cierre: **3–5 dias efectivos**.
+  El cuello de botella ya no es el tipado sino las pruebas de humo manuales de cada fase.
 - **Node local 22.22** (el TODO decia 20.19): el type-stripping nativo ya esta disponible aqui,
   lo que desbloquea quitar la duplicacion de `PackPolicy` (Fase 8).
 - **Por que este orden**: Electron va primero para no mezclar sus regresiones con las de la
@@ -291,31 +297,61 @@ archivo de logica**. Desde aqui, **todo archivo nuevo nace en `.ts`/`.tsx`**.
 
 El mayor retorno de toda la migracion. Al cerrarla, **reestimar** las fases siguientes.
 
-- [ ] `shared/errorCodes.js → .ts`: tipo `ErrorCode` (union de los valores) y
-  `TERMINAL_AUTH_CODES` tipado
-- [ ] Clase `LauncherError` con `code: ErrorCode` (y `cause`) en `src/shared`; sustituir los ~34
-  `error.code = …` del main **en commits por manager**, no en uno global
-- [ ] `shared/channels.js → .ts` + **mapa de contratos IPC** `canal → (args) => retorno`:
-  - [ ] `ipc/result.js → .ts`: `handle()` tipado contra el mapa y el envelope
-        `{ ok: true, data } | { ok: false, code, message }`
-  - [ ] `preload/index.js → .ts` tipado contra el mapa (sigue saliendo en CJS)
-  - [ ] `ipcClient.js → .ts`: el desenvoltorio reconstruye `LauncherError`
-  - [ ] Resultado: un canal que falte en una de las 4 capas es error de compilacion
-- [ ] `launch:progress` como **union discriminada** por `type` (fases, ciclo de vida,
+Hecha junto con la Fase 5 en la rama `ts/f4-f5-contracts-main` (07/11/2026, `614e673`…`c18e426`,
+validada a mano por el usuario; lint, typecheck, test y build pasan en cada commit). Decisiones del usuario al empezar: `LauncherError` y los
+guardas de cada manager entran con la conversion de ese archivo (no en commits aparte), los
+handlers se registran desde un **mapa** tipado, y `LaunchManager` no se parte ahora (nota en
+`TODO.md`).
+
+- [x] `shared/errorCodes.js → .ts`: tipo `ErrorCode` (union de los valores) y
+  `TERMINAL_AUTH_CODES` tipado — 07/11/2026, `614e673`. Tambien
+  `isErrorCode` y `isTerminalAuthCode` como type guards
+- [x] Clase `LauncherError` con `code: ErrorCode` (y `cause`) en `src/shared`; sustituir los ~34
+  `error.code = …` del main **en commits por manager**, no en uno global — 07/11/2026,
+  `614e673` (la clase). Sustituidos todos, cada uno en la conversion de su archivo (no
+  queda ningun `error.code =` en main). `errorCodeOf(err, fallback)` es lo que leen el envelope
+  y el evento `error` del lanzamiento: un codigo que no es del launcher (`ENOENT`) viaja como
+  `UNKNOWN`
+- [x] `shared/channels.js → .ts` + **mapa de contratos IPC** `canal → (args) => retorno` —
+  07/11/2026, `614e673` (`channels`) y `2ead452`: `src/shared/ipcContract.ts` (`InvokeContract`,
+  `SendContract`, `EventContract`, DTOs y `ElectronAPI`). `UndeclaredChannels` no compila si un
+  nombre de `Channels` no esta en ningun contrato:
+  - [x] `ipc/result.js → .ts`: `handle()` tipado contra el mapa y el envelope
+        `{ ok: true, data } | { ok: false, code, message }` — los argumentos llegan al handler
+        como `unknown` (`Untrusted<Args>`); `handleAll`, `listen` y `emit` completan el registro
+  - [x] `preload/index.js → .ts` tipado contra el mapa (sigue saliendo en CJS) — comprobado en
+        `out/preload/index.js` (`require("electron")`)
+  - [x] `ipcClient.js → .ts`: el desenvoltorio reconstruye `LauncherError` — y
+        `UnwrappedMethods` no compila si un metodo del puente no tiene envoltorio
+  - [x] Resultado: un canal que falte en una de las 4 capas es error de compilacion —
+        comprobado rompiendo cada capa a proposito: el error nombra el canal o el metodo
+- [x] `launch:progress` como **union discriminada** por `type` (fases, ciclo de vida,
   `game_startup`, `stdout`/`stderr`); `launchPhases.js → .ts` con `PHASE_RANGE` tipado como
-  `Record<PhaseType, …>` para que una fase sin franja no compile
-- [ ] `shared/skins.js → .ts`
-- [ ] Tipos del **manifest** (`docs/manifest.md`) y de **`config.json`** (incluido
-  `CONFIG_VERSION`), en `src/shared` o `src/main/types` segun quien los use
-- [ ] Validadores en runtime como **type guards** sobre lo que ya existe (`assertShape`,
+  `Record<PhaseType, …>` para que una fase sin franja no compile — 07/11/2026,
+  `2ead452`: `src/shared/launchProgress.ts`. Con `LaunchManager` ya emitiendo la union, el test
+  que leia su fuente con un glob de vite se ha quitado (`10701f3`): lo hace el compilador
+- [x] `shared/skins.js → .ts` — 07/11/2026, `614e673`. Lleva tambien los tipos
+  que cruzan el IPC (`SkinState`, `SkinSaveChoice`…) e `isSkinVariant`
+- [x] Tipos del **manifest** (`docs/manifest.md`) y de **`config.json`** (incluido
+  `CONFIG_VERSION`), en `src/shared` o `src/main/types` segun quien los use — 07/11/2026,
+  `265df33`: `src/main/types/{config,manifest,minecraft}.ts`, en la zona de 4 espacios de
+  `eslint.config.mjs`. Lo que ve el renderer (`Modpack`, `ManifestPointer`) va en
+  `src/shared/modpack.ts` (`2ead452`)
+- [x] Validadores en runtime como **type guards** sobre lo que ya existe (`assertShape`,
   `validateConfig`, `parseProfile`, `toModpack`): `unknown` entra, el tipo sale. Tipos a mano
-  para Mojang version JSON y Fabric Meta, con solo los campos que se leen
+  para Mojang version JSON y Fabric Meta, con solo los campos que se leen — 07/11/2026,
+  tipados en el commit de cada manager. `assertShape` comprueba ahora
+  tambien `policies`, `ignore`, `loader` y la `policy` de cada archivo; nuevo
+  `DistributionManager.parseServerData` para el documento que llega por `distro:setServerData`
+  (descarta una RAM que la JVM no lee). `toModpack` es del renderer y se tipa en la Fase 6
 
 **Documentacion**
-- [ ] `AGENTS.md`: "IPC Pattern" (el mapa sustituye la verificacion manual de las 4 capas),
-  "Progress event contract" (la union), y que los errores se lanzan con `LauncherError`
-- [ ] ADR-0002 y ADR-0005: addendum fechado si el mecanismo cambia de forma
-- [ ] Reestimacion anotada en "Contexto"
+- [x] `AGENTS.md`: "IPC Pattern" (el mapa sustituye la verificacion manual de las 4 capas),
+  "Progress event contract" (la union), y que los errores se lanzan con `LauncherError` —
+  07/11/2026
+- [x] ADR-0002 y ADR-0005: addendum fechado si el mecanismo cambia de forma — 07/11/2026, los
+  dos (el mecanismo no cambia; lo que cambia es quien lo comprueba)
+- [x] Reestimacion anotada en "Contexto" — 07/11/2026
 
 ---
 
@@ -324,25 +360,39 @@ El mayor retorno de toda la migracion. Al cerrarla, **reestimar** las fases sigu
 Cada archivo: `git mv x.js x.ts` + tipos en el mismo commit (sin refactors), tests en verde. Los
 tests del archivo se renombran a `.test.ts` con el.
 
-- [ ] **utils**: `PathUtils` · `HttpUtils` · `MavenUtils` · `PackPolicy` · `FileUtils` ·
-  `GameOutput` · `StartupTracker` · `Logger` (~490 lineas)
-- [ ] `constants.js`
-- [ ] `ConfigManager` (630)
-- [ ] `ManifestManager` (167)
-- [ ] `DistributionManager` (274)
-- [ ] `MinecraftDownloadManager` (105) — comprobar los `.d.ts` de helios-core, no suponerlos
-- [ ] `ModLoaderManager` (209)
-- [ ] `LaunchManager` (1.028) — valorar partirlo **antes**, en un commit propio
-- [ ] `AuthManager` (517)
-- [ ] `SkinManager` (677)
-- [ ] `windows/msftAuth.js` (161)
-- [ ] `ipc/*.ipc.js` (auth, config, distribution, launch, logs, skins, window, index)
-- [ ] `main/index.js` (181)
-- [ ] Prueba de humo de la Fase 1 en `pnpm package`
+Todo en `ts/f4-f5-contracts-main` (07/11/2026, un commit por grupo). Los tests (`src/main/testing`
+incluido) pasaron a `.ts` con su archivo; 33 en verde (uno menos: el de `launchPhases` que leia
+el fuente).
+
+- [x] **utils**: `PathUtils` · `HttpUtils` · `MavenUtils` · `PackPolicy` · `FileUtils` ·
+  `GameOutput` · `StartupTracker` · `Logger` (~490 lineas) — 07/11/2026, `265df33`
+- [x] `constants.js` — 07/11/2026, `265df33`
+- [x] `ConfigManager` (630) — 07/11/2026, `7d1f48e` (con `src/main/testing`). `config` arranca con los valores por defecto en vez
+  de `null` (antes de `load()` nadie lo lee)
+- [x] `ManifestManager` (167) — 07/11/2026, `505c553`. Fuera el `cache: 'no-store'` del `fetch`, que en
+  Node no hacia nada (no hay cache HTTP) y no existe en sus tipos
+- [x] `DistributionManager` (274) — 07/11/2026, `505c553`
+- [x] `MinecraftDownloadManager` (105) — comprobar los `.d.ts` de helios-core, no suponerlos —
+  07/11/2026, `93a3777`. El `VersionJson` de helios no trae `javaVersion`; se usa el tipo propio
+- [x] `ModLoaderManager` (209) — 07/11/2026, `93a3777`
+- [x] `LaunchManager` (1.028) — valorar partirlo **antes**, en un commit propio — 07/11/2026,
+  `10701f3`, convertido sin partir (decision del usuario); el corte queda anotado en `TODO.md`. Un valor
+  de argumento que no es string se descarta en vez de llegar a `spawn`, que rechazaba el comando
+  entero
+- [x] `AuthManager` (517) — 07/11/2026, `98a02fc`
+- [x] `SkinManager` (677) — 07/11/2026, `3d07e2c`
+- [x] `windows/msftAuth.js` (161) — 07/11/2026, `379e2c5`
+- [x] `ipc/*.ipc.js` (auth, config, distribution, launch, logs, skins, window, index) —
+  07/11/2026, `c18e426`. Cada archivo devuelve su parte del mapa (`satisfies Partial<InvokeHandlers>`, que
+  tipa los argumentos como `unknown`) e `ipc/index.ts` las junta en un `InvokeHandlers`:
+  quitar un handler no compila. Validacion nueva en el handler: el codigo de autorizacion y el
+  uuid del logout, y las opciones de los dialogos (titulo y filtros)
+- [x] `main/index.js` (181) — 07/11/2026, `c18e426`
+- [x] Prueba de humo de la Fase 1 en `pnpm package` — 07/11/2026, hecha por el usuario
 
 **Documentacion**
-- [ ] `AGENTS.md`: arbol de "Process Model" y todas las rutas `*.js` del main; seccion "Shared
-  Utilities"
+- [x] `AGENTS.md`: arbol de "Process Model" y todas las rutas `*.js` del main; seccion "Shared
+  Utilities" — 07/11/2026
 
 ---
 

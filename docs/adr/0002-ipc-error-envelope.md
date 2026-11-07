@@ -48,3 +48,24 @@ silently vanished on the way over, which is how users ended up reading "undefine
   then cannot tell "no account" from "the disk is unreadable".
 - **A custom serializer for `Error`.** *(reconstructed)* More machinery than the envelope for the same result,
   and still leaves each handler free to invent its own shape.
+
+## Addendum (2026-11-07)
+
+The envelope is unchanged; what changed is who checks it. With the TypeScript migration (Phase 4
+of `TODO-Migracion.md`, [0015](0015-incremental-typescript-migration.md)) the four-layer rule is
+enforced by the compiler instead of by review:
+
+- Every channel is declared in `src/shared/ipcContract.ts` — `InvokeContract`, `SendContract` or
+  `EventContract` — with what it takes and returns. The handlers in `main/ipc` form one map
+  typed `InvokeHandlers`, the preload builds an `ElectronAPI` and `ipcClient` checks it wraps
+  every bridge method, so a channel missing from a layer, or typed differently there, does not
+  compile. The map replaced registering each handler with its own `handle()` call.
+- Handlers receive their arguments as `unknown`. The contract states what the renderer means
+  to send; validating what arrives stays the handler's job, as before.
+- Errors are thrown as `LauncherError(code, message, cause?)` (`src/shared/LauncherError.ts`)
+  instead of an `Error` with `.code` assigned afterwards, and `ipcClient` rebuilds a
+  `LauncherError` on the renderer side. `ErrorCode` is the union of the codes.
+- One behaviour change: the envelope only carries the launcher's own codes. A foreign one, like
+  node's `ENOENT` from an unwrapped `fs` call, used to cross as it was and now travels as
+  `UNKNOWN` (`errorCodeOf`). No renderer branch read those, and a code the renderer could act on
+  belongs in `errorCodes.ts` anyway.

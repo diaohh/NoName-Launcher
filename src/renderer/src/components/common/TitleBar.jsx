@@ -20,7 +20,7 @@ function WindowButton({ onClick, label, danger = false, children }) {
 }
 
 /**
- * The window's title bar. The window is frameless (`frame: false` in main/index.js) so the
+ * The window's title bar. The window is frameless (`frame: false` in main/index) so the
  * native one does not break the glass; this replaces it. The whole strip drags the window,
  * a double click on it maximizes like the native one, and only the buttons opt out.
  *

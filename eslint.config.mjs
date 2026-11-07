@@ -41,13 +41,15 @@ export default [
     }
   },
 
-  // 4 spaces: the managers, the utils, the auth window and the test support.
+  // 4 spaces: the managers, the utils, the auth window, the test support and the data types
+  // the managers read.
   {
     files: [
       'src/main/managers/**/*.{js,ts}',
       'src/main/utils/**/*.{js,ts}',
       'src/main/windows/**/*.{js,ts}',
-      'src/main/testing/**/*.{js,ts}'
+      'src/main/testing/**/*.{js,ts}',
+      'src/main/types/**/*.ts'
     ],
     plugins: { '@stylistic': stylistic },
     rules: { '@stylistic/indent': ['error', 4, { SwitchCase: 1 }] }

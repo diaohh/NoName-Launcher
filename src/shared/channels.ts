@@ -1,0 +1,66 @@
+/**
+ * IPC channel names, read by the handlers in `main/ipc/` and by the preload. Living in
+ * `shared/` keeps the two from drifting: the preload used to repeat every name as a string
+ * literal, so a rename on one side silently left the other invoking a channel nobody answered.
+ */
+export const Channels = {
+  // Auth
+  AUTH_MSFT_LOGIN: 'auth:msftLogin',
+  AUTH_LOGIN: 'auth:login',
+  AUTH_LOGOUT: 'auth:logout',
+  AUTH_VALIDATE: 'auth:validate',
+  AUTH_GET_ACCOUNT: 'auth:getAccount',
+  AUTH_TOKEN_EXPIRED: 'auth:tokenExpired',
+
+  // Config
+  CONFIG_GET_SETTINGS: 'config:getSettings',
+  CONFIG_SET_JAVA_EXECUTABLE: 'config:setJavaExecutable',
+  CONFIG_SET_JAVA_AUTO_DOWNLOAD: 'config:setJavaAutoDownload',
+  CONFIG_SET_MAX_RAM: 'config:setMaxRam',
+  CONFIG_SET_USE_MODPACK_RAM: 'config:setUseModpackRam',
+  CONFIG_SET_GAME_WIDTH: 'config:setGameWidth',
+  CONFIG_SET_GAME_HEIGHT: 'config:setGameHeight',
+  CONFIG_SET_FULLSCREEN: 'config:setFullscreen',
+  CONFIG_SET_DATA_DIRECTORY: 'config:setDataDirectory',
+
+  // Dialogs
+  DIALOG_OPEN_FILE: 'dialog:openFile',
+  DIALOG_OPEN_FOLDER: 'dialog:openFolder',
+  SHELL_OPEN_DATA_DIRECTORY: 'shell:openDataDirectory',
+  SHELL_OPEN_LOGS_DIRECTORY: 'shell:openLogsDirectory',
+
+  // Distribution
+  DISTRO_SET_SERVER_DATA: 'distro:setServerData',
+
+  // Launch
+  LAUNCH_GAME: 'launch:game',
+  LAUNCH_PROGRESS: 'launch:progress',
+  LAUNCH_KILL: 'launch:kill',
+  LAUNCH_GET_STATUS: 'launch:getStatus',
+
+  // Logs
+  LOGS_EXPORT: 'logs:export',
+
+  // Skins. Every call to Mojang happens in main, which holds the token; the renderer only
+  // ever receives textures as data URLs.
+  SKINS_GET_STATE: 'skins:getState',
+  SKINS_GET_ACTIVE_TEXTURE: 'skins:getActiveTexture',
+  SKINS_IMPORT: 'skins:import',
+  SKINS_RENAME: 'skins:rename',
+  SKINS_DELETE: 'skins:delete',
+  SKINS_SAVE: 'skins:save',
+
+  // Window
+  WINDOW_MINIMIZE: 'window:minimize',
+  WINDOW_MAXIMIZE: 'window:maximize',
+  WINDOW_CLOSE: 'window:close',
+  WINDOW_IS_MAXIMIZED: 'window:isMaximized',
+  WINDOW_MAXIMIZED_CHANGED: 'window:maximizedChanged',
+  // While a launch is being prepared main holds the close and asks the renderer first; the
+  // renderer answers with WINDOW_CONFIRM_CLOSE when the player still wants out.
+  WINDOW_CLOSE_REQUESTED: 'window:closeRequested',
+  WINDOW_CONFIRM_CLOSE: 'window:confirmClose'
+} as const
+
+/** Any channel name. What each one carries is in `ipcContract`. */
+export type Channel = typeof Channels[keyof typeof Channels]

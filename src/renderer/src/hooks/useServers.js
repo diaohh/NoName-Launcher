@@ -17,7 +17,7 @@ const UNKNOWN_MESSAGE = 'No se ha podido cargar la lista de modpacks.'
  * text is ours — the original goes to the console.
  *
  * These codes never cross the IPC boundary, which is why they deliberately do not live in
- * `shared/errorCodes.js`.
+ * `shared/errorCodes`.
  */
 function describeError(err) {
   const isNetwork = err?.code === FIRESTORE_TIMEOUT
