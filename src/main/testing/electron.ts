@@ -22,7 +22,7 @@ const PREFIX = 'stub-encrypted:'
 export const safeStorageControl = {
     available: true,
     undecryptable: false,
-    encryptDelaysMs: [],
+    encryptDelaysMs: [] as number[],
     reset() {
         this.available = true
         this.undecryptable = false
@@ -30,7 +30,7 @@ export const safeStorageControl = {
     }
 }
 
-function decrypt(encrypted) {
+function decrypt(encrypted: Buffer): string {
     const text = Buffer.from(encrypted).toString('utf-8')
     if (safeStorageControl.undecryptable || !text.startsWith(PREFIX)) {
         throw new Error('Error while decrypting the ciphertext provided to safeStorage.decryptString.')
@@ -43,16 +43,16 @@ function decrypt(encrypted) {
  * disk in the clear without depending on what the OS keyring would produce.
  */
 export const safeStorage = {
-    async isAsyncEncryptionAvailable() {
+    async isAsyncEncryptionAvailable(): Promise<boolean> {
         return safeStorageControl.available
     },
-    async encryptStringAsync(plainText) {
+    async encryptStringAsync(plainText: string): Promise<Buffer> {
         const delay = safeStorageControl.encryptDelaysMs.shift() ?? 0
         if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay))
         if (!safeStorageControl.available) throw new Error('Encryption is not available.')
         return Buffer.from(PREFIX + plainText, 'utf-8')
     },
-    async decryptStringAsync(encrypted) {
+    async decryptStringAsync(encrypted: Buffer): Promise<{ result: string, shouldReEncrypt: boolean }> {
         return { result: decrypt(encrypted), shouldReEncrypt: false }
     }
 }
@@ -61,7 +61,7 @@ export const app = {
     isPackaged: false,
     getName: () => 'NoNameLauncher',
     getVersion: () => '0.0.0-test',
-    getPath: (name) => path.join(os.tmpdir(), 'nnl-test', name)
+    getPath: (name: string) => path.join(os.tmpdir(), 'nnl-test', name)
 }
 
 // AuthManager subscribes to `resume` only when its scheduler starts, which no test does.

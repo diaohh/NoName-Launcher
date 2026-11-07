@@ -6,14 +6,14 @@ import { defineConfig } from 'vitest/config'
  * preload, renderer) and resolves the Azure client id from `.env`, and the tests need none
  * of it — they import the sources directly, on node.
  *
- * Tests sit next to the file they cover (`X.test.js` beside `X.js`) and the coverage is
+ * Tests sit next to the file they cover (`X.test.ts` beside `X.ts`) and the coverage is
  * minimal on purpose: what fails silently, and what the TypeScript migration rewrites.
  */
 export default defineConfig({
   resolve: {
     alias: [
       // The real package only resolves to the path of the Electron binary under node.
-      { find: /^electron$/, replacement: fileURLToPath(new URL('./src/main/testing/electron.js', import.meta.url)) }
+      { find: /^electron$/, replacement: fileURLToPath(new URL('./src/main/testing/electron.ts', import.meta.url)) }
     ]
   },
   define: {

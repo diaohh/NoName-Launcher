@@ -6,6 +6,8 @@ import Logger from '../utils/Logger'
 import { resolveInside } from '../utils/PathUtils'
 import { writeFileAtomicSync } from '../utils/FileUtils'
 import { ERROR_CODE } from '../../shared/errorCodes'
+import { LauncherError } from '../../shared/LauncherError'
+import type { Account, DiskAccount, DiskConfig, LauncherConfig, MicrosoftTokens } from '../types/config'
 
 const logger = Logger.getLogger('ConfigManager')
 
@@ -19,23 +21,32 @@ const logger = Logger.getLogger('ConfigManager')
  */
 const CONFIG_VERSION = 2
 
-const isPlainObject = (value) => value != null && typeof value === 'object' && !Array.isArray(value)
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+    value != null && typeof value === 'object' && !Array.isArray(value)
 
 /** Whether a stored value can stand in for its default. See `validateConfig`. */
-function hasExpectedType(actual, expected) {
+function hasExpectedType(actual: unknown, expected: unknown): boolean {
     if (expected === null) return actual === null || typeof actual === 'string'
     if (typeof expected === 'number') return typeof actual === 'number' && Number.isFinite(actual)
     return typeof actual === typeof expected
 }
 
+/** What `decryptAccount` reads back out of the encrypted blob. */
+interface AccountSecrets {
+    accessToken: string
+    access_token: string
+    refresh_token: string
+}
+
 class ConfigManager {
-    static config = null
-    static configPath = null
-    static launcherDir = null
-    static dataDir = null
+    /** The defaults until `load()` replaces them with the file's. */
+    static config: LauncherConfig = ConfigManager.getDefaultConfig()
+    static configPath: string | null = null
+    static launcherDir: string | null = null
+    static dataDir: string | null = null
 
     /** The tail of the save queue; it never rejects. See `save`. */
-    static pendingSave = Promise.resolve()
+    static pendingSave: Promise<void> = Promise.resolve()
 
     /**
      * The launcher's own root, and the one thing the player cannot move.
@@ -44,7 +55,7 @@ class ConfigManager {
      * configuration to read a preference from — so this must never depend on a setting.
      * Everything bulky (see `getDataDirectory`) hangs off the data directory instead.
      */
-    static getLauncherDirectory() {
+    static getLauncherDirectory(): string {
         if (this.launcherDir) {
             return this.launcherDir
         }
@@ -54,13 +65,14 @@ class ConfigManager {
                 path.join(os.homedir(), 'Library', 'Application Support') :
                 path.join(os.homedir(), '.local', 'share'))
 
-        this.launcherDir = path.join(appDataPath, '.nonamelauncher')
+        const launcherDir = path.join(appDataPath, '.nonamelauncher')
+        this.launcherDir = launcherDir
 
-        if (!fs.existsSync(this.launcherDir)) {
-            fs.mkdirSync(this.launcherDir, { recursive: true })
+        if (!fs.existsSync(launcherDir)) {
+            fs.mkdirSync(launcherDir, { recursive: true })
         }
 
-        return this.launcherDir
+        return launcherDir
     }
 
     /**
@@ -68,7 +80,7 @@ class ConfigManager {
      * logs describe the launcher, and they have to be found in the same place even when the
      * data directory is the thing that broke.
      */
-    static getLogsDirectory() {
+    static getLogsDirectory(): string {
         return path.join(this.getLauncherDirectory(), 'logs')
     }
 
@@ -77,7 +89,7 @@ class ConfigManager {
      * directory: the skins are the player's own files, not a cache the launcher can download
      * again, and moving the data directory must not leave them behind. See ADR-0014.
      */
-    static getSkinsDirectory() {
+    static getSkinsDirectory(): string {
         return path.join(this.getLauncherDirectory(), 'skins')
     }
 
@@ -87,7 +99,7 @@ class ConfigManager {
      * Next to the config for the same reason as the logs: it describes the launcher, not the
      * data, and a data directory change must not lose track of it.
      */
-    static getRunningGamePath() {
+    static getRunningGamePath(): string {
         return path.join(this.getLauncherDirectory(), 'running-game.json')
     }
 
@@ -99,26 +111,27 @@ class ConfigManager {
      * a folder that lost its permissions — falls back to the launcher directory with a
      * warning and **does not** rewrite the config: the drive may well be back next time.
      */
-    static getDataDirectory() {
+    static getDataDirectory(): string {
         if (this.dataDir) {
             return this.dataDir
         }
 
-        const configured = this.config?.settings?.launcher?.dataDirectory
+        const configured = this.config.settings.launcher.dataDirectory
 
         if (configured && !this.isUsableDataDirectory(configured)) {
             logger.warn(`The configured data directory is unusable, falling back to the default: ${configured}`)
         } else if (configured) {
             this.dataDir = configured
-            return this.dataDir
+            return configured
         }
 
-        this.dataDir = this.getLauncherDirectory()
-        return this.dataDir
+        const fallback = this.getLauncherDirectory()
+        this.dataDir = fallback
+        return fallback
     }
 
     /** True when the directory exists (or can be created) and can be written to. */
-    static isUsableDataDirectory(directory) {
+    static isUsableDataDirectory(directory: string): boolean {
         try {
             fs.ensureDirSync(directory)
             fs.accessSync(directory, fs.constants.W_OK)
@@ -129,11 +142,11 @@ class ConfigManager {
         }
     }
 
-    static getInstanceDirectory() {
+    static getInstanceDirectory(): string {
         return path.join(this.getDataDirectory(), 'instances')
     }
 
-    static getCommonDirectory() {
+    static getCommonDirectory(): string {
         return path.join(this.getDataDirectory(), 'common')
     }
 
@@ -142,15 +155,15 @@ class ConfigManager {
      * JSON (`inheritsFrom`), so it is resolved inside the versions directory rather than
      * trusted to be a single path segment.
      */
-    static getVersionDirectory(versionId) {
+    static getVersionDirectory(versionId: string): string {
         return resolveInside(path.join(this.getCommonDirectory(), 'versions'), versionId)
     }
 
-    static getVersionJsonPath(versionId) {
+    static getVersionJsonPath(versionId: string): string {
         return path.join(this.getVersionDirectory(versionId), `${versionId}.json`)
     }
 
-    static getDefaultConfig() {
+    static getDefaultConfig(): LauncherConfig {
         return {
             version: CONFIG_VERSION,
             settings: {
@@ -190,23 +203,25 @@ class ConfigManager {
      * Reads `config.json`, migrating and repairing it, and decrypts the stored session.
      * Asynchronous because `safeStorage` only decrypts asynchronously since Electron 45.
      */
-    static async load() {
-        this.configPath = path.join(this.getLauncherDirectory(), 'config.json')
+    static async load(): Promise<LauncherConfig> {
+        const configPath = path.join(this.getLauncherDirectory(), 'config.json')
+        this.configPath = configPath
 
-        if (!fs.existsSync(this.configPath)) {
+        if (!fs.existsSync(configPath)) {
             logger.info('Config file not found, creating default...')
             this.config = this.getDefaultConfig()
             await this.saveAfterLoad()
             return this.config
         }
 
-        let parsed
+        let parsed: Record<string, unknown>
         try {
-            parsed = JSON.parse(fs.readFileSync(this.configPath, 'UTF-8'))
+            const raw: unknown = JSON.parse(fs.readFileSync(configPath, 'utf-8'))
             // `null`, an array or a bare string parse fine and are still not a config.
-            if (!isPlainObject(parsed)) throw new Error('config.json does not hold an object')
+            if (!isPlainObject(raw)) throw new Error('config.json does not hold an object')
+            parsed = raw
         } catch (err) {
-            this.quarantineConfig(err)
+            this.quarantineConfig(configPath, err)
             this.config = this.getDefaultConfig()
             await this.saveAfterLoad()
             return this.config
@@ -243,7 +258,7 @@ class ConfigManager {
      * dropped instead: discovery finds the same runtime again on the next launch, and the few
      * players who did pick one by hand pick it again.
      */
-    static migrateJavaSelection() {
+    static migrateJavaSelection(): void {
         const java = this.config.settings.java
         if (java.executable) {
             logger.info(`Config v2: forgetting the stored Java (${java.executable}), the launcher will pick one per modpack`)
@@ -262,8 +277,10 @@ class ConfigManager {
      * @returns true when the file on disk needs to be rewritten: a v0 account, a dropped
      * one, or a blob safeStorage asks to re-encrypt because its key was rotated.
      */
-    static async hydrateSecrets() {
-        const database = this.config.authenticationDatabase
+    static async hydrateSecrets(): Promise<boolean> {
+        // Straight from the file: `validateConfig` only checked that this is an object, so each
+        // entry is checked here before it is trusted as an account.
+        const database = this.config.authenticationDatabase as Record<string, unknown>
         let rewriteNeeded = false
 
         for (const [uuid, account] of Object.entries(database)) {
@@ -284,7 +301,7 @@ class ConfigManager {
             }
 
             try {
-                const { decrypted, shouldReEncrypt } = await this.decryptAccount(account)
+                const { decrypted, shouldReEncrypt } = await this.decryptAccount(account as unknown as DiskAccount)
                 database[uuid] = decrypted
                 if (shouldReEncrypt) rewriteNeeded = true
             } catch (err) {
@@ -301,7 +318,7 @@ class ConfigManager {
      * Drops every credential while leaving the rest of the config untouched. The player
      * lands back on the login screen; nothing else they configured is lost.
      */
-    static purgeSession(reason) {
+    static purgeSession(reason: string): void {
         logger.warn(`Purging the stored session: ${reason}`)
         this.config.authenticationDatabase = {}
         this.config.selectedAccount = null
@@ -312,7 +329,7 @@ class ConfigManager {
      * written by `encryptString` decrypt with `decryptStringAsync`, so the move needed no
      * config migration (ADR-0007).
      */
-    static async isEncryptionAvailable() {
+    static async isEncryptionAvailable(): Promise<boolean> {
         try {
             return await safeStorage.isAsyncEncryptionAvailable()
         } catch (err) {
@@ -326,14 +343,14 @@ class ConfigManager {
      * username, uuid, expiries — stays readable, so config.json remains inspectable and
      * a decryption failure costs the session rather than the settings.
      */
-    static async encryptAccount(account) {
+    static async encryptAccount(account: Account): Promise<DiskAccount> {
         const { accessToken, microsoft, ...rest } = account
-        const { access_token, refresh_token, ...microsoftRest } = microsoft ?? {}
+        const { access_token, refresh_token, ...microsoftRest }: Partial<MicrosoftTokens> = microsoft ?? {}
         const encrypted = await safeStorage.encryptStringAsync(JSON.stringify({ accessToken, access_token, refresh_token }))
 
         return {
             ...rest,
-            microsoft: microsoftRest,
+            microsoft: microsoftRest as DiskAccount['microsoft'],
             secrets: encrypted.toString('base64')
         }
     }
@@ -342,10 +359,11 @@ class ConfigManager {
      * @returns the account with its secrets back in place, and whether safeStorage asks for
      * the blob to be re-encrypted (its key was rotated or a better one became available).
      */
-    static async decryptAccount(account) {
+    static async decryptAccount(account: DiskAccount): Promise<{ decrypted: Account, shouldReEncrypt: boolean }> {
         const { secrets, ...rest } = account
         const { result, shouldReEncrypt } = await safeStorage.decryptStringAsync(Buffer.from(secrets, 'base64'))
-        const payload = JSON.parse(result)
+        // Written by `encryptAccount` and authenticated by the keyring: the launcher's own data.
+        const payload = JSON.parse(result) as AccountSecrets
 
         return {
             shouldReEncrypt: Boolean(shouldReEncrypt),
@@ -368,10 +386,10 @@ class ConfigManager {
      * must never be the reason a player loses them irrecoverably. The launcher starts
      * on the defaults, but the original stays on disk right next to it.
      */
-    static quarantineConfig(err) {
-        const backupPath = `${this.configPath}.corrupt-${Date.now()}`
+    static quarantineConfig(configPath: string, err: unknown): void {
+        const backupPath = `${configPath}.corrupt-${Date.now()}`
         try {
-            fs.moveSync(this.configPath, backupPath)
+            fs.moveSync(configPath, backupPath)
             logger.error(`Config unreadable, moved aside to ${backupPath}`, err)
         } catch (moveErr) {
             logger.error('Config unreadable and could not be moved aside', moveErr)
@@ -395,24 +413,25 @@ class ConfigManager {
      * turn comes, so the last write always carries the newest state. A failed save rejects
      * for its own caller and does not stop the ones queued behind it.
      */
-    static save() {
+    static save(): Promise<void> {
         const run = this.pendingSave.then(() => this.writeConfig())
         this.pendingSave = run.catch(() => {})
         return run
     }
 
-    static async writeConfig() {
+    static async writeConfig(): Promise<void> {
         const data = JSON.stringify(await this.toDiskConfig(), null, 4)
 
         try {
+            if (this.configPath == null) throw new Error('config.json written before load()')
             writeFileAtomicSync(this.configPath, data)
         } catch (err) {
             logger.error('Failed to save config', err)
-
-            const error = new Error('No se ha podido guardar la configuracion. Comprueba que hay espacio en disco y permiso de escritura.')
-            error.code = ERROR_CODE.CONFIG_SAVE_FAILED
-            error.cause = err
-            throw error
+            throw new LauncherError(
+                ERROR_CODE.CONFIG_SAVE_FAILED,
+                'No se ha podido guardar la configuracion. Comprueba que hay espacio en disco y permiso de escritura.',
+                err
+            )
         }
 
         logger.info('Configuration saved successfully')
@@ -422,7 +441,7 @@ class ConfigManager {
      * `load()` rewrites the file after a migration or a reset, but the launcher must still
      * open when that write fails — a read-only disk is reported by the next explicit save.
      */
-    static async saveAfterLoad() {
+    static async saveAfterLoad(): Promise<void> {
         try {
             await this.save()
         } catch {
@@ -438,8 +457,8 @@ class ConfigManager {
      * persisted: it stays in memory for this run and the player logs in again next
      * start.
      */
-    static async toDiskConfig() {
-        const config = { ...this.config, authenticationDatabase: {} }
+    static async toDiskConfig(): Promise<DiskConfig> {
+        const config: DiskConfig = { ...this.config, authenticationDatabase: {} }
 
         if (!(await this.isEncryptionAvailable())) {
             if (Object.keys(this.config.authenticationDatabase).length > 0) {
@@ -470,10 +489,10 @@ class ConfigManager {
      * of its default. A `null` default means "a string or nothing" (paths, selected ids). A
      * mismatch falls back to the default for that key alone, never for the whole file.
      */
-    static validateConfig(config) {
-        const defaults = this.getDefaultConfig()
+    static validateConfig(config: Record<string, unknown>): LauncherConfig {
+        const defaults = this.getDefaultConfig() as unknown as Record<string, unknown>
 
-        const merge = (target, source, parentKey) => {
+        const merge = (target: Record<string, unknown>, source: Record<string, unknown>, parentKey: string) => {
             for (const key in source) {
                 const expected = source[key]
                 const actual = target[key]
@@ -484,7 +503,7 @@ class ConfigManager {
                         if (actual !== undefined) logger.warn(`Config: "${keyPath}" is not an object, resetting it`)
                         target[key] = {}
                     }
-                    merge(target[key], expected, keyPath)
+                    merge(target[key] as Record<string, unknown>, expected, keyPath)
                 } else if (actual === undefined) {
                     target[key] = expected
                 } else if (!hasExpectedType(actual, expected)) {
@@ -495,40 +514,42 @@ class ConfigManager {
             return target
         }
 
-        return merge(config, defaults, '')
+        // Every key of the defaults is now present with the default's type, which is what the
+        // type promises. The accounts are not: `hydrateSecrets` checks those.
+        return merge(config, defaults, '') as unknown as LauncherConfig
     }
 
-    static getConfig() { return this.config }
-    static getGameWidth() { return this.config.settings.game.resWidth }
-    static getGameHeight() { return this.config.settings.game.resHeight }
-    static getFullscreen() { return this.config.settings.game.fullscreen }
-    static getMinRAM() { return this.config.settings.java.minRAM }
-    static getMaxRAM() { return this.config.settings.java.maxRAM }
-    static getJavaExecutable() { return this.config.settings.java.executable }
-    static getJavaAutoDownload() { return this.config.settings.java.autoDownload }
-    static getUseModpackRam() { return this.config.settings.java.useModpackRam }
-    static getMinRAMMb() { return this.parseRamToMB(this.getMinRAM()) }
-    static getMaxRAMMb() { return this.parseRamToMB(this.getMaxRAM()) }
-    static getSelectedServer() { return this.config.selectedServer }
-    static getSelectedAccount() { return this.config.selectedAccount }
-    static getAuthenticationDatabase() { return this.config.authenticationDatabase }
+    static getConfig(): LauncherConfig { return this.config }
+    static getGameWidth(): number { return this.config.settings.game.resWidth }
+    static getGameHeight(): number { return this.config.settings.game.resHeight }
+    static getFullscreen(): boolean { return this.config.settings.game.fullscreen }
+    static getMinRAM(): string { return this.config.settings.java.minRAM }
+    static getMaxRAM(): string { return this.config.settings.java.maxRAM }
+    static getJavaExecutable(): string | null { return this.config.settings.java.executable }
+    static getJavaAutoDownload(): boolean { return this.config.settings.java.autoDownload }
+    static getUseModpackRam(): boolean { return this.config.settings.java.useModpackRam }
+    static getMinRAMMb(): number | null { return this.parseRamToMB(this.getMinRAM()) }
+    static getMaxRAMMb(): number | null { return this.parseRamToMB(this.getMaxRAM()) }
+    static getSelectedServer(): string | null { return this.config.selectedServer }
+    static getSelectedAccount(): string | null { return this.config.selectedAccount }
+    static getAuthenticationDatabase(): Record<string, Account> { return this.config.authenticationDatabase }
 
-    static getAccountByUUID(uuid) {
+    static getAccountByUUID(uuid: string): Account | null {
         return this.config.authenticationDatabase[uuid] || null
     }
 
-    static setGameWidth(width) { this.config.settings.game.resWidth = width }
-    static setGameHeight(height) { this.config.settings.game.resHeight = height }
-    static setFullscreen(fullscreen) { this.config.settings.game.fullscreen = fullscreen }
-    static setMinRAM(ram) { this.config.settings.java.minRAM = ram }
-    static setUseModpackRam(value) { this.config.settings.java.useModpackRam = !!value }
+    static setGameWidth(width: number): void { this.config.settings.game.resWidth = width }
+    static setGameHeight(height: number): void { this.config.settings.game.resHeight = height }
+    static setFullscreen(fullscreen: boolean): void { this.config.settings.game.fullscreen = fullscreen }
+    static setMinRAM(ram: string): void { this.config.settings.java.minRAM = ram }
+    static setUseModpackRam(value: boolean): void { this.config.settings.java.useModpackRam = !!value }
 
     /**
      * The JVM aborts before printing anything useful when `-Xms` sits above `-Xmx`, and the
      * defaults are 2G/4G — so dragging the settings slider down past the minimum would build
      * a launch command that simply dies. The floor follows the ceiling down.
      */
-    static setMaxRAM(ram) {
+    static setMaxRAM(ram: string): void {
         this.config.settings.java.maxRAM = ram
 
         const maxMb = this.parseRamToMB(ram)
@@ -545,7 +566,7 @@ class ConfigManager {
      * it accepts `-Xmx4G`, so only the stored format has to be read back. Returns null for
      * anything unparseable rather than guessing a number.
      */
-    static parseRamToMB(value) {
+    static parseRamToMB(value: unknown): number | null {
         if (typeof value === 'number' && Number.isFinite(value)) return Math.round(value)
         if (typeof value !== 'string') return null
 
@@ -558,31 +579,32 @@ class ConfigManager {
         return Math.round(parseFloat(match[1]) * multiplier)
     }
 
-    static formatRamFromMB(megabytes) {
+    static formatRamFromMB(megabytes: number): string {
         return `${Math.round(megabytes)}M`
     }
-    static setJavaExecutable(executable) { this.config.settings.java.executable = executable }
+    static setJavaExecutable(executable: string | null): void { this.config.settings.java.executable = executable }
 
     /**
      * The runtime cached for a Java major, or null. The map is hand-editable like the rest of
      * the file and `validateConfig` only checks that it is an object, so the entry is checked
      * here; whether it still runs is the caller's job (`validateSelectedJvm`).
      */
-    static getJavaRuntime(major) {
+    static getJavaRuntime(major: number | string): string | null {
         const entry = this.config.settings.java.runtimes[String(major)]
         return typeof entry === 'string' && entry.length > 0 ? entry : null
     }
 
     /** Every cached runtime, keyed by major, for the settings screen. */
-    static getJavaRuntimes() {
-        return Object.fromEntries(
-            Object.keys(this.config.settings.java.runtimes)
-                .map(major => [major, this.getJavaRuntime(major)])
-                .filter(([, executable]) => executable != null)
-        )
+    static getJavaRuntimes(): Record<string, string> {
+        const runtimes: Record<string, string> = {}
+        for (const major of Object.keys(this.config.settings.java.runtimes)) {
+            const executable = this.getJavaRuntime(major)
+            if (executable != null) runtimes[major] = executable
+        }
+        return runtimes
     }
 
-    static setJavaRuntime(major, executable) {
+    static setJavaRuntime(major: number | string, executable: string | null): void {
         if (executable == null) {
             delete this.config.settings.java.runtimes[String(major)]
         } else {
@@ -590,32 +612,39 @@ class ConfigManager {
         }
     }
 
-    static setJavaAutoDownload(autoDownload) { this.config.settings.java.autoDownload = autoDownload }
+    static setJavaAutoDownload(autoDownload: boolean): void { this.config.settings.java.autoDownload = autoDownload }
     /**
      * Points the game data at a new directory from the next path lookup onwards.
      *
      * Nothing already on disk is moved — the settings screen says so. Passing null
      * restores the default location.
      */
-    static setDataDirectory(directory) {
+    static setDataDirectory(directory: unknown): void {
         // A relative path would resolve against whatever the working directory happens to be.
         const isValid = directory == null
             || (typeof directory === 'string' && path.isAbsolute(directory) && this.isUsableDataDirectory(directory))
 
         if (!isValid) {
-            const error = new Error('No se puede escribir en esa carpeta. Elige otra.')
-            error.code = ERROR_CODE.CONFIG_INVALID_DATA_DIR
-            throw error
+            throw new LauncherError(ERROR_CODE.CONFIG_INVALID_DATA_DIR, 'No se puede escribir en esa carpeta. Elige otra.')
         }
 
-        this.config.settings.launcher.dataDirectory = directory
+        this.config.settings.launcher.dataDirectory = directory ?? null
         this.dataDir = null
     }
 
-    static setSelectedServer(serverId) { this.config.selectedServer = serverId }
-    static setSelectedAccount(uuid) { this.config.selectedAccount = uuid }
+    static setSelectedServer(serverId: string | null): void { this.config.selectedServer = serverId }
+    static setSelectedAccount(uuid: string | null): void { this.config.selectedAccount = uuid }
 
-    static addMicrosoftAccount(uuid, accessToken, username, displayName, mcExpires, msAccessToken, msRefreshToken, msExpires) {
+    static addMicrosoftAccount(
+        uuid: string,
+        accessToken: string,
+        username: string,
+        displayName: string,
+        mcExpires: number,
+        msAccessToken: string,
+        msRefreshToken: string,
+        msExpires: number
+    ): Account {
         this.config.selectedAccount = uuid
         this.config.authenticationDatabase[uuid] = {
             type: 'microsoft',
@@ -633,7 +662,14 @@ class ConfigManager {
         return this.config.authenticationDatabase[uuid]
     }
 
-    static updateMicrosoftAccount(uuid, accessToken, mcExpires, msAccessToken, msRefreshToken, msExpires) {
+    static updateMicrosoftAccount(
+        uuid: string,
+        accessToken: string,
+        mcExpires: number,
+        msAccessToken: string,
+        msRefreshToken: string,
+        msExpires: number
+    ): Account | null {
         if (!this.config.authenticationDatabase[uuid]) {
             logger.error('Account not found:', uuid)
             return null
@@ -649,7 +685,7 @@ class ConfigManager {
         return account
     }
 
-    static removeAccount(uuid) {
+    static removeAccount(uuid: string): void {
         if (this.config.authenticationDatabase[uuid]) {
             delete this.config.authenticationDatabase[uuid]
 

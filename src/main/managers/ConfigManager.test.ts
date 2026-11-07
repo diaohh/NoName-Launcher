@@ -1,7 +1,7 @@
 import fs from 'fs'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import ConfigManager from './ConfigManager'
-import { createTempLauncher } from '../testing/tempLauncher'
+import { createTempLauncher, type TempLauncher } from '../testing/tempLauncher'
 import { safeStorageControl } from '../testing/electron'
 
 const UUID = '069a79f444e94726a5befca90e38aaf5'
@@ -14,7 +14,7 @@ function addAccount() {
 }
 
 describe('ConfigManager', () => {
-    let launcher
+    let launcher: TempLauncher
 
     beforeEach(() => {
         launcher = createTempLauncher()
@@ -83,13 +83,13 @@ describe('ConfigManager', () => {
             expect(raw).not.toContain('ms-refresh-token')
             expect(launcher.readConfig().authenticationDatabase[UUID].secrets).toEqual(expect.any(String))
 
-            ConfigManager.config = null
+            ConfigManager.config = ConfigManager.getDefaultConfig()
             await ConfigManager.load()
 
             const account = ConfigManager.getAccountByUUID(UUID)
-            expect(account.accessToken).toBe('mc-access-token')
-            expect(account.microsoft.access_token).toBe('ms-access-token')
-            expect(account.microsoft.refresh_token).toBe('ms-refresh-token')
+            expect(account?.accessToken).toBe('mc-access-token')
+            expect(account?.microsoft.access_token).toBe('ms-access-token')
+            expect(account?.microsoft.refresh_token).toBe('ms-refresh-token')
             expect(ConfigManager.getSelectedAccount()).toBe(UUID)
         })
 
@@ -112,7 +112,7 @@ describe('ConfigManager', () => {
             await ConfigManager.save()
 
             safeStorageControl.undecryptable = true
-            ConfigManager.config = null
+            ConfigManager.config = ConfigManager.getDefaultConfig()
             await ConfigManager.load()
 
             expect(ConfigManager.getAuthenticationDatabase()).toEqual({})

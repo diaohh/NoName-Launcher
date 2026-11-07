@@ -2,6 +2,10 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import ConfigManager from '../managers/ConfigManager'
+import type { DiskConfig } from '../types/config'
+import type { VersionJson } from '../types/minecraft'
+
+export type TempLauncher = ReturnType<typeof createTempLauncher>
 
 /**
  * Points `ConfigManager` at a fresh temporary launcher directory, on the default config.
@@ -25,16 +29,16 @@ export function createTempLauncher() {
         configPath,
 
         /** Writes `config.json` as a previous launcher (or a player) would have left it. */
-        writeConfig(config) {
+        writeConfig(config: unknown) {
             fs.writeFileSync(configPath, JSON.stringify(config, null, 4))
         },
 
-        readConfig() {
+        readConfig(): DiskConfig {
             return JSON.parse(fs.readFileSync(configPath, 'utf-8'))
         },
 
         /** Writes `common/versions/<id>/<id>.json`, the way the download step leaves it. */
-        writeVersion(versionId, manifest) {
+        writeVersion(versionId: string, manifest: VersionJson) {
             const jsonPath = ConfigManager.getVersionJsonPath(versionId)
             fs.mkdirSync(path.dirname(jsonPath), { recursive: true })
             fs.writeFileSync(jsonPath, JSON.stringify(manifest))
@@ -44,7 +48,7 @@ export function createTempLauncher() {
             ConfigManager.launcherDir = null
             ConfigManager.dataDir = null
             ConfigManager.configPath = null
-            ConfigManager.config = null
+            ConfigManager.config = ConfigManager.getDefaultConfig()
             fs.rmSync(dir, { recursive: true, force: true })
         }
     }
