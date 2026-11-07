@@ -1,4 +1,4 @@
-import { BrowserWindow } from 'electron'
+import { BrowserWindow, session } from 'electron'
 import Logger from '../utils/Logger'
 import { MICROSOFT_CLIENT_ID } from '../constants'
 import { ERROR_CODE } from '../../shared/errorCodes'
@@ -6,6 +6,20 @@ import { ERROR_CODE } from '../../shared/errorCodes'
 const logger = Logger.getLogger('MsftAuth')
 
 const REDIRECT_URI = 'https://login.microsoftonline.com/common/oauth2/nativeclient'
+
+/**
+ * The sign-in window gets a session of its own, never the launcher's default one.
+ *
+ * In the default session Microsoft's cookies were written to disk next to the launcher's and
+ * outlived a logout: the next "Iniciar sesion" could walk straight back into the previous
+ * account, and the cookies themselves are a live Microsoft web session. Without the `persist:`
+ * prefix this partition is kept in memory only, so nothing survives the process, and
+ * `clearMsftAuthSession` empties it on logout for the rest of the run.
+ */
+const AUTH_PARTITION = 'msft-auth'
+
+/** Hosts whose cookies older versions left in the default session. */
+const MICROSOFT_COOKIE_DOMAINS = ['microsoftonline.com', 'microsoft.com', 'live.com']
 
 /**
  * The sign-in flow legitimately bounces between these hosts. Anything else is either a
@@ -65,7 +79,8 @@ export function createMsftAuthWindow() {
             webPreferences: {
                 nodeIntegration: false,
                 contextIsolation: true,
-                sandbox: true
+                sandbox: true,
+                partition: AUTH_PARTITION
             }
         })
         msftAuthWindow = window
@@ -158,4 +173,30 @@ export function createMsftAuthWindow() {
 
         window.loadURL(authUrl)
     })
+}
+
+/** Forgets the Microsoft account the sign-in window last used. Called on logout. */
+export async function clearMsftAuthSession() {
+    await session.fromPartition(AUTH_PARTITION).clearStorageData()
+}
+
+/**
+ * Removes the Microsoft cookies that versions before the sign-in partition left on disk in the
+ * default session. Nothing writes them there any more, so this only cleans up after an upgrade
+ * and finds nothing on every later start.
+ */
+export async function purgeLegacyAuthCookies() {
+    const cookies = session.defaultSession.cookies
+    const isMicrosoft = (domain) => {
+        const host = domain.replace(/^\./, '')
+        return MICROSOFT_COOKIE_DOMAINS.some((d) => host === d || host.endsWith(`.${d}`))
+    }
+
+    const stale = (await cookies.get({})).filter((cookie) => isMicrosoft(cookie.domain))
+    await Promise.all(stale.map((cookie) => {
+        const url = `https://${cookie.domain.replace(/^\./, '')}${cookie.path}`
+        return cookies.remove(url, cookie.name)
+    }))
+
+    if (stale.length > 0) logger.info(`Removed ${stale.length} Microsoft cookies from the default session`)
 }

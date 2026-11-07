@@ -1,7 +1,10 @@
 import { Channels } from '../../shared/channels'
 import { handle } from './result'
+import Logger from '../utils/Logger'
 import AuthManager from '../managers/AuthManager'
-import { createMsftAuthWindow } from '../windows/msftAuth'
+import { createMsftAuthWindow, clearMsftAuthSession } from '../windows/msftAuth'
+
+const logger = Logger.getLogger('AuthIPC')
 
 export function registerAuthIPC(mainWindow) {
   handle(Channels.AUTH_MSFT_LOGIN, async () => {
@@ -25,6 +28,9 @@ export function registerAuthIPC(mainWindow) {
     AuthManager.removeAccount(uuid)
     // Re-arms against whatever account is left, or disarms when none is.
     AuthManager.scheduleTokenRefresh()
+    // The account is already gone from config.json; a failure here only means the sign-in
+    // window may still remember it until the launcher restarts (its partition is in memory).
+    await clearMsftAuthSession().catch((err) => logger.warn('Could not clear the sign-in session', err))
   })
 
   handle(Channels.AUTH_VALIDATE, async () => {

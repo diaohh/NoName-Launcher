@@ -21,6 +21,13 @@ local working material and are never committed (latest: `2026-09-17-auditoria.md
 findings are in `TODO.md`, marked 📋 and tagged `S`/`B`/`D` + number, which points back to the
 report's tables. If you have the report, read it before touching an area it flags.
 
+**TypeScript migration in progress.** [`TODO-Migracion.md`](TODO-Migracion.md) is a temporary
+checklist for it and for the steps that prepare it (Electron 44, Vitest), split into phases.
+Migration work lands on the `migration` integration branch through per-phase PRs, never on
+`main` directly. Read the checklist before starting migration work, mark items `[x]` with date and commit instead of
+deleting them, and update the docs each phase lists before calling the phase done. It is
+deleted when the migration closes.
+
 ## Commands
 
 ```bash
@@ -152,6 +159,7 @@ Rules when touching auth ([ADR-0007](docs/adr/0007-encrypt-account-secrets-with-
 - `validateSelectedMicrosoftAccount` returns `{ ok, code, message }`, never a boolean.
 - The refresh is **scheduled from `expiresAt`**, not polled: `AuthManager.startTokenRefreshScheduler` arms a `setTimeout` 5 min before expiry, bounded to `[15 s, 30 min]`, backs off `[1, 2, 5, 10 min]` on a recoverable failure and notifies the renderer only on a terminal one. Starting is idempotent, and `powerMonitor.on('resume')` re-checks after a suspend. Re-arm it with `scheduleTokenRefresh()` after anything that changes the selected account.
 - Never send the Minecraft `accessToken` to the renderer; the renderer only needs `username`/`uuid`/`displayName`.
+- The Microsoft sign-in window runs in its own **in-memory** partition (`msft-auth` in `windows/msftAuth.js`), never in the default session, and the logout handler empties it. Microsoft's cookies are a live web session for the player's account: they must not reach the disk nor outlive a logout. `purgeLegacyAuthCookies` removes the ones older versions left in the default session.
 - `microsoft.expires_at` is the expiry of the MS **access** token (~1 h), not of the refresh token (~90 days). Never treat it as "the session is over".
 - A decryption failure costs the session only: `purgeSession` clears `authenticationDatabase` and `selectedAccount` and leaves every setting alone. If `safeStorage.isEncryptionAvailable()` is false, credentials are **not persisted at all** rather than written in plaintext.
 - `usersAllowed` filtering in `firestoreService` is UX only ([ADR-0006](docs/adr/0006-usersallowed-is-ux-not-access-control.md)), and cannot currently be enforced in Security Rules either — the launcher has no Firebase identity, so `request.auth` is always `null`. See the stand-by entry in `TODO.md`.
@@ -415,7 +423,7 @@ Nothing app-side is still open from the 2026-09-17 audit; B1 (publishing) is in 
 - The working tree is CRLF (`core.autocrlf=true`). Scripted edits must match `\r\n`, and a `\uXXXX` escape typed into a tool call can arrive as the literal character — check regexes like `/^\uFEFF/` after writing them.
 - The TypeScript migration (TODO P5) does **not** depend on the ESM migration: electron-vite still emits the sandboxed preload as CJS from a `.ts` source.
 - `pnpm-lock.yaml` is the only lockfile; the stale `package-lock.json` has been removed.
-- Renderer bundle is ~1.2 MB, dominated by the Firebase SDK; only `getDoc`/`getDocs` are used, so `firebase/firestore/lite` is enough.
+- The renderer reads Firestore through `firebase/firestore/lite` (REST, no realtime, no offline queue); the initial chunk is ~0.9 MB. Do not import from `firebase/firestore`: it pulls the full SDK back in (~320 KB more) for nothing, since only one-off `getDoc`/`getDocs` reads are made. Lite has no request deadline, so the timeout race in `firestoreService` stays ([ADR-0009](docs/adr/0009-no-offline-mode.md)).
 - The skin manager is a **lazy chunk** (`React.lazy` in `HomeScreen`, ~900 KB minified, almost all three.js via `skinview3d`). Anything the home screen imports must not reach `skinview3d` or `skinview-utils`, or the chunk folds back into the initial bundle — that is why `SkinHead` carries its own CSS instead of importing `services/skinTextures.js`. The same holds for `SkinManagerSkeleton` (the Suspense fallback **and** the screen's own loading state, so loading is one continuous skeleton), the `SkinManagerLayout` frame it shares with the screen, `SkinCard` and `common/Spinner`, which all end up in the initial bundle. `skinview3d` pins three.js `^0.156`; check its release before bumping three on its own.
 
 ## Commits
