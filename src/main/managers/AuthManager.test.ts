@@ -1,18 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import { MicrosoftErrorCode } from 'helios-core/microsoft'
+import { RestResponseStatus } from 'helios-core/common'
 import AuthManager from './AuthManager'
 import { ERROR_CODE, isTerminalAuthCode } from '../../shared/errorCodes'
 
 /** What helios-core hands back for a failed request: it never throws, it returns this. */
-const failedResponse = (error, extra = {}) => ({ responseStatus: 'ERROR', error, ...extra })
+const failedResponse = (error: Error, extra: { microsoftErrorCode?: MicrosoftErrorCode } = {}) =>
+    ({ responseStatus: RestResponseStatus.ERROR, error, ...extra })
 
 /** got's `RequestError` with an HTTP answer attached. */
-function httpError(statusCode, body) {
+function httpError(statusCode: number, body: string) {
     return Object.assign(new Error(`Response code ${statusCode}`), { response: { statusCode, body } })
 }
 
 /** A request that never reached Microsoft: no `response` at all. */
-function transportError(code) {
+function transportError(code: string) {
     return Object.assign(new Error(code), { code })
 }
 

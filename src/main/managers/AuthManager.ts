@@ -1,12 +1,46 @@
 import { powerMonitor } from 'electron'
-import { MicrosoftAuth, MicrosoftErrorCode } from 'helios-core/microsoft'
+import { MicrosoftAuth, MicrosoftErrorCode, type MicrosoftResponse } from 'helios-core/microsoft'
 import { RestResponseStatus } from 'helios-core/common'
 import ConfigManager from './ConfigManager'
 import Logger from '../utils/Logger'
 import { MICROSOFT_CLIENT_ID } from '../constants'
-import { ERROR_CODE, isTerminalAuthCode } from '../../shared/errorCodes'
+import { ERROR_CODE, isTerminalAuthCode, type ErrorCode } from '../../shared/errorCodes'
+import { LauncherError, errorCodeOf } from '../../shared/LauncherError'
+import type { AccountValidation, SessionExpired } from '../../shared/ipcContract'
+import type { Account } from '../types/config'
 
 const logger = Logger.getLogger('AuthManager')
+
+/**
+ * What `classifyRestError` reads from a failed helios response: got's `RequestError`, with or
+ * without an HTTP answer, and the Microsoft code helios worked out from the body. got is not a
+ * dependency of the launcher, so its error is described here by the fields that are read.
+ */
+interface FailedResponse {
+    error?: unknown
+    microsoftErrorCode?: MicrosoftErrorCode
+}
+
+interface HttpFailure {
+    code?: unknown
+    response?: { statusCode?: number, body?: unknown }
+}
+
+/** A Microsoft token set, as `exchangeAuthCode` / `exchangeRefreshToken` return it. */
+export interface MicrosoftTokenSet {
+    accessToken: string
+    refreshToken: string
+    expiresAt: number
+}
+
+/** A playable Minecraft session, as `resolveMinecraftSession` returns it. */
+export interface MinecraftSession {
+    accessToken: string
+    username: string
+    uuid: string
+    displayName: string
+    mcExpires: number
+}
 
 /** got reports a request that never reached the server with one of these and no response. */
 const TRANSPORT_ERROR_CODES = new Set([
@@ -39,34 +73,38 @@ const MESSAGES = {
 
 class AuthManager {
 
-    static refreshTimer = null
-    static onSessionExpired = null
-    static resumeListener = null
+    static refreshTimer: NodeJS.Timeout | null = null
+    static onSessionExpired: ((payload: SessionExpired) => void) | null = null
+    static resumeListener: (() => void) | null = null
     static retryAttempt = 0
-    static validationInFlight = null
+    static validationInFlight: Promise<AccountValidation> | null = null
 
-    static authError(code, message, cause) {
-        const error = new Error(message)
-        error.code = code
-        if (cause) error.cause = cause
-        return error
+    static authError(code: ErrorCode, message: string, cause?: unknown): LauncherError {
+        return new LauncherError(code, message, cause ?? undefined)
     }
 
     /** True when the failure means the session is gone for good. */
-    static isTerminalError(code) {
+    static isTerminalError(code: unknown): boolean {
         return isTerminalAuthCode(code)
     }
 
     /** Microsoft answers OAuth failures with a JSON body carrying an `error` field. */
-    static readOAuthError(cause) {
+    static readOAuthError(cause: HttpFailure | undefined): string | null {
         const body = cause?.response?.body
         if (!body) return null
         try {
-            const parsed = typeof body === 'string' ? JSON.parse(body) : body
-            return parsed?.error ?? null
+            const parsed: unknown = typeof body === 'string' ? JSON.parse(body) : body
+            const error = (parsed as { error?: unknown } | null)?.error
+            return typeof error === 'string' ? error : null
         } catch {
             return null
         }
+    }
+
+    /** The body of a successful helios response, which helios only leaves empty on an error. */
+    static dataOf<T>(response: MicrosoftResponse<T | null>): T {
+        if (response.data == null) throw this.authError(ERROR_CODE.AUTH_UNKNOWN, MESSAGES.UNKNOWN)
+        return response.data
     }
 
     /**
@@ -78,8 +116,12 @@ class AuthManager {
      * @param terminalFallback MicrosoftErrorCode to assume for an unexplained 4xx on
      *                         endpoints where one failure mode dominates.
      */
-    static classifyRestError(operation, response, terminalFallback = null) {
-        const cause = response?.error
+    static classifyRestError(
+        operation: string,
+        response: FailedResponse | undefined,
+        terminalFallback: MicrosoftErrorCode | null = null
+    ): LauncherError {
+        const cause = response?.error as HttpFailure | undefined
         const statusCode = cause?.response?.statusCode
 
         // UNKNOWN is helios' default, so it carries no information — only a specific
@@ -101,7 +143,8 @@ class AuthManager {
         }
 
         const oauthError = this.readOAuthError(cause)
-        if (statusCode === 401 || ['invalid_grant', 'invalid_client', 'unauthorized_client', 'interaction_required', 'consent_required'].includes(oauthError)) {
+        const rejectsCredentials = ['invalid_grant', 'invalid_client', 'unauthorized_client', 'interaction_required', 'consent_required']
+        if (statusCode === 401 || (oauthError != null && rejectsCredentials.includes(oauthError))) {
             logger.warn(`${operation} rejected the stored credentials (${oauthError ?? `HTTP ${statusCode}`})`)
             return this.authError(ERROR_CODE.AUTH_INVALID_GRANT, MESSAGES.INVALID_GRANT, cause)
         }
@@ -116,10 +159,11 @@ class AuthManager {
     }
 
     /** Classifies an exception that escaped a helios call instead of being returned. */
-    static classifyThrown(err) {
-        if (typeof err?.code === 'string' && err.code.startsWith('AUTH_')) return err
-        if (TRANSPORT_ERROR_CODES.has(err?.code)) {
-            logger.warn(`Microsoft auth failed at the transport layer (${err.code})`)
+    static classifyThrown(err: unknown): LauncherError {
+        if (err instanceof LauncherError && err.code.startsWith('AUTH_')) return err
+        const code = (err as { code?: unknown } | null)?.code
+        if (typeof code === 'string' && TRANSPORT_ERROR_CODES.has(code)) {
+            logger.warn(`Microsoft auth failed at the transport layer (${code})`)
             return this.authError(ERROR_CODE.AUTH_NETWORK, MESSAGES.NETWORK, err)
         }
         logger.error('Unexpected Microsoft auth error:', err)
@@ -129,9 +173,8 @@ class AuthManager {
     /**
      * Trades a fresh authorization code for a Microsoft token set.
      *
-     * @returns {Promise<{accessToken: string, refreshToken: string, expiresAt: number}>}
      */
-    static async exchangeAuthCode(authCode) {
+    static async exchangeAuthCode(authCode: string): Promise<MicrosoftTokenSet> {
         return await this.requestMicrosoftTokens(authCode, false)
     }
 
@@ -139,11 +182,11 @@ class AuthManager {
      * Trades a stored refresh token for a new Microsoft token set. Microsoft rotates the
      * refresh token, so the caller must persist the one that comes back.
      */
-    static async exchangeRefreshToken(refreshToken) {
+    static async exchangeRefreshToken(refreshToken: string): Promise<MicrosoftTokenSet> {
         return await this.requestMicrosoftTokens(refreshToken, true)
     }
 
-    static async requestMicrosoftTokens(credential, isRefresh) {
+    static async requestMicrosoftTokens(credential: string, isRefresh: boolean): Promise<MicrosoftTokenSet> {
         try {
             const response = await MicrosoftAuth.getAccessToken(credential, isRefresh, MICROSOFT_CLIENT_ID)
 
@@ -153,10 +196,11 @@ class AuthManager {
 
             logger.info(`Microsoft access token obtained (${isRefresh ? 'refresh' : 'auth code'})`)
 
+            const data = this.dataOf(response)
             return {
-                accessToken: response.data.access_token,
-                refreshToken: response.data.refresh_token,
-                expiresAt: this.calculateExpiryDate(new Date().getTime(), response.data.expires_in)
+                accessToken: data.access_token,
+                refreshToken: data.refresh_token,
+                expiresAt: this.calculateExpiryDate(new Date().getTime(), data.expires_in)
             }
         } catch (err) {
             // Never flatten a classified failure back into UNKNOWN: losing the code here
@@ -172,9 +216,8 @@ class AuthManager {
      * This is the half that never depends on how the Microsoft token was obtained, which
      * is why refreshing only the Minecraft token is just calling this on the stored one.
      *
-     * @returns {Promise<{accessToken, username, uuid, displayName, mcExpires}>}
      */
-    static async resolveMinecraftSession(msAccessToken) {
+    static async resolveMinecraftSession(msAccessToken: string): Promise<MinecraftSession> {
         try {
             const xblResponse = await MicrosoftAuth.getXBLToken(msAccessToken)
             if (xblResponse.responseStatus !== RestResponseStatus.SUCCESS) {
@@ -183,22 +226,23 @@ class AuthManager {
 
             logger.info('XBL token obtained')
 
-            const xstsResponse = await MicrosoftAuth.getXSTSToken(xblResponse.data)
+            const xstsResponse = await MicrosoftAuth.getXSTSToken(this.dataOf(xblResponse))
             if (xstsResponse.responseStatus !== RestResponseStatus.SUCCESS) {
                 throw this.classifyRestError('getXSTSToken', xstsResponse)
             }
 
             logger.info('XSTS token obtained')
 
-            const mcTokenResponse = await MicrosoftAuth.getMCAccessToken(xstsResponse.data)
+            const mcTokenResponse = await MicrosoftAuth.getMCAccessToken(this.dataOf(xstsResponse))
             if (mcTokenResponse.responseStatus !== RestResponseStatus.SUCCESS) {
                 throw this.classifyRestError('getMCAccessToken', mcTokenResponse)
             }
 
-            const mcAccessToken = mcTokenResponse.data.access_token
+            const mcToken = this.dataOf(mcTokenResponse)
+            const mcAccessToken = mcToken.access_token
             const mcExpires = this.calculateExpiryDate(
                 new Date().getTime(),
-                mcTokenResponse.data.expires_in
+                mcToken.expires_in
             )
 
             logger.info('Minecraft access token obtained')
@@ -210,7 +254,7 @@ class AuthManager {
                 throw this.classifyRestError('getMCProfile', mcProfileResponse, MicrosoftErrorCode.NO_PROFILE)
             }
 
-            const mcProfile = mcProfileResponse.data
+            const mcProfile = this.dataOf(mcProfileResponse)
             logger.info('Minecraft profile obtained:', mcProfile.name)
 
             return {
@@ -225,7 +269,7 @@ class AuthManager {
         }
     }
 
-    static async addMicrosoftAccount(authCode) {
+    static async addMicrosoftAccount(authCode: string): Promise<MinecraftSession> {
         const microsoft = await this.exchangeAuthCode(authCode)
         const session = await this.resolveMinecraftSession(microsoft.accessToken)
 
@@ -258,7 +302,7 @@ class AuthManager {
      * refresh races the first, the last write wins, and an `invalid_grant` from the loser is
      * terminal. Concurrent callers share the validation already in progress instead.
      */
-    static validateSelectedMicrosoftAccount() {
+    static validateSelectedMicrosoftAccount(): Promise<AccountValidation> {
         if (!this.validationInFlight) {
             this.validationInFlight = this.runAccountValidation().finally(() => {
                 this.validationInFlight = null
@@ -267,7 +311,7 @@ class AuthManager {
         return this.validationInFlight
     }
 
-    static async runAccountValidation() {
+    static async runAccountValidation(): Promise<AccountValidation> {
         const uuid = ConfigManager.getSelectedAccount()
         if (!uuid) {
             logger.warn('No account selected')
@@ -297,7 +341,7 @@ class AuthManager {
             }
             return { ok: true }
         } catch (err) {
-            const code = err?.code ?? ERROR_CODE.AUTH_UNKNOWN
+            const code = errorCodeOf(err, ERROR_CODE.AUTH_UNKNOWN)
 
             if (this.isTerminalError(code)) {
                 logger.warn(`Refresh failed with a terminal error (${code}), logging out user`)
@@ -312,12 +356,12 @@ class AuthManager {
                 logger.warn(`Refresh failed with a recoverable error (${code}), keeping the account`)
             }
 
-            return { ok: false, code, message: err?.message ?? MESSAGES.UNKNOWN }
+            return { ok: false, code, message: (err instanceof Error && err.message) || MESSAGES.UNKNOWN }
         }
     }
 
     /** The Microsoft token is still good, so only the Minecraft half is renewed. */
-    static async refreshMCToken(account) {
+    static async refreshMCToken(account: Account): Promise<void> {
         logger.info('Attempting to refresh MC token for account:', account.uuid)
         const session = await this.resolveMinecraftSession(account.microsoft.access_token)
 
@@ -335,7 +379,7 @@ class AuthManager {
     }
 
     /** Both tokens have expired: renew the Microsoft one, then the Minecraft session. */
-    static async refreshMSToken(account) {
+    static async refreshMSToken(account: Account): Promise<void> {
         logger.info('Attempting to refresh MS token for account:', account.uuid)
         const microsoft = await this.exchangeRefreshToken(account.microsoft.refresh_token)
         const session = await this.resolveMinecraftSession(microsoft.accessToken)
@@ -353,13 +397,13 @@ class AuthManager {
         logger.info('MS and MC tokens refreshed successfully')
     }
 
-    static getSelectedAccount() {
+    static getSelectedAccount(): Account | null {
         const uuid = ConfigManager.getSelectedAccount()
         if (!uuid) return null
         return ConfigManager.getAccountByUUID(uuid)
     }
 
-    static async removeAccount(uuid) {
+    static async removeAccount(uuid: string): Promise<void> {
         ConfigManager.removeAccount(uuid)
         await ConfigManager.save()
         logger.info('Account removed:', uuid)
@@ -376,7 +420,7 @@ class AuthManager {
      * @param onExpired Called only when the session is gone for a terminal reason. A network
      *                  failure never reaches it — see ADR-0007.
      */
-    static startTokenRefreshScheduler(onExpired) {
+    static startTokenRefreshScheduler(onExpired: (payload: SessionExpired) => void): void {
         this.stopTokenRefreshScheduler()
         this.onSessionExpired = onExpired
 
@@ -392,7 +436,7 @@ class AuthManager {
         this.scheduleTokenRefresh()
     }
 
-    static stopTokenRefreshScheduler() {
+    static stopTokenRefreshScheduler(): void {
         if (this.refreshTimer) {
             clearTimeout(this.refreshTimer)
             this.refreshTimer = null
@@ -415,7 +459,7 @@ class AuthManager {
      * `microsoft.expires_at`, which belongs to the Microsoft *access* token and says nothing
      * about whether the session can still be renewed.
      */
-    static scheduleTokenRefresh(delayOverride = null) {
+    static scheduleTokenRefresh(delayOverride: number | null = null): void {
         if (this.refreshTimer) {
             clearTimeout(this.refreshTimer)
             this.refreshTimer = null
@@ -436,12 +480,12 @@ class AuthManager {
      * The scheduled check, run through the same path a launch uses so there is a single
      * definition of "is this session still good".
      */
-    static async runScheduledRefresh() {
+    static async runScheduledRefresh(): Promise<void> {
         this.refreshTimer = null
 
         const uuid = ConfigManager.getSelectedAccount()
         const account = uuid ? ConfigManager.getAccountByUUID(uuid) : null
-        if (!account || account.type !== 'microsoft') return
+        if (!uuid || !account || account.type !== 'microsoft') return
 
         // Woken by the ceiling rather than by the expiry: nothing to do yet.
         if (account.expiresAt - new Date().getTime() > REFRESH_SKEW_MS) {
@@ -473,7 +517,7 @@ class AuthManager {
         if (notify) notify({ expired: true, message: result.message })
     }
 
-    static calculateExpiryDate(nowMs, expiresInS) {
+    static calculateExpiryDate(nowMs: number, expiresInS: number): number {
         return nowMs + ((expiresInS - 10) * 1000)
     }
 
@@ -482,7 +526,7 @@ class AuthManager {
      * `{ title, desc }` object, which does not survive `ipcMain.handle` — that is why
      * a failed login showed the user the word "undefined".
      */
-    static microsoftError(errorCode, cause) {
+    static microsoftError(errorCode: MicrosoftErrorCode, cause?: unknown): LauncherError {
         switch (errorCode) {
             case MicrosoftErrorCode.NO_PROFILE:
                 return this.authError(
