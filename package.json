@@ -7,10 +7,10 @@
   "author": "diaoh",
   "license": "MIT",
   "scripts": {
-    "dev": "electron-vite dev",
+    "dev": "install-electron && electron-vite dev",
     "lint": "eslint .",
     "build": "electron-vite build",
-    "preview": "electron-vite preview",
+    "preview": "install-electron && electron-vite preview",
     "package": "electron-vite build && electron-builder --win",
     "package:linux": "electron-vite build && electron-builder --linux",
     "package:mac": "electron-vite build && electron-builder --mac"
@@ -18,7 +18,6 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "@firebase/util",
-      "electron",
       "electron-winstaller",
       "esbuild",
       "protobufjs"
@@ -36,9 +35,9 @@
     "@stylistic/eslint-plugin": "^5.10.0",
     "@tailwindcss/postcss": "^4.2.1",
     "@vitejs/plugin-react": "^4.3.4",
-    "electron": "37.1.0",
+    "electron": "45.2.3",
     "electron-builder": "^26.8.1",
-    "electron-vite": "^5.0.0",
+    "electron-vite": "^6.0.0",
     "eslint": "^10.9.1",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.1.1",
