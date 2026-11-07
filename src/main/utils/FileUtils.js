@@ -19,6 +19,36 @@ export function hashFile(filePath, algo) {
 }
 
 /**
+ * Writes a file so that a crash or a power cut leaves either the old contents or the new
+ * ones, never a truncated file: the data goes to a temporary file that is flushed to disk
+ * and then renamed over the target. Throws the underlying error; callers word their own.
+ *
+ * @param {string} filePath
+ * @param {string|Buffer} data
+ */
+export function writeFileAtomicSync(filePath, data) {
+    const tmpPath = `${filePath}.tmp`
+
+    try {
+        const fd = fs.openSync(tmpPath, 'w')
+        try {
+            fs.writeFileSync(fd, data)
+            fs.fsyncSync(fd)
+        } finally {
+            fs.closeSync(fd)
+        }
+        fs.renameSync(tmpPath, filePath)
+    } catch (err) {
+        try {
+            fs.rmSync(tmpPath, { force: true })
+        } catch {
+            // Nothing more to do; the next write overwrites it.
+        }
+        throw err
+    }
+}
+
+/**
  * Checks that a local file exists and matches the expected hash.
  * A missing expected hash means "existence is enough" — some artifacts are
  * published without a checksum.

@@ -4,6 +4,7 @@ import os from 'os'
 import { safeStorage } from 'electron'
 import Logger from '../utils/Logger'
 import { resolveInside } from '../utils/PathUtils'
+import { writeFileAtomicSync } from '../utils/FileUtils'
 import { ERROR_CODE } from '../../shared/errorCodes'
 
 const logger = Logger.getLogger('ConfigManager')
@@ -67,6 +68,7 @@ class ConfigManager {
     static getLogsDirectory() {
         return path.join(this.getLauncherDirectory(), 'logs')
     }
+
 
     /**
      * Records the game the launcher started, so a launcher opened while that game is still
@@ -359,23 +361,10 @@ class ConfigManager {
      */
     static save() {
         const data = JSON.stringify(this.toDiskConfig(), null, 4)
-        const tmpPath = `${this.configPath}.tmp`
 
         try {
-            const fd = fs.openSync(tmpPath, 'w')
-            try {
-                fs.writeFileSync(fd, data, 'utf-8')
-                fs.fsyncSync(fd)
-            } finally {
-                fs.closeSync(fd)
-            }
-            fs.renameSync(tmpPath, this.configPath)
+            writeFileAtomicSync(this.configPath, data)
         } catch (err) {
-            try {
-                fs.removeSync(tmpPath)
-            } catch {
-                // Nothing more to do; the next save overwrites it.
-            }
             logger.error('Failed to save config', err)
 
             const error = new Error('No se ha podido guardar la configuracion. Comprueba que hay espacio en disco y permiso de escritura.')
