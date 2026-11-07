@@ -3,13 +3,23 @@ import fs from 'fs-extra'
 import crypto from 'crypto'
 import ConfigManager from './ConfigManager'
 import Logger from '../utils/Logger'
+import { POLICIES } from '../utils/PackPolicy'
 import { isSafeRelativePath } from '../utils/PathUtils'
 import { fetchWithTimeout } from '../utils/HttpUtils'
-import { ERROR_CODE } from '../../shared/errorCodes'
+import { ERROR_CODE, type ErrorCode } from '../../shared/errorCodes'
+import { LauncherError } from '../../shared/LauncherError'
+import type { ManifestPointer, PackManifest } from '../types/manifest'
 
 const logger = Logger.getLogger('ManifestManager')
 
 const SUPPORTED_FORMAT_VERSION = 1
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+    value != null && typeof value === 'object' && !Array.isArray(value)
+
+const isOptional = (value: unknown, check: (value: unknown) => boolean) => value === undefined || check(value)
+
+const isPolicy = (value: unknown) => (POLICIES as readonly unknown[]).includes(value)
 
 /**
  * Fetches and verifies the modpack manifest published to the CDN.
@@ -24,7 +34,7 @@ class ManifestManager {
      * so the base is derived instead of stored. Moving to a custom domain is then a
      * single Firestore field change, with no manifest to regenerate.
      */
-    static deriveBaseUrl(manifestUrl) {
+    static deriveBaseUrl(manifestUrl: string): string {
         const marker = '/manifest.json'
         if (!manifestUrl.endsWith(marker)) {
             throw this.manifestError(ERROR_CODE.MANIFEST_INVALID, `La URL del manifest debe terminar en ${marker}: ${manifestUrl}`)
@@ -32,53 +42,84 @@ class ManifestManager {
         return manifestUrl.slice(0, -marker.length)
     }
 
-    static manifestError(code, message) {
-        const error = new Error(message)
-        error.code = code
-        return error
+    static manifestError(code: ErrorCode, message: string, cause?: unknown): LauncherError {
+        return new LauncherError(code, message, cause)
     }
 
     /** Mod filenames contain spaces and brackets, so every segment is encoded. */
-    static fileUrl(baseUrl, relativePath) {
+    static fileUrl(baseUrl: string, relativePath: string): string {
         const encoded = relativePath.split('/').map(encodeURIComponent).join('/')
         return `${baseUrl}/files/${encoded}`
     }
 
-    static cachePath(hash) {
+    static cachePath(hash: string): string {
         return path.join(ConfigManager.getDataDirectory(), 'manifests', `${hash}.json`)
     }
 
-    static assertShape(manifest) {
-        if (manifest?.formatVersion !== SUPPORTED_FORMAT_VERSION) {
+    /**
+     * The manifest's shape, checked before anything reads it as a `PackManifest`: the bytes
+     * come from the network, and a hash only proves they are the published ones.
+     */
+    static assertShape(manifest: unknown): asserts manifest is PackManifest {
+        const invalid = (message: string) => this.manifestError(ERROR_CODE.MANIFEST_INVALID, message)
+
+        if (!isPlainObject(manifest) || manifest.formatVersion !== SUPPORTED_FORMAT_VERSION) {
+            const found = isPlainObject(manifest) ? manifest.formatVersion : undefined
             throw this.manifestError(
                 ERROR_CODE.UNSUPPORTED_MANIFEST_FORMAT,
-                `El manifest usa el formato ${manifest?.formatVersion} y este launcher entiende ` +
+                `El manifest usa el formato ${found} y este launcher entiende ` +
                 `el ${SUPPORTED_FORMAT_VERSION}. Actualiza el launcher.`
             )
         }
 
-        if (!Array.isArray(manifest.files)) throw this.manifestError(ERROR_CODE.MANIFEST_INVALID, 'El manifest no contiene "files"')
-        if (!manifest.minecraft?.version) throw this.manifestError(ERROR_CODE.MANIFEST_INVALID, 'El manifest no declara "minecraft.version"')
+        const { files, minecraft, loader, policies, ignore } = manifest
+
+        if (!Array.isArray(files)) throw invalid('El manifest no contiene "files"')
+        if (!isPlainObject(minecraft) || typeof minecraft.version !== 'string' || !minecraft.version) {
+            throw invalid('El manifest no declara "minecraft.version"')
+        }
+
+        // Every path collected here is joined onto the instance directory, for writing or
+        // deleting. A hash only proves the manifest is the published one, so they are checked too.
+        const paths: unknown[] = []
 
         // A missing hash used to mean "existence is enough", which silently froze files
         // at whatever version the player already had. It is an error now.
-        for (const file of manifest.files) {
-            if (!file.path || !file.hash || typeof file.size !== 'number') {
-                throw this.manifestError(ERROR_CODE.MANIFEST_INVALID, `Entrada de manifest invalida: ${JSON.stringify(file)}`)
-            }
+        for (const file of files) {
+            const valid = isPlainObject(file)
+                && typeof file.path === 'string' && file.path
+                && typeof file.hash === 'string' && file.hash
+                && typeof file.size === 'number'
+                && isOptional(file.policy, isPolicy)
+            if (!valid) throw invalid(`Entrada de manifest invalida: ${JSON.stringify(file)}`)
+            paths.push(file.path)
         }
 
-        // Every path below is joined onto the instance directory, for writing or deleting.
-        // A hash only proves the manifest is the published one, so its paths are checked too.
-        const paths = [
-            ...manifest.files.map(file => file.path),
-            ...(manifest.policies || []).map(rule => rule?.path?.replace(/\/+$/, '')),
-            ...(manifest.loader?.installer ? [manifest.loader.installer.path] : [])
-        ]
+        const rules: unknown = policies ?? []
+        if (!Array.isArray(rules)) throw invalid('El manifest contiene "policies" invalidas')
+        for (const rule of rules) {
+            if (!isPlainObject(rule) || typeof rule.path !== 'string' || !isPolicy(rule.policy)) {
+                throw invalid(`Regla de manifest invalida: ${JSON.stringify(rule)}`)
+            }
+            paths.push(rule.path.replace(/\/+$/, ''))
+        }
+
+        if (!isOptional(ignore, value => Array.isArray(value) && value.every(pattern => typeof pattern === 'string'))) {
+            throw invalid('El manifest contiene un "ignore" invalido')
+        }
+
+        if (loader !== undefined) {
+            const valid = isPlainObject(loader)
+                && typeof loader.type === 'string'
+                && isOptional(loader.version, version => typeof version === 'string')
+                && isOptional(loader.installer, installer => isPlainObject(installer) && typeof installer.path === 'string')
+            if (!valid) throw invalid('El manifest declara un "loader" invalido')
+            if (isPlainObject(loader.installer)) paths.push(loader.installer.path)
+        }
 
         const unsafe = paths.find(relativePath => !isSafeRelativePath(relativePath))
         if (unsafe !== undefined) {
-            throw this.manifestError(ERROR_CODE.MANIFEST_INVALID, `El manifest contiene una ruta no permitida: ${JSON.stringify(unsafe)}`)
+            throw invalid(`El manifest contiene una ruta no permitida: ${JSON.stringify(unsafe)}`)
         }
     }
 
@@ -86,21 +127,16 @@ class ManifestManager {
      * The published bytes, parsed. The hash is always taken over the bytes themselves (see
      * `fetch`), so a UTF-8 BOM is only stripped here, for `JSON.parse`, never before hashing.
      */
-    static parse(bytes) {
+    static parse(bytes: Buffer): unknown {
         try {
             return JSON.parse(bytes.toString('utf8').replace(/^\uFEFF/, ''))
         } catch (err) {
-            const error = this.manifestError(ERROR_CODE.MANIFEST_INVALID, 'El manifest publicado no es un JSON valido.')
-            error.cause = err
-            throw error
+            throw this.manifestError(ERROR_CODE.MANIFEST_INVALID, 'El manifest publicado no es un JSON valido.', err)
         }
     }
 
-    /**
-     * @param {{url: string, hash: string, version?: string}} ref The Firestore pointer.
-     * @returns {Promise<{manifest: object, baseUrl: string}>}
-     */
-    static async fetch(ref) {
+    /** @param ref The Firestore pointer. */
+    static async fetch(ref: ManifestPointer | null | undefined): Promise<{ manifest: PackManifest, baseUrl: string }> {
         if (!ref || !ref.url || !ref.hash) {
             throw this.manifestError(
                 ERROR_CODE.MANIFEST_MISSING,
@@ -126,7 +162,9 @@ class ManifestManager {
 
         logger.info('Fetching manifest:', ref.url)
 
-        const response = await fetchWithTimeout(ref.url, 'el manifest del modpack', { cache: 'no-store' })
+        // Node's fetch keeps no HTTP cache, so there is nothing to bypass here; a stale copy
+        // served by the CDN fails the hash check below.
+        const response = await fetchWithTimeout(ref.url, 'el manifest del modpack')
         if (!response.ok) {
             throw this.manifestError(
                 ERROR_CODE.MANIFEST_DOWNLOAD_FAILED,
@@ -158,8 +196,7 @@ class ManifestManager {
         return { manifest, baseUrl }
     }
 
-    /** @param {Buffer} bytes */
-    static sha256(bytes) {
+    static sha256(bytes: Buffer): string {
         return crypto.createHash('sha256').update(bytes).digest('hex')
     }
 }

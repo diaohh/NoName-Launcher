@@ -6,15 +6,60 @@ import { hashFile, validateLocalFile } from '../utils/FileUtils'
 import { compileIgnore, resolvePolicy, strictRoots } from '../utils/PackPolicy'
 import { isSafeRelativePath, resolveInside } from '../utils/PathUtils'
 import { ERROR_CODE } from '../../shared/errorCodes'
+import { LauncherError } from '../../shared/LauncherError'
+import type { StepProgress } from '../../shared/launchProgress'
+import type { ManifestPointer, ModpackRam } from '../../shared/modpack'
+import type { ManifestFile, PackManifest } from '../types/manifest'
 import path from 'path'
 import fs from 'fs-extra'
 
 const logger = Logger.getLogger('DistributionManager')
 
-const toMB = (bytes) => (bytes / 1024 / 1024).toFixed(1)
+const toMB = (bytes: number) => (bytes / 1024 / 1024).toFixed(1)
 
 const STATE_FILE = '.nnl-state.json'
 const STATE_VERSION = 1
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+    value != null && typeof value === 'object' && !Array.isArray(value)
+
+/**
+ * The part of the modpack document main reads (`Modpack` in `shared/modpack` is the whole
+ * of it), checked by `parseServerData`.
+ */
+export interface ServerData {
+    id: string
+    name: string
+    maintenance: boolean
+    maintenanceMessage: string | null
+    /** Null when the document has no usable pointer; the launch stops with MANIFEST_MISSING. */
+    manifest: ManifestPointer | null
+    /** Only values the JVM can read (`4G`, `4096M`); anything else leaves the launcher's own. */
+    java: ModpackRam
+}
+
+/** The selected modpack. Wrapped because the launch flow has always read `rawServer`. */
+export interface SelectedServer {
+    rawServer: ServerData
+}
+
+/** What the launcher wrote into an instance: per path, the hash it verified and the file's stat. */
+interface StateEntry {
+    hash: string
+    size: number
+    mtimeMs: number
+}
+
+/** `seed` files the launcher never wrote are kept with a null entry until they are cleaned up. */
+type InstanceState = Record<string, StateEntry | null>
+
+export interface SyncPlan {
+    toDownload: ManifestFile[]
+    toDelete: string[]
+    state: InstanceState
+}
+
+type ProgressCallback = (progress: StepProgress) => void
 
 /**
  * Keeps a modpack instance in sync with its published manifest.
@@ -24,25 +69,55 @@ const STATE_VERSION = 1
  */
 class DistributionManager {
 
-    static selectedServer = null
+    static selectedServer: SelectedServer | null = null
 
     /**
      * Stores the modpack document sent by the renderer. `modules` no longer exists:
      * everything about files and the mod loader now comes from the manifest.
      */
-    static async setServerData(serverData) {
-        // The id becomes a directory name, so it is checked before anything is stored.
-        this.instanceDirFor(serverData?.id)
-        this.selectedServer = { rawServer: serverData }
-        logger.info('Server data set from Firestore:', serverData.name)
-        ConfigManager.setSelectedServer(serverData.id)
+    static async setServerData(serverData: unknown): Promise<boolean> {
+        const rawServer = this.parseServerData(serverData)
+        this.selectedServer = { rawServer }
+        logger.info('Server data set from Firestore:', rawServer.name)
+        ConfigManager.setSelectedServer(rawServer.id)
         await ConfigManager.save()
         return true
     }
 
-    static getSelectedServer() { return this.selectedServer }
+    /**
+     * The fields of the modpack document main uses. It arrives from the renderer, which read
+     * it from Firestore, so neither the IPC boundary nor the network can be trusted with it:
+     * the id must be a safe directory name (MODPACK_INVALID otherwise), and an optional field
+     * of the wrong type is dropped rather than carried into the launch — a RAM value the JVM
+     * cannot read used to reach `-Xmx` as it was, and abort the game before it printed anything.
+     */
+    static parseServerData(serverData: unknown): ServerData {
+        const data = isPlainObject(serverData) ? serverData : {}
+        const id = data.id
+        // The id becomes a directory name, so it is checked before anything is stored.
+        this.instanceDirFor(id)
 
-    static getInstanceDir(server) {
+        const text = (value: unknown) => (typeof value === 'string' && value.length > 0 ? value : null)
+        const ram = (value: unknown) => (typeof value === 'string' && ConfigManager.parseRamToMB(value) != null ? value : undefined)
+
+        const manifest = data.manifest
+        const java = isPlainObject(data.java) ? data.java : {}
+
+        return {
+            id: id as string,
+            name: text(data.name) ?? (id as string),
+            maintenance: Boolean(data.maintenance),
+            maintenanceMessage: text(data.maintenanceMessage),
+            manifest: isPlainObject(manifest) && typeof manifest.url === 'string' && typeof manifest.hash === 'string'
+                ? { url: manifest.url, hash: manifest.hash, version: text(manifest.version) ?? undefined }
+                : null,
+            java: { minRam: ram(java.minRam), maxRam: ram(java.maxRam) }
+        }
+    }
+
+    static getSelectedServer(): SelectedServer | null { return this.selectedServer }
+
+    static getInstanceDir(server: SelectedServer): string {
         return this.instanceDirFor(server.rawServer.id)
     }
 
@@ -50,11 +125,9 @@ class DistributionManager {
      * `instances/<id>`. The id arrives from the renderer (it is the Firestore document id),
      * so it must be exactly one safe path segment.
      */
-    static instanceDirFor(id) {
+    static instanceDirFor(id: unknown): string {
         if (typeof id !== 'string' || id.includes('/') || !isSafeRelativePath(id)) {
-            const error = new Error(`El identificador del modpack no es valido: ${JSON.stringify(id)}`)
-            error.code = ERROR_CODE.MODPACK_INVALID
-            throw error
+            throw new LauncherError(ERROR_CODE.MODPACK_INVALID, `El identificador del modpack no es valido: ${JSON.stringify(id)}`)
         }
         return resolveInside(ConfigManager.getInstanceDirectory(), id)
     }
@@ -65,29 +138,31 @@ class DistributionManager {
      * Records what the launcher itself wrote, so an unchanged instance can be
      * verified by size and mtime instead of re-hashing hundreds of megabytes.
      */
-    static readState(instanceDir) {
+    static readState(instanceDir: string): InstanceState {
         const statePath = path.join(instanceDir, STATE_FILE)
         try {
             const state = fs.readJsonSync(statePath)
             if (state.version !== STATE_VERSION) return {}
-            return state.files || {}
+            // The launcher's own file. An entry that is not what it wrote can only fail the
+            // comparison in `planSync`, which costs a re-hash, never a wrong answer.
+            return (state.files || {}) as InstanceState
         } catch {
             return {}
         }
     }
 
-    static writeState(instanceDir, files) {
+    static writeState(instanceDir: string, files: InstanceState): void {
         const statePath = path.join(instanceDir, STATE_FILE)
         try {
             fs.ensureDirSync(instanceDir)
             fs.writeJsonSync(statePath, { version: STATE_VERSION, files })
         } catch (err) {
             // The state file is an optimization: losing it costs a re-hash, not correctness.
-            logger.warn('Could not write instance state:', err.message)
+            logger.warn('Could not write instance state:', err instanceof Error ? err.message : err)
         }
     }
 
-    static stateEntry(filePath, hash) {
+    static stateEntry(filePath: string, hash: string): StateEntry {
         const stats = fs.statSync(filePath)
         return { hash, size: stats.size, mtimeMs: stats.mtimeMs }
     }
@@ -99,14 +174,13 @@ class DistributionManager {
      *
      * @param progressCallback Receives `{ current, total, message }`; the launch `type`
      * is added by LaunchManager, which is the layer that knows it.
-     * @returns {Promise<{toDownload: Array, toDelete: Array, state: object}>}
      */
-    static async planSync(server, manifest, progressCallback) {
+    static async planSync(server: SelectedServer, manifest: PackManifest, progressCallback?: ProgressCallback): Promise<SyncPlan> {
         const instanceDir = this.getInstanceDir(server)
         const state = this.readState(instanceDir)
-        const nextState = {}
+        const nextState: InstanceState = {}
 
-        const toDownload = []
+        const toDownload: ManifestFile[] = []
         let checked = 0
 
         for (const entry of manifest.files) {
@@ -169,10 +243,10 @@ class DistributionManager {
      * manifest's `ignore` globs are honoured here too — otherwise runtime-generated
      * files such as `*.cache.json` would be deleted and recreated on every launch.
      */
-    static findOrphans(manifest, instanceDir) {
+    static findOrphans(manifest: PackManifest, instanceDir: string): string[] {
         const declared = new Set(manifest.files.map(f => f.path))
         const isIgnored = compileIgnore(manifest.ignore)
-        const orphans = []
+        const orphans: string[] = []
 
         for (const root of strictRoots(manifest.policies)) {
             const rootDir = resolveInside(instanceDir, root)
@@ -195,7 +269,7 @@ class DistributionManager {
     }
 
     /** Relative POSIX paths of every file under `dir`, expressed against `base`. */
-    static walk(dir, base, out = []) {
+    static walk(dir: string, base: string, out: string[] = []): string[] {
         for (const dirent of fs.readdirSync(dir, { withFileTypes: true })) {
             const full = path.join(dir, dirent.name)
             if (dirent.isDirectory()) this.walk(full, base, out)
@@ -206,9 +280,15 @@ class DistributionManager {
 
     // ------------------------------------------------------------------- apply
 
-    static async applySync(server, manifest, baseUrl, plan, progressCallback) {
+    static async applySync(
+        server: SelectedServer,
+        manifest: PackManifest,
+        baseUrl: string,
+        plan: SyncPlan,
+        progressCallback?: ProgressCallback
+    ): Promise<void> {
         const instanceDir = this.getInstanceDir(server)
-        const state = { ...plan.state }
+        const state: InstanceState = { ...plan.state }
 
         for (const relPath of plan.toDelete) {
             // Never step outside the instance, whatever the manifest claims.
