@@ -7,10 +7,12 @@
  * See docs/manifest.md.
  */
 
-export const POLICIES = ['strict', 'seed', 'additive', 'ignore']
+import type { FilePolicy, PolicyRule } from '../types/manifest'
+
+export const POLICIES: readonly FilePolicy[] = ['strict', 'seed', 'additive', 'ignore']
 
 /** Converts a glob (`**`, `*`, `?`) into an anchored RegExp. Only what `ignore` uses. */
-export function globToRegExp(pattern) {
+export function globToRegExp(pattern: string): RegExp {
     let re = ''
     for (let i = 0; i < pattern.length; i++) {
         const c = pattern[i]
@@ -37,14 +39,14 @@ export function globToRegExp(pattern) {
     return new RegExp(`^${re}$`)
 }
 
-export function compileIgnore(patterns) {
+export function compileIgnore(patterns: readonly string[] | undefined): (relPath: string) => boolean {
     const regexes = (patterns || []).map(globToRegExp)
     return (relPath) => regexes.some(re => re.test(relPath))
 }
 
 /** The rule whose `path` is the longest matching prefix wins. */
-export function resolvePolicy(relPath, rules) {
-    let best = null
+export function resolvePolicy(relPath: string, rules: readonly PolicyRule[] | undefined): PolicyRule | null {
+    let best: PolicyRule | null = null
     for (const rule of rules || []) {
         const rulePath = rule.path.replace(/\/+$/, '')
         if (relPath === rulePath || relPath.startsWith(`${rulePath}/`)) {
@@ -57,7 +59,7 @@ export function resolvePolicy(relPath, rules) {
 }
 
 /** Paths the launcher is allowed to delete unknown files from. */
-export function strictRoots(rules) {
+export function strictRoots(rules: readonly PolicyRule[] | undefined): string[] {
     return (rules || [])
         .filter(rule => rule.policy === 'strict')
         .map(rule => rule.path.replace(/\/+$/, ''))

@@ -7,7 +7,7 @@ import path from 'path'
  * @param {string} identifier group:artifact:version[:classifier]
  * @returns {string} Path using the platform separator.
  */
-export function mavenToRelativePath(identifier) {
+export function mavenToRelativePath(identifier: string): string {
     const [group, artifact, version, classifier] = identifier.split(':')
     const suffix = classifier ? `-${classifier}` : ''
     const fileName = `${artifact}-${version}${suffix}.jar`
@@ -17,7 +17,7 @@ export function mavenToRelativePath(identifier) {
 /**
  * Builds the download URL for a Maven identifier hosted on the given repository.
  */
-export function mavenToUrl(repositoryUrl, identifier) {
+export function mavenToUrl(repositoryUrl: string, identifier: string): string {
     const relativeUrl = mavenToRelativePath(identifier).split(path.sep).join('/')
     return `${repositoryUrl.endsWith('/') ? repositoryUrl : `${repositoryUrl}/`}${relativeUrl}`
 }

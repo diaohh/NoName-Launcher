@@ -1,3 +1,11 @@
+import type { StartupProgress } from '../../shared/launchProgress'
+
+export interface StartupMilestone {
+    pattern: RegExp
+    percent: number
+    message: string
+}
+
 /**
  * Lines Minecraft prints on its way to the title screen, in the order they normally appear,
  * and where each one puts the startup bar.
@@ -8,7 +16,7 @@
  * on 1.20.x logs — it only gets calibrated for real by launching the modpacks being shipped.
  * Each pattern is tested against one whole line (see `readLines`).
  */
-export const STARTUP_MILESTONES = [
+export const STARTUP_MILESTONES: readonly StartupMilestone[] = [
     { pattern: /Loading Minecraft \S+ with Fabric Loader/, percent: 5, message: 'Cargando Fabric Loader...' },
     { pattern: /Loading \d+ mods:/, percent: 10, message: 'Cargando mods...' },
     // "188 Datafixer optimizations took 361 milliseconds" since 1.20; "Building optimized
@@ -42,21 +50,20 @@ const GIVE_UP_MS = 3 * 60 * 1000
  * answer while nothing has been understood yet. `done` is sent exactly once; after it, the
  * tracker ignores everything, which is the latch that keeps gameplay output from moving it.
  *
- * @param {(progress: {current: number|null, total: number, message: string, done: boolean}) => void} report
- * @returns {{ feed: (lines: string[]) => void, dispose: () => void }} `dispose` stops the
- * timers without reporting; call it when the game exits or the launcher lets go of it.
+ * `dispose` stops the timers without reporting; call it when the game exits or the launcher
+ * lets go of it.
  */
-export function createStartupTracker(report) {
-    let percent = null
+export function createStartupTracker(report: (progress: StartupProgress) => void): StartupTracker {
+    let percent: number | null = null
     let done = false
-    let settleTimer = null
+    let settleTimer: NodeJS.Timeout | undefined
 
     const dispose = () => {
         clearTimeout(giveUpTimer)
         clearTimeout(settleTimer)
     }
 
-    const finish = (message) => {
+    const finish = (message: string) => {
         if (done) return
         done = true
         dispose()
@@ -67,7 +74,7 @@ export function createStartupTracker(report) {
 
     report({ current: null, total: 0, message: 'Arrancando Java...', done: false })
 
-    const feed = (lines) => {
+    const feed = (lines: string[]) => {
         if (done) return
 
         for (const line of lines) {
@@ -86,4 +93,9 @@ export function createStartupTracker(report) {
     }
 
     return { feed, dispose }
+}
+
+export interface StartupTracker {
+    feed: (lines: string[]) => void
+    dispose: () => void
 }

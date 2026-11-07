@@ -1,5 +1,6 @@
 import path from 'path'
 import { ERROR_CODE } from '../../shared/errorCodes'
+import { LauncherError } from '../../shared/LauncherError'
 
 /**
  * Joins `relativePath` onto `base` and refuses any result that is not strictly inside it.
@@ -9,16 +10,14 @@ import { ERROR_CODE } from '../../shared/errorCodes'
  * or an absolute path in any of them would otherwise land a download anywhere on disk. The
  * hash on the manifest proves the file is the published one, not that its paths are sane.
  *
- * @throws {Error} with `code = PATH_OUTSIDE_BASE`
+ * @throws {LauncherError} PATH_OUTSIDE_BASE
  */
-export function resolveInside(base, relativePath) {
+export function resolveInside(base: string, relativePath: string): string {
     const root = path.resolve(base)
     const target = path.resolve(root, String(relativePath))
 
     if (!target.startsWith(root + path.sep)) {
-        const error = new Error(`Ruta no permitida fuera de ${root}: ${relativePath}`)
-        error.code = ERROR_CODE.PATH_OUTSIDE_BASE
-        throw error
+        throw new LauncherError(ERROR_CODE.PATH_OUTSIDE_BASE, `Ruta no permitida fuera de ${root}: ${relativePath}`)
     }
 
     return target
@@ -29,7 +28,7 @@ export function resolveInside(base, relativePath) {
  * segment, and nothing Windows would read as a drive or a stream (`C:`, `file:stream`).
  * Checked on the manifest itself so a bad entry fails the launch before any file is touched.
  */
-export function isSafeRelativePath(relativePath) {
+export function isSafeRelativePath(relativePath: unknown): relativePath is string {
     if (typeof relativePath !== 'string' || relativePath.length === 0) return false
     if (/[\\:\0]/.test(relativePath) || relativePath.startsWith('/')) return false
 

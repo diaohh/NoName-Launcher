@@ -3,14 +3,15 @@ import path from 'path'
 import { describe, expect, it } from 'vitest'
 import { resolveInside } from './PathUtils'
 import { ERROR_CODE } from '../../shared/errorCodes'
+import { LauncherError } from '../../shared/LauncherError'
 
 const base = path.join(os.tmpdir(), 'nnl-base')
 
-function codeOf(fn) {
+function codeOf(fn: () => unknown) {
     try {
         fn()
     } catch (err) {
-        return err.code
+        return err instanceof LauncherError ? err.code : err
     }
     return null
 }

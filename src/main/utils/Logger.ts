@@ -16,7 +16,7 @@ const MAX_CAUSE_DEPTH = 3
  * slips through inside an error object — got attaches the whole request to its errors,
  * `Authorization` header and form body included.
  */
-const REDACTIONS = [
+const REDACTIONS: ReadonlyArray<readonly [RegExp, string]> = [
     // accessToken: 'eyJ…', "refresh_token":"M.C5…", Authorization: 'XBL3.0 x=…', RpsTicket=d=…
     [/\b(\w*token|authorization|rpsticket|secrets|password)(["']?\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;&}\]]+)/gi, '$1$2[redacted]'],
     // The JVM command line carries the Minecraft token as a bare argument.
@@ -25,13 +25,13 @@ const REDACTIONS = [
     [/\beyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]+/g, '[redacted]']
 ]
 
-export function redact(text) {
+export function redact(text: string): string {
     return REDACTIONS.reduce((out, [pattern, replacement]) => out.replace(pattern, replacement), text)
 }
 
 function timestamp() {
     const d = new Date()
-    const pad = (n) => String(n).padStart(2, '0')
+    const pad = (n: number) => String(n).padStart(2, '0')
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
@@ -39,9 +39,11 @@ function timestamp() {
  * An error as stack, code and cause chain — never `util.inspect` with unlimited depth, which
  * is what used to dump got's request options, headers and all, into the output.
  */
-function describeError(err, depth = 0) {
+function describeError(err: Error, depth = 0): string {
     let out = err.stack || `${err.name}: ${err.message}`
-    if (typeof err.code === 'string' || typeof err.code === 'number') out += `\n    code: ${err.code}`
+    // Node's errors, got's and the launcher's own all carry one, as a string or a number.
+    const code = (err as { code?: unknown }).code
+    if (typeof code === 'string' || typeof code === 'number') out += `\n    code: ${code}`
 
     if (err.cause != null && depth < MAX_CAUSE_DEPTH) {
         out += '\nCaused by: ' + (err.cause instanceof Error
@@ -51,7 +53,7 @@ function describeError(err, depth = 0) {
     return out
 }
 
-function describeValue(value) {
+function describeValue(value: unknown): string {
     if (value instanceof Error) return describeError(value)
     if (typeof value === 'object' && value !== null) return util.inspect(value, { depth: 3, breakLength: Infinity })
     return String(value)
@@ -62,9 +64,9 @@ function describeValue(value) {
  * the same as before. When the only extra argument is an Error, winston has already appended
  * its message to ours; it is trimmed off here because the stack repeats it.
  */
-function renderLine(info) {
+function renderLine(info: winston.Logform.TransformableInfo): string {
     let message = typeof info.message === 'string' ? info.message : util.inspect(info.message)
-    const splat = info[SPLAT] || []
+    const splat = (info[SPLAT] as unknown[] | undefined) ?? []
     let trailer = ''
 
     if (splat.length === 1 && splat[0] instanceof Error) {
@@ -75,7 +77,7 @@ function renderLine(info) {
         message += ' ' + splat.map(describeValue).join(' ')
     }
 
-    return redact(`[${timestamp()}] [${info.level}] [${info.label}]: ${message}${trailer}`)
+    return redact(`[${timestamp()}] [${info.level}] [${String(info.label)}]: ${message}${trailer}`)
 }
 
 const line = winston.format.printf(renderLine)
@@ -106,10 +108,10 @@ root.on('error', (err) => {
 })
 
 class Logger {
-    static loggers = {}
-    static logsDirectory = null
+    static loggers: Record<string, winston.Logger> = {}
+    static logsDirectory: string | null = null
 
-    static getLogger(name) {
+    static getLogger(name: string): winston.Logger {
         if (!this.loggers[name]) {
             this.loggers[name] = root.child({ label: name })
         }
@@ -121,7 +123,7 @@ class Logger {
      * and keeping five files (`launcher.log` is always the newest). Called once at startup,
      * after the single-instance lock, so two launchers never rotate the same file.
      */
-    static enableFileLogging(directory) {
+    static enableFileLogging(directory: string): void {
         if (this.logsDirectory) return
 
         this.logsDirectory = directory
