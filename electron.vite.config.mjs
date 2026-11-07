@@ -44,14 +44,12 @@ export default defineConfig(({ mode }) => ({
   },
   renderer: {
     plugins: [react()],
+    // `index.html` in this root is the entry; vite finds it on its own. Naming it again as
+    // `./src/renderer/index.html` resolved against this root, so the dev dependency scan
+    // never found it and pre-bundled deps on the fly — two copies of React, "Invalid hook call".
     root: './src/renderer',
     define: {
       __APP_VERSION__: JSON.stringify(pkg.version)
-    },
-    build: {
-      rollupOptions: {
-        input: './src/renderer/index.html'
-      }
     }
   }
 }))
