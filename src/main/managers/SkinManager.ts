@@ -9,8 +9,18 @@ import Logger from '../utils/Logger'
 import { fetchWithTimeout } from '../utils/HttpUtils'
 import { writeFileAtomicSync } from '../utils/FileUtils'
 import { resolveInside } from '../utils/PathUtils'
-import { ERROR_CODE } from '../../shared/errorCodes'
-import { MAX_SKIN_NAME_LENGTH, SKIN_VARIANTS } from '../../shared/skins'
+import { ERROR_CODE, type ErrorCode } from '../../shared/errorCodes'
+import { LauncherError, errorCodeOf } from '../../shared/LauncherError'
+import {
+    MAX_SKIN_NAME_LENGTH,
+    isSkinVariant,
+    type SkinEntry,
+    type SkinImport,
+    type SkinSaveChoice,
+    type SkinSaveResult,
+    type SkinState,
+    type SkinVariant
+} from '../../shared/skins'
 
 const logger = Logger.getLogger('SkinManager')
 
@@ -40,24 +50,47 @@ const INDEX_VERSION = 1
 const SKIN_ID = /^[0-9a-f]{64}$/
 const SKIN_FILE = /^([0-9a-f]{64})\.png$/
 
-function skinError(code, message, cause) {
-    const error = new Error(message)
-    error.code = code
-    if (cause) error.cause = cause
-    return error
+/** A vault entry as `index.json` keeps it; the renderer only ever sees its `SkinEntry` part. */
+interface VaultEntry extends SkinEntry {
+    /** The Mojang texture URL this skin was last published under, once known. */
+    textureUrl: string | null
+    addedAt: number
 }
 
-const isPlainObject = (value) => value != null && typeof value === 'object' && !Array.isArray(value)
+interface VaultIndex {
+    version: number
+    skins: VaultEntry[]
+}
 
-const sha256 = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex')
+interface ProfileCape {
+    id: string
+    name: string
+    url: string | null
+    active: boolean
+}
 
-const toDataUrl = (bytes) => `data:image/png;base64,${bytes.toString('base64')}`
+/** The parts of a Mojang profile the launcher uses, as `parseProfile` reads them. */
+interface Profile {
+    name: string
+    activeSkin: { url: string, variant: SkinVariant } | null
+    capes: ProfileCape[]
+    activeCapeId: string | null
+}
+
+const skinError = (code: ErrorCode, message: string, cause?: unknown) => new LauncherError(code, message, cause)
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+    value != null && typeof value === 'object' && !Array.isArray(value)
+
+const sha256 = (bytes: Buffer) => crypto.createHash('sha256').update(bytes).digest('hex')
+
+const toDataUrl = (bytes: Buffer) => `data:image/png;base64,${bytes.toString('base64')}`
 
 /**
  * Name shown under a skin: no control characters, no surrounding blanks, at most
  * MAX_SKIN_NAME_LENGTH characters. Empty when nothing usable is left.
  */
-export function cleanSkinName(raw) {
+export function cleanSkinName(raw: unknown): string {
     if (typeof raw !== 'string') return ''
     // eslint-disable-next-line no-control-regex
     return raw.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, MAX_SKIN_NAME_LENGTH).trim()
@@ -78,10 +111,10 @@ export function cleanSkinName(raw) {
 class SkinManager {
 
     /** Serialises every read-modify-write of index.json. */
-    static vaultQueue = Promise.resolve()
+    static vaultQueue: Promise<unknown> = Promise.resolve()
 
     /** Vault id of the skin the account is wearing, as of the last profile read. */
-    static activeSkinId = null
+    static activeSkinId: string | null = null
 
     // ---------------------------------------------------------------- public API
 
@@ -89,7 +122,7 @@ class SkinManager {
      * Everything the skin manager screen shows. The skin the account is wearing is added to
      * the vault first, so changing it can never lose it.
      */
-    static async getState() {
+    static async getState(): Promise<SkinState> {
         const token = await this.sessionToken()
         const profile = await this.fetchProfile(token)
         const activeSkinId = await this.syncActiveSkin(profile)
@@ -122,7 +155,7 @@ class SkinManager {
     }
 
     /** The texture of the skin the account is wearing, for the avatar. Null with no skin. */
-    static async getActiveTexture() {
+    static async getActiveTexture(): Promise<string | null> {
         const token = await this.sessionToken()
         const profile = await this.fetchProfile(token)
         const activeSkinId = await this.syncActiveSkin(profile)
@@ -132,11 +165,11 @@ class SkinManager {
     /**
      * Copies a PNG the player picked into the vault.
      *
-     * @param {string} filePath Answered by the native open dialog, never by the renderer.
-     * @returns {{ skin, duplicate: boolean }} `duplicate` when the image was already there.
+     * @param filePath Answered by the native open dialog, never by the renderer.
+     * @returns `duplicate` when the image was already there.
      */
-    static async importSkinFile(filePath) {
-        let bytes
+    static async importSkinFile(filePath: string): Promise<SkinImport> {
+        let bytes: Buffer
         try {
             const stats = await fsp.stat(filePath)
             if (!stats.isFile()) throw new Error('not a file')
@@ -145,7 +178,7 @@ class SkinManager {
             }
             bytes = await fsp.readFile(filePath)
         } catch (err) {
-            if (err.code === ERROR_CODE.SKIN_INVALID_FILE) throw err
+            if (err instanceof LauncherError && err.code === ERROR_CODE.SKIN_INVALID_FILE) throw err
             throw skinError(ERROR_CODE.SKIN_INVALID_FILE, 'No se ha podido leer la imagen seleccionada.', err)
         }
 
@@ -158,7 +191,7 @@ class SkinManager {
                 return { skin: { ...this.publicEntry(existing), texture: toDataUrl(bytes) }, duplicate: true }
             }
 
-            const entry = {
+            const entry: VaultEntry = {
                 id,
                 name: cleanSkinName(path.basename(filePath, path.extname(filePath))) || 'Skin',
                 // Unknown until the player saves it: the renderer infers it from the texture.
@@ -176,7 +209,7 @@ class SkinManager {
         })
     }
 
-    static async renameSkin(id, name) {
+    static async renameSkin(id: string, name: string): Promise<SkinEntry> {
         return this.withVault(async (index) => {
             const entry = this.findEntry(index, id)
             entry.name = name
@@ -189,7 +222,7 @@ class SkinManager {
      * Moves a skin to the system trash, as the file explorer would, so a slip can be undone
      * from there. A file put back is adopted again on the next read of the vault.
      */
-    static async deleteSkin(id) {
+    static async deleteSkin(id: string): Promise<void> {
         if (id === this.activeSkinId) {
             throw skinError(ERROR_CODE.SKIN_IN_USE, 'No puedes borrar la skin que llevas puesta.')
         }
@@ -223,11 +256,10 @@ class SkinManager {
      * The skin goes first. When it is accepted and the cape is then refused, the error says
      * the skin did change: the screen re-reads the profile and shows what actually stuck.
      *
-     * @param {{ skinId: string|null, variant: 'classic'|'slim', capeId: string|null }} choice
-     *        Already validated by the IPC handler. `skinId` null keeps the current skin.
-     * @returns {Promise<{ skinTexture: string|null }>} The texture now worn, for the avatar.
+     * @param choice Already validated by the IPC handler. `skinId` null keeps the current skin.
+     * @returns The texture now worn, for the avatar.
      */
-    static async save({ skinId, variant, capeId }) {
+    static async save({ skinId, variant, capeId }: SkinSaveChoice): Promise<SkinSaveResult> {
         const token = await this.sessionToken()
         let profile = await this.fetchProfile(token)
         let skinChanged = false
@@ -254,7 +286,7 @@ class SkinManager {
                 profile = await this.setActiveCape(token, capeId)
                 logger.info(capeId ? `Cape changed to ${capeId}` : 'Cape hidden')
             } catch (err) {
-                if (skinChanged) err.message = `La skin se ha guardado, pero la capa no. ${err.message}`
+                if (skinChanged && err instanceof Error) err.message = `La skin se ha guardado, pero la capa no. ${err.message}`
                 throw err
             }
         }
@@ -270,7 +302,7 @@ class SkinManager {
      * keeps AuthManager's own code, so the renderer can tell a dead session (log out) from a
      * network blip (stay) exactly as it does for a launch.
      */
-    static async sessionToken() {
+    static async sessionToken(): Promise<string> {
         const result = await AuthManager.validateSelectedMicrosoftAccount()
         if (!result.ok) throw skinError(result.code, result.message)
 
@@ -281,7 +313,7 @@ class SkinManager {
         return account.accessToken
     }
 
-    static async fetchProfile(token) {
+    static async fetchProfile(token: string): Promise<Profile> {
         const failure = 'No se ha podido leer tu perfil de Minecraft'
         const response = await this.mojangRequest(PROFILE_URL, {
             headers: { Authorization: `Bearer ${token}` }
@@ -289,7 +321,7 @@ class SkinManager {
 
         if (!response.ok) throw await this.mojangError(response, ERROR_CODE.SKIN_PROFILE_FAILED, failure)
 
-        let body
+        let body: unknown
         try {
             body = await response.json()
         } catch (err) {
@@ -301,14 +333,14 @@ class SkinManager {
         return profile
     }
 
-    static async uploadSkin(token, id, variant) {
+    static async uploadSkin(token: string, id: string, variant: SkinVariant): Promise<Profile> {
         const bytes = await this.readSkinFile(id)
         // The file sits on disk where anything can replace it; checked again before it is sent.
         this.assertSkinImage(bytes)
 
         const form = new FormData()
         form.append('variant', variant)
-        form.append('file', new Blob([bytes], { type: 'image/png' }), 'skin.png')
+        form.append('file', new Blob([new Uint8Array(bytes)], { type: 'image/png' }), 'skin.png')
 
         const failure = 'No se ha podido guardar la skin'
         const response = await this.mojangRequest(SKINS_URL, {
@@ -321,7 +353,7 @@ class SkinManager {
         return this.profileFromResponse(response, token)
     }
 
-    static async setActiveCape(token, capeId) {
+    static async setActiveCape(token: string, capeId: string | null): Promise<Profile> {
         const failure = capeId ? 'No se ha podido cambiar la capa' : 'No se ha podido quitar la capa'
         const response = await this.mojangRequest(ACTIVE_CAPE_URL, capeId
             ? {
@@ -343,7 +375,7 @@ class SkinManager {
      * different, the change has still been made, so the profile is read again rather than
      * reporting a failure that did not happen.
      */
-    static async profileFromResponse(response, token) {
+    static async profileFromResponse(response: Response, token: string): Promise<Profile> {
         try {
             const profile = this.parseProfile(await response.json())
             if (profile) return profile
@@ -355,18 +387,19 @@ class SkinManager {
     }
 
     /** `fetchWithTimeout`, with its "download" wording replaced by the operation's own. */
-    static async mojangRequest(url, init, failure) {
+    static async mojangRequest(url: string, init: RequestInit, failure: string): Promise<Response> {
         try {
             return await fetchWithTimeout(url, 'la respuesta de Mojang', init)
         } catch (err) {
-            const message = err.code === ERROR_CODE.NETWORK_TIMEOUT
+            const code = errorCodeOf(err, ERROR_CODE.NETWORK_ERROR)
+            const message = code === ERROR_CODE.NETWORK_TIMEOUT
                 ? `${failure}: Mojang no ha respondido a tiempo. Comprueba tu conexion e intentalo de nuevo.`
                 : `${failure}: no se ha podido contactar con Mojang. Comprueba tu conexion e intentalo de nuevo.`
-            throw skinError(err.code, message, err.cause ?? err)
+            throw skinError(code, message, (err instanceof Error ? err.cause : undefined) ?? err)
         }
     }
 
-    static async mojangError(response, code, failure) {
+    static async mojangError(response: Response, code: ErrorCode, failure: string): Promise<LauncherError> {
         let detail = ''
         try {
             detail = (await response.text()).slice(0, 300)
@@ -394,26 +427,26 @@ class SkinManager {
      * Reads the parts of a profile the launcher uses. The body comes from the network, so
      * anything that does not have the expected shape is dropped, and a texture URL is only
      * followed when it points at Mojang's texture host.
-     *
-     * @returns {{ name, activeSkin: {url, variant}|null, capes, activeCapeId }|null}
      */
-    static parseProfile(body) {
+    static parseProfile(body: unknown): Profile | null {
         if (!isPlainObject(body) || typeof body.name !== 'string' || !Array.isArray(body.skins)) return null
 
-        const wearing = body.skins.find(skin => isPlainObject(skin) && skin.state === 'ACTIVE')
+        const wearing = body.skins.find((skin): skin is Record<string, unknown> => isPlainObject(skin) && skin.state === 'ACTIVE')
         const wearingUrl = wearing ? this.textureUrl(wearing.url) : null
-        const activeSkin = wearingUrl
+        const activeSkin: Profile['activeSkin'] = wearing && wearingUrl
             ? { url: wearingUrl, variant: String(wearing.variant).toUpperCase() === 'SLIM' ? 'slim' : 'classic' }
             : null
 
-        const capes = (Array.isArray(body.capes) ? body.capes : [])
-            .filter(cape => isPlainObject(cape) && typeof cape.id === 'string' && cape.id.length > 0 && cape.id.length <= 64)
-            .map(cape => ({
+        const capes: ProfileCape[] = []
+        for (const cape of Array.isArray(body.capes) ? body.capes : []) {
+            if (!isPlainObject(cape) || typeof cape.id !== 'string' || cape.id.length === 0 || cape.id.length > 64) continue
+            capes.push({
                 id: cape.id,
                 name: typeof cape.alias === 'string' && cape.alias.trim() ? cape.alias.trim().slice(0, 40) : 'Capa',
                 url: this.textureUrl(cape.url),
                 active: cape.state === 'ACTIVE'
-            }))
+            })
+        }
 
         return {
             name: body.name,
@@ -424,9 +457,9 @@ class SkinManager {
     }
 
     /** Mojang still hands out `http://` texture URLs; they are served over https too. */
-    static textureUrl(raw) {
+    static textureUrl(raw: unknown): string | null {
         if (typeof raw !== 'string') return null
-        let url
+        let url: URL
         try {
             url = new URL(raw)
         } catch {
@@ -436,7 +469,7 @@ class SkinManager {
         return `https://${TEXTURE_HOST}${url.pathname}`
     }
 
-    static async downloadTexture(url, what) {
+    static async downloadTexture(url: string, what: string): Promise<Buffer> {
         const response = await fetchWithTimeout(url, what, { timeoutMs: TEXTURE_TIMEOUT_MS })
         if (!response.ok) {
             throw skinError(ERROR_CODE.SKIN_PROFILE_FAILED, `No se ha podido descargar ${what} (HTTP ${response.status}).`)
@@ -449,7 +482,7 @@ class SkinManager {
         return bytes
     }
 
-    static async optionalTexture(url, what) {
+    static async optionalTexture(url: string | null, what: string): Promise<string | null> {
         if (!url) return null
         try {
             return toDataUrl(await this.downloadTexture(url, what))
@@ -468,7 +501,7 @@ class SkinManager {
      * the file that was sent. The entry is therefore matched by the texture URL it was last
      * published under first, and by the hash of the downloaded texture only after that.
      */
-    static async syncActiveSkin(profile) {
+    static async syncActiveSkin(profile: Profile): Promise<string | null> {
         const wearing = profile.activeSkin
         if (!wearing) {
             this.activeSkinId = null
@@ -516,19 +549,20 @@ class SkinManager {
     }
 
     /** After an upload, the vault entry that was sent is the one published under the new URL. */
-    static async claimActiveTexture(id, profile) {
-        if (!profile.activeSkin) return
+    static async claimActiveTexture(id: string, profile: Profile): Promise<void> {
+        const wearing = profile.activeSkin
+        if (!wearing) return
 
         await this.withVault(async (index) => {
             const entry = this.findEntry(index, id)
-            this.assignTextureUrl(index, entry, profile.activeSkin.url)
-            entry.variant = profile.activeSkin.variant
+            this.assignTextureUrl(index, entry, wearing.url)
+            entry.variant = wearing.variant
             this.writeIndex(index)
         })
     }
 
     /** A texture URL belongs to one entry at most, or the URL match would be ambiguous. */
-    static assignTextureUrl(index, entry, url) {
+    static assignTextureUrl(index: VaultIndex, entry: VaultEntry, url: string): void {
         for (const other of index.skins) {
             if (other !== entry && other.textureUrl === url) other.textureUrl = null
         }
@@ -536,7 +570,7 @@ class SkinManager {
     }
 
     /** Runs `fn(index)` after every earlier vault operation has finished. */
-    static withVault(fn) {
+    static withVault<T>(fn: (index: VaultIndex) => Promise<T>): Promise<T> {
         const run = this.vaultQueue.then(() => fn(this.readIndex()))
         this.vaultQueue = run.catch(() => {})
         return run
@@ -547,16 +581,16 @@ class SkinManager {
      * adopts any `<sha256>.png` that has no entry: one restored from the trash, or every
      * skin after the index itself was lost.
      */
-    static readIndex() {
+    static readIndex(): VaultIndex {
         const directory = this.ensureVaultDirectory()
         const indexPath = path.join(directory, INDEX_FILE)
 
-        let stored = []
+        let stored: unknown[] = []
         try {
-            const parsed = JSON.parse(fs.readFileSync(indexPath, 'utf8'))
-            stored = Array.isArray(parsed?.skins) ? parsed.skins : []
+            const parsed: unknown = JSON.parse(fs.readFileSync(indexPath, 'utf8'))
+            stored = isPlainObject(parsed) && Array.isArray(parsed.skins) ? parsed.skins : []
         } catch (err) {
-            if (err.code !== 'ENOENT') {
+            if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
                 const quarantined = `${indexPath}.corrupt-${Date.now()}`
                 logger.warn(`Skin index unreadable, moved aside to ${quarantined}`, err)
                 try {
@@ -567,15 +601,15 @@ class SkinManager {
             }
         }
 
-        let files
+        let files: Set<string>
         try {
             files = new Set(fs.readdirSync(directory))
         } catch (err) {
             throw skinError(ERROR_CODE.SKIN_VAULT_FAILED, 'No se ha podido leer la carpeta de skins.', err)
         }
 
-        const skins = []
-        const seen = new Set()
+        const skins: VaultEntry[] = []
+        const seen = new Set<string>()
         for (const raw of stored) {
             const entry = this.normalizeEntry(raw)
             if (!entry || seen.has(entry.id) || !files.has(`${entry.id}.png`)) continue
@@ -593,18 +627,18 @@ class SkinManager {
         return { version: INDEX_VERSION, skins }
     }
 
-    static normalizeEntry(raw) {
+    static normalizeEntry(raw: unknown): VaultEntry | null {
         if (!isPlainObject(raw) || typeof raw.id !== 'string' || !SKIN_ID.test(raw.id)) return null
         return {
             id: raw.id,
             name: cleanSkinName(raw.name) || 'Skin',
-            variant: SKIN_VARIANTS.includes(raw.variant) ? raw.variant : null,
+            variant: isSkinVariant(raw.variant) ? raw.variant : null,
             textureUrl: this.textureUrl(raw.textureUrl),
-            addedAt: Number.isFinite(raw.addedAt) ? raw.addedAt : 0
+            addedAt: typeof raw.addedAt === 'number' && Number.isFinite(raw.addedAt) ? raw.addedAt : 0
         }
     }
 
-    static writeIndex(index) {
+    static writeIndex(index: VaultIndex): void {
         const indexPath = path.join(this.ensureVaultDirectory(), INDEX_FILE)
         try {
             writeFileAtomicSync(indexPath, JSON.stringify({ version: INDEX_VERSION, skins: index.skins }, null, 4))
@@ -613,7 +647,7 @@ class SkinManager {
         }
     }
 
-    static writeSkinFile(id, bytes) {
+    static writeSkinFile(id: string, bytes: Buffer): void {
         try {
             writeFileAtomicSync(this.skinPath(id), bytes)
         } catch (err) {
@@ -621,7 +655,7 @@ class SkinManager {
         }
     }
 
-    static async readSkinFile(id) {
+    static async readSkinFile(id: string): Promise<Buffer> {
         try {
             return await fsp.readFile(this.skinPath(id))
         } catch (err) {
@@ -629,17 +663,17 @@ class SkinManager {
         }
     }
 
-    static findEntry(index, id) {
+    static findEntry(index: VaultIndex, id: string): VaultEntry {
         const entry = index.skins.find(candidate => candidate.id === id)
         if (!entry) throw skinError(ERROR_CODE.SKIN_NOT_FOUND, 'Esa skin ya no esta en la carpeta de skins.')
         return entry
     }
 
-    static skinPath(id) {
+    static skinPath(id: string): string {
         return resolveInside(ConfigManager.getSkinsDirectory(), `${id}.png`)
     }
 
-    static ensureVaultDirectory() {
+    static ensureVaultDirectory(): string {
         const directory = ConfigManager.getSkinsDirectory()
         try {
             fs.mkdirSync(directory, { recursive: true })
@@ -649,7 +683,7 @@ class SkinManager {
         return directory
     }
 
-    static publicEntry(entry) {
+    static publicEntry(entry: VaultEntry): SkinEntry {
         return { id: entry.id, name: entry.name, variant: entry.variant }
     }
 
@@ -657,7 +691,7 @@ class SkinManager {
      * A skin Mojang accepts: a PNG of 64x64, or 64x32 in the pre-1.8 layout. Read from the
      * IHDR chunk, which the PNG format requires to come first, so no image library is needed.
      */
-    static assertSkinImage(bytes) {
+    static assertSkinImage(bytes: Buffer): void {
         const isPng = bytes.length >= 24
             && bytes.subarray(0, 8).equals(PNG_SIGNATURE)
             && bytes.toString('ascii', 12, 16) === 'IHDR'
