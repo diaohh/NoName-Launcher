@@ -34,6 +34,9 @@ class ConfigManager {
     static launcherDir = null
     static dataDir = null
 
+    /** The tail of the save queue; it never rejects. See `save`. */
+    static pendingSave = Promise.resolve()
+
     /**
      * The launcher's own root, and the one thing the player cannot move.
      *
@@ -183,13 +186,17 @@ class ConfigManager {
         }
     }
 
-    static load() {
+    /**
+     * Reads `config.json`, migrating and repairing it, and decrypts the stored session.
+     * Asynchronous because `safeStorage` only decrypts asynchronously since Electron 45.
+     */
+    static async load() {
         this.configPath = path.join(this.getLauncherDirectory(), 'config.json')
 
         if (!fs.existsSync(this.configPath)) {
             logger.info('Config file not found, creating default...')
             this.config = this.getDefaultConfig()
-            this.saveAfterLoad()
+            await this.saveAfterLoad()
             return this.config
         }
 
@@ -201,7 +208,7 @@ class ConfigManager {
         } catch (err) {
             this.quarantineConfig(err)
             this.config = this.getDefaultConfig()
-            this.saveAfterLoad()
+            await this.saveAfterLoad()
             return this.config
         }
 
@@ -214,14 +221,14 @@ class ConfigManager {
 
         if (diskVersion < 2) this.migrateJavaSelection()
 
-        const rewriteNeeded = this.hydrateSecrets()
+        const rewriteNeeded = await this.hydrateSecrets()
 
         if (diskVersion !== CONFIG_VERSION) {
             logger.info(`Migrating config from version ${diskVersion} to ${CONFIG_VERSION}`)
         }
 
         if (diskVersion !== CONFIG_VERSION || rewriteNeeded) {
-            this.saveAfterLoad()
+            await this.saveAfterLoad()
         }
 
         logger.info('Configuration loaded successfully')
@@ -252,9 +259,10 @@ class ConfigManager {
      * safeStorage gone — costs the session and nothing else: the Java settings, the
      * data directory and the selected modpack all survive.
      *
-     * @returns true when the file on disk needs to be rewritten.
+     * @returns true when the file on disk needs to be rewritten: a v0 account, a dropped
+     * one, or a blob safeStorage asks to re-encrypt because its key was rotated.
      */
-    static hydrateSecrets() {
+    static async hydrateSecrets() {
         const database = this.config.authenticationDatabase
         let rewriteNeeded = false
 
@@ -276,7 +284,9 @@ class ConfigManager {
             }
 
             try {
-                database[uuid] = this.decryptAccount(account)
+                const { decrypted, shouldReEncrypt } = await this.decryptAccount(account)
+                database[uuid] = decrypted
+                if (shouldReEncrypt) rewriteNeeded = true
             } catch (err) {
                 logger.error(`Could not decrypt the credentials of ${uuid}`, err)
                 this.purgeSession(`the credentials of ${uuid} are unreadable`)
@@ -297,9 +307,14 @@ class ConfigManager {
         this.config.selectedAccount = null
     }
 
-    static isEncryptionAvailable() {
+    /**
+     * Electron 45 deprecated the synchronous safeStorage methods and 46 removes them. Blobs
+     * written by `encryptString` decrypt with `decryptStringAsync`, so the move needed no
+     * config migration (ADR-0007).
+     */
+    static async isEncryptionAvailable() {
         try {
-            return safeStorage.isEncryptionAvailable()
+            return await safeStorage.isAsyncEncryptionAvailable()
         } catch (err) {
             logger.error('safeStorage is not usable', err)
             return false
@@ -311,30 +326,37 @@ class ConfigManager {
      * username, uuid, expiries — stays readable, so config.json remains inspectable and
      * a decryption failure costs the session rather than the settings.
      */
-    static encryptAccount(account) {
+    static async encryptAccount(account) {
         const { accessToken, microsoft, ...rest } = account
         const { access_token, refresh_token, ...microsoftRest } = microsoft ?? {}
+        const encrypted = await safeStorage.encryptStringAsync(JSON.stringify({ accessToken, access_token, refresh_token }))
 
         return {
             ...rest,
             microsoft: microsoftRest,
-            secrets: safeStorage
-                .encryptString(JSON.stringify({ accessToken, access_token, refresh_token }))
-                .toString('base64')
+            secrets: encrypted.toString('base64')
         }
     }
 
-    static decryptAccount(account) {
+    /**
+     * @returns the account with its secrets back in place, and whether safeStorage asks for
+     * the blob to be re-encrypted (its key was rotated or a better one became available).
+     */
+    static async decryptAccount(account) {
         const { secrets, ...rest } = account
-        const payload = JSON.parse(safeStorage.decryptString(Buffer.from(secrets, 'base64')))
+        const { result, shouldReEncrypt } = await safeStorage.decryptStringAsync(Buffer.from(secrets, 'base64'))
+        const payload = JSON.parse(result)
 
         return {
-            ...rest,
-            accessToken: payload.accessToken,
-            microsoft: {
-                ...rest.microsoft,
-                access_token: payload.access_token,
-                refresh_token: payload.refresh_token
+            shouldReEncrypt: Boolean(shouldReEncrypt),
+            decrypted: {
+                ...rest,
+                accessToken: payload.accessToken,
+                microsoft: {
+                    ...rest.microsoft,
+                    access_token: payload.access_token,
+                    refresh_token: payload.refresh_token
+                }
             }
         }
     }
@@ -366,9 +388,21 @@ class ConfigManager {
      *
      * A failure is thrown (`CONFIG_SAVE_FAILED`) rather than logged: a settings screen that
      * shows a value the disk never received is lying to the player.
+     *
+     * Saves run one at a time, in the order they were asked for. Encryption is asynchronous,
+     * so two overlapping saves could otherwise finish out of order and leave the older config
+     * on disk. Each one waits for the previous save and encodes the config as it is when its
+     * turn comes, so the last write always carries the newest state. A failed save rejects
+     * for its own caller and does not stop the ones queued behind it.
      */
     static save() {
-        const data = JSON.stringify(this.toDiskConfig(), null, 4)
+        const run = this.pendingSave.then(() => this.writeConfig())
+        this.pendingSave = run.catch(() => {})
+        return run
+    }
+
+    static async writeConfig() {
+        const data = JSON.stringify(await this.toDiskConfig(), null, 4)
 
         try {
             writeFileAtomicSync(this.configPath, data)
@@ -388,9 +422,9 @@ class ConfigManager {
      * `load()` rewrites the file after a migration or a reset, but the launcher must still
      * open when that write fails — a read-only disk is reported by the next explicit save.
      */
-    static saveAfterLoad() {
+    static async saveAfterLoad() {
         try {
-            this.save()
+            await this.save()
         } catch {
             // Already logged by save().
         }
@@ -404,10 +438,10 @@ class ConfigManager {
      * persisted: it stays in memory for this run and the player logs in again next
      * start.
      */
-    static toDiskConfig() {
+    static async toDiskConfig() {
         const config = { ...this.config, authenticationDatabase: {} }
 
-        if (!this.isEncryptionAvailable()) {
+        if (!(await this.isEncryptionAvailable())) {
             if (Object.keys(this.config.authenticationDatabase).length > 0) {
                 logger.warn('safeStorage is unavailable, the session will not be persisted')
             }
@@ -417,7 +451,7 @@ class ConfigManager {
 
         for (const [uuid, account] of Object.entries(this.config.authenticationDatabase)) {
             try {
-                config.authenticationDatabase[uuid] = this.encryptAccount(account)
+                config.authenticationDatabase[uuid] = await this.encryptAccount(account)
             } catch (err) {
                 logger.error(`Failed to encrypt the credentials of ${uuid}, leaving them off disk`, err)
                 if (config.selectedAccount === uuid) config.selectedAccount = null

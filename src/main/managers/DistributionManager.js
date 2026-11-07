@@ -30,13 +30,13 @@ class DistributionManager {
      * Stores the modpack document sent by the renderer. `modules` no longer exists:
      * everything about files and the mod loader now comes from the manifest.
      */
-    static setServerData(serverData) {
+    static async setServerData(serverData) {
         // The id becomes a directory name, so it is checked before anything is stored.
         this.instanceDirFor(serverData?.id)
         this.selectedServer = { rawServer: serverData }
         logger.info('Server data set from Firestore:', serverData.name)
         ConfigManager.setSelectedServer(serverData.id)
-        ConfigManager.save()
+        await ConfigManager.save()
         return true
     }
 

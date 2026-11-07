@@ -121,4 +121,19 @@ describe('ConfigManager', () => {
             expect(launcher.readConfig().authenticationDatabase).toEqual({})
         })
     })
+
+    it('never lets an earlier save land on top of a later one', async () => {
+        addAccount()
+        // The first save's encryption is the slow one, so unordered writes would finish
+        // with the older config on disk.
+        safeStorageControl.encryptDelaysMs = [50, 0]
+
+        ConfigManager.setSelectedServer('first')
+        const first = ConfigManager.save()
+        ConfigManager.setSelectedServer('second')
+        const second = ConfigManager.save()
+        await Promise.all([first, second])
+
+        expect(launcher.readConfig().selectedServer).toBe('second')
+    })
 })

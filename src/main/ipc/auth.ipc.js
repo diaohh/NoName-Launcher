@@ -25,7 +25,7 @@ export function registerAuthIPC(mainWindow) {
   })
 
   handle(Channels.AUTH_LOGOUT, async (_event, uuid) => {
-    AuthManager.removeAccount(uuid)
+    await AuthManager.removeAccount(uuid)
     // Re-arms against whatever account is left, or disarms when none is.
     AuthManager.scheduleTokenRefresh()
     // The account is already gone from config.json; a failure here only means the sign-in

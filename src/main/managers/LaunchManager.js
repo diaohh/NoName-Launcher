@@ -274,7 +274,7 @@ class LaunchManager {
 
         ConfigManager.setJavaRuntime(requiredVersion, executable)
         try {
-            ConfigManager.save()
+            await ConfigManager.save()
         } catch {
             // Already logged by save(). The cache only saves a discovery next time; failing a
             // launch that has its Java over it would be the wrong trade.

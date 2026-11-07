@@ -15,15 +15,18 @@ const PREFIX = 'stub-encrypted:'
 
 /**
  * Switches the tests flip to reach the paths that cannot happen on a developer's machine:
- * no keyring at all, or a blob the keyring can no longer open. `reset()` goes in an
+ * no keyring at all, a blob the keyring can no longer open, or an encryption that takes
+ * longer than the next one (`encryptDelaysMs`, consumed one per call). `reset()` goes in an
  * `afterEach`, so one test cannot leave the next without encryption.
  */
 export const safeStorageControl = {
     available: true,
     undecryptable: false,
+    encryptDelaysMs: [],
     reset() {
         this.available = true
         this.undecryptable = false
+        this.encryptDelaysMs = []
     }
 }
 
@@ -40,15 +43,17 @@ function decrypt(encrypted) {
  * disk in the clear without depending on what the OS keyring would produce.
  */
 export const safeStorage = {
-    isEncryptionAvailable() {
+    async isAsyncEncryptionAvailable() {
         return safeStorageControl.available
     },
-    encryptString(plainText) {
+    async encryptStringAsync(plainText) {
+        const delay = safeStorageControl.encryptDelaysMs.shift() ?? 0
+        if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay))
         if (!safeStorageControl.available) throw new Error('Encryption is not available.')
         return Buffer.from(PREFIX + plainText, 'utf-8')
     },
-    decryptString(encrypted) {
-        return decrypt(encrypted)
+    async decryptStringAsync(encrypted) {
+        return { result: decrypt(encrypted), shouldReEncrypt: false }
     }
 }
 
