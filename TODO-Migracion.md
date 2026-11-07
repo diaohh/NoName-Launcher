@@ -84,34 +84,62 @@ Independientes entre si y de lo demas; pueden ir antes o intercalados.
 
 ---
 
-## Fase 1 — Electron 37 → 44 y actualizaciones de dependencias
+## Fase 1 — Electron 37 → 45 y actualizaciones de dependencias
 
 En una rama propia, **antes** de cualquier `.ts`. Un commit por salto relevante, para poder
-bisecar.
+bisecar. Rama `ts/f1-electron`.
 
-- [ ] Leer los breaking changes de Electron 38→44 y anotar aqui los que tocan APIs que usamos:
+- [x] Leer los breaking changes de Electron 38→44 y anotar aqui los que tocan APIs que usamos:
   `safeStorage`, `powerMonitor`, `session.webRequest` (CSP, ADR-0010), `sandbox`, ventana sin
-  marco, `requestSingleInstanceLock`, `shell.trashItem`, `dialog`, `BrowserWindow` del login
-- [ ] `electron` 37.1.0 → 44.x
-- [ ] `electron-builder` a la ultima 26.x (arrastra la mayoria de avisos de tar/minimatch/xmldom)
-- [ ] `vite` 6 → 8 y `@vitejs/plugin-react` 4 → 6 — **comprobar antes los `peerDependencies`
+  marco, `requestSingleInstanceLock`, `shell.trashItem`, `dialog`, `BrowserWindow` del login —
+  06/11/2026, leidos hasta la 45 (`docs/breaking-changes.md` de electron/electron). Nos tocan:
+  - **45: `safeStorage` sincrono deprecado, eliminado en 46.** Sigue funcionando en 45 (avisa
+    por consola). Pasa a item propio, despues de la Fase 2 — ver "Fase 2b"
+  - **42: el binario ya no se descarga en `postinstall`**, sino en el primer uso; electron-vite
+    lee `path.txt` y falla ("Electron uninstall") si no esta. `pnpm dev`/`preview` ejecutan
+    antes `install-electron`, y `electron` sale de `onlyBuiltDependencies`
+  - **43: los dialogos sin `defaultPath` abren en Descargas.** El selector del directorio de
+    datos ahora empieza en el directorio actual; Java manual e importar skin se quedan en
+    Descargas (sin punto de partida obvio, y las skins suelen estar ahi)
+  - Sin impacto: `clipboard` fuera del renderer (44; usamos `navigator.clipboard`), shims de
+    Node fuera del preload sandboxed (45; el preload no los usa), fin de Windows 32 bits (44;
+    no lo generamos), descriptores de ficheros del ASAR (45), `clearStorageData` sin `quotas`
+- [x] `electron` 37.1.0 → ~~44.x~~ **45.2.3** — 06/11/2026, `b16e8af`. La 45 ya era estable
+  (21/10/2026) y se mantiene mas tiempo que la 44. Junto con electron-vite 5 → 6
+- [x] `electron-builder` a la ultima 26.x (arrastra la mayoria de avisos de tar/minimatch/xmldom)
+  — 06/11/2026, `a472c50`, 26.18.0. Reinstalado para que `app-builder-lib` 26.8.1 no se quedara
+  colgado del lockfile
+- [x] `vite` 6 → 8 y `@vitejs/plugin-react` 4 → 6 — **comprobar antes los `peerDependencies`
   de `electron-vite`**; si su version actual no soporta vite 8, subir a la mayor que soporte (o
-  subir electron-vite) y anotarlo
-- [ ] Menores: `react`/`react-dom`, `firebase`, `postcss`, `tailwindcss`
-- [ ] `pnpm audit --prod` sigue a 0; anotar el total de `pnpm audit` antes y despues
-- [ ] Prueba de humo manual en `pnpm dev` **y** en el instalador de `pnpm package`:
+  subir electron-vite) y anotarlo — 06/11/2026, `2617a54`. electron-vite 5 solo llegaba a vite 7;
+  la 6 admite 6–8. De paso, `9fcdbe1` arregla la entrada del renderer: el escaneo de
+  dependencias en dev fallaba (ya con vite 6) y cargaba React dos veces ("Invalid hook call")
+- [x] Menores: `react`/`react-dom`, `firebase`, `postcss`, `tailwindcss` — 06/11/2026,
+  `a472c50`: React 19.3.1, **Firebase 13.2** (la mayor solo rompe AI Logic; probado contra el
+  Firestore real), PostCSS 8.5.32, Tailwind 4.3.5. El chunk inicial pasa de 892 a 1.003 kB: lite
+  incluye ahora los tipos BSON y vectoriales (12.19 ya daba 968 kB)
+- [x] `pnpm audit --prod` sigue a 0; anotar el total de `pnpm audit` antes y despues —
+  06/11/2026: 172 avisos (3 criticos) → 41 (2 criticos, `protobufjs` y `websocket-driver`, que
+  vienen del SDK completo de Firestore instalado como dependencia de `firebase` y no entran en
+  el bundle). `--prod` a 0
+- [ ] Prueba de humo manual en `pnpm dev` **y** en el instalador de `pnpm package`
+  (`pnpm dev` arranca, descifra la sesion guardada por Electron 37 y valida el token;
+  `pnpm package` genera instalador y portable con Electron 45.2.3):
   - [ ] login Microsoft, reinicio del launcher con la sesion guardada (`safeStorage`)
   - [ ] lanzar un modpack Fabric de punta a punta, ver logs, matar el juego
   - [ ] cerrar el launcher con el juego abierto (el juego sobrevive, ADR-0013) y durante la
         preparacion (confirmacion de `CloseGuard`)
   - [ ] segunda instancia enfoca la primera
   - [ ] gestor de skins: importar, guardar skin/capa, borrar a la papelera
-  - [ ] ajustes: RAM, Java manual, directorio de datos
+  - [ ] ajustes: RAM, Java manual, directorio de datos (el selector abre en el actual)
 
 **Documentacion**
-- [ ] `AGENTS.md`: "Electron 37" en la cabecera del proyecto y cualquier gotcha nuevo
-- [ ] `README.md`: versiones si aparecen
-- [ ] `TODO.md`: cerrar "Electron 37 → 44" y "Actualizaciones menores"
+- [x] `AGENTS.md`: "Electron 37" en la cabecera del proyecto y cualquier gotcha nuevo —
+  06/11/2026: cabecera, `onlyBuiltDependencies`/`install-electron`, `safeStorage` sincrono hasta
+  la 46, tamaño del chunk, y Gotchas de la entrada del renderer, los dialogos y el preload
+- [x] `README.md`: versiones si aparecen — 06/11/2026: Tech Stack y la nota de instalacion
+- [x] `TODO.md`: cerrar "Electron 37 → 44" y "Actualizaciones menores" — 06/11/2026
+- [x] ADR-0007: addendum sobre la API asincrona de `safeStorage` — 06/11/2026
 
 ---
 
@@ -146,6 +174,31 @@ seguridad de las Fases 4–7: un archivo convertido a TS tiene que pasar los mis
 - [ ] `AGENTS.md`: "Commands" con `pnpm test`; "Verifying Changes" pasa de la receta de esbuild a
   Vitest (la receta se queda solo para lo que necesite una red real)
 - [ ] `README.md`: seccion de contribucion con `pnpm test`
+
+---
+
+## Fase 2b — `safeStorage` asincrono (bloquea Electron 46)
+
+Salio de la Fase 1: Electron 45 depreca los metodos sincronos de `safeStorage` y la 46 los
+elimina. Va **despues** de la Fase 2 porque los tests de `ConfigManager` (cifrado, sin keyring)
+son justo los que protegen este cambio, y **antes** de la Fase 5, para tipar `ConfigManager` ya
+asincrono.
+
+- [ ] `isEncryptionAvailable` → `await safeStorage.isAsyncEncryptionAvailable()`,
+  `encryptString` → `encryptStringAsync`, `decryptString` → `decryptStringAsync` (devuelve
+  `{ result }`). Los blobs actuales se descifran con la API nueva: sin migracion de config
+- [ ] `ConfigManager.load()` y `save()` pasan a `async`; revisar **todos** los llamantes
+  (`createWindow`, handlers IPC, `AuthManager`), que hoy cuentan con que `save()` lanza
+  `CONFIG_SAVE_FAILED` de forma sincrona
+- [ ] Que dos `save()` concurrentes no se pisen: hoy son sincronos y no pueden solaparse;
+  asincronos si (serializarlos en una cola o en una promesa encadenada)
+- [ ] Tests de la Fase 2 en verde y prueba de humo de login + reinicio con sesion guardada
+
+**Documentacion**
+- [ ] `AGENTS.md`: "Authentication" (quitar la nota de Electron 45) y "Persistence" en Trust
+  Boundaries (`save()` asincrono)
+- [ ] ADR-0007: addendum con el cambio hecho
+- [ ] `TODO.md`/este archivo: Electron deja de estar bloqueado en la 45
 
 ---
 

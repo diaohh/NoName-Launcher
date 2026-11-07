@@ -33,7 +33,7 @@ A custom Minecraft launcher built with Electron, React, and Tailwind CSS. Featur
 
 | Layer | Technology |
 |-------|-----------|
-| Framework | Electron 37 |
+| Framework | Electron 45 |
 | Frontend | React 19, Tailwind CSS v4 |
 | Build | electron-vite, electron-builder |
 | Backend | Firebase Firestore |
@@ -206,9 +206,10 @@ Two conventions are easy to break from outside and are worth reading before a fi
   unable to start from a clean install, and it stayed hidden for weeks because the existing
   `node_modules` still had the package on disk. It will only reproduce after
   `rm -rf node_modules && pnpm install`.
-- **`package.json` lists `pnpm.onlyBuiltDependencies`.** pnpm 10 skips postinstall scripts
-  unless a package is on that list; without `electron` there the binary is never downloaded and
-  `pnpm dev` fails.
+- **The Electron binary is downloaded on first use, not on install.** Since Electron 42 the
+  package has no postinstall script; `pnpm dev` and `pnpm preview` run `install-electron`
+  first, because electron-vite expects the binary to be there already. The first `pnpm dev`
+  after a clean install takes a little longer while it downloads.
 - **`resources/` is electron-vite's public directory for the main process.** The window icon
   is imported as `resources/icon.png?asset&asarUnpack`, which resolves to a path next to the
   bundle rather than copying the file, so `electron-builder.yml` has to ship it explicitly
