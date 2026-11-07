@@ -70,7 +70,7 @@ Independientes entre si y de lo demas; pueden ir antes o intercalados.
   `AuthManager`, que no conoce ventanas), y `purgeLegacyAuthCookies` al arrancar borra las
   cookies de Microsoft que dejaron versiones anteriores en la sesion por defecto. Comprobado
   con un script en Electron: solo se borran las de Microsoft, la particion no persiste y queda
-  vacia tras el logout. Falta probar un login real a mano
+  vacia tras el logout. Login, logout y nuevo login probados a mano por el usuario el 06/11/2026
 - [x] S9: addendum fechado en ADR-0007 (el `accessToken` viaja en la linea de comandos del juego)
   — 06/11/2026: ya estaba hecho, en el addendum del 17/09/2026 de ADR-0007. Solo se quita el
   item de `TODO.md`
