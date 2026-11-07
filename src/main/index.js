@@ -8,6 +8,7 @@ import { registerAllIPC } from './ipc'
 import ConfigManager from './managers/ConfigManager'
 import LaunchManager from './managers/LaunchManager'
 import Logger from './utils/Logger'
+import { purgeLegacyAuthCookies } from './windows/msftAuth'
 
 const logger = Logger.getLogger('Main')
 
@@ -27,9 +28,10 @@ const isDev = !app.isPackaged && (process.env.NODE_ENV === 'development' || Bool
  * reload — a static tag would have to be loose enough for dev, which defeats the point
  * in production.
  *
- * The header is attached only to the launcher's own document. The Microsoft login window
- * shares this session and ships its own policy; overwriting it would break the sign-in
- * page.
+ * The header is attached only to the launcher's own document. The Microsoft login window runs
+ * in its own partition (`windows/msftAuth.js`), so its requests never reach this handler; the
+ * filter stays so that nothing else loaded in the default session gets a policy that is not
+ * its own.
  */
 function applyContentSecurityPolicy() {
   const policy = [
@@ -150,6 +152,7 @@ function startLauncher() {
   app.whenReady().then(() => {
     applyContentSecurityPolicy()
     createWindow()
+    purgeLegacyAuthCookies().catch((err) => logger.warn('Could not purge old Microsoft cookies', err))
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {

@@ -64,8 +64,13 @@ Independientes entre si y de lo demas; pueden ir antes o intercalados.
   06/11/2026, `ts/f0-quick-wins`. Chunk inicial 1.235,90 → 911,82 kB. Probado contra el
   Firestore real (lista + documento). La carrera de 12 s se queda: lite no tiene plazo propio, y
   un fallo de red llega como `unknown`, que `useServers` ahora cuenta como "sin red"
-- [ ] S7, parte barata: `partition` propia para la ventana de login (`windows/msftAuth.js`) y
-  limpiar su sesion al cerrar sesion en `AuthManager`
+- [x] S7, parte barata: `partition` propia para la ventana de login (`windows/msftAuth.js`) y
+  limpiar su sesion al cerrar sesion en `AuthManager` — 06/11/2026, `ts/f0-quick-wins`.
+  Particion en memoria (`msft-auth`), vaciada en el handler de logout (`auth.ipc.js`, no en
+  `AuthManager`, que no conoce ventanas), y `purgeLegacyAuthCookies` al arrancar borra las
+  cookies de Microsoft que dejaron versiones anteriores en la sesion por defecto. Comprobado
+  con un script en Electron: solo se borran las de Microsoft, la particion no persiste y queda
+  vacia tras el logout. Falta probar un login real a mano
 - [ ] S9: addendum fechado en ADR-0007 (el `accessToken` viaja en la linea de comandos del juego)
 
 **Documentacion**
