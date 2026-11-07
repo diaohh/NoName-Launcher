@@ -12,7 +12,7 @@ import { purgeLegacyAuthCookies } from './windows/msftAuth'
 
 const logger = Logger.getLogger('Main')
 
-let mainWindow
+let mainWindow: BrowserWindow | null = null
 
 // Development behaviour — a remote renderer URL, DevTools, the relaxed CSP — is decided by
 // `app.isPackaged` first. Environment variables only choose between dev variants, so no
@@ -29,11 +29,11 @@ const isDev = !app.isPackaged && (process.env.NODE_ENV === 'development' || Bool
  * in production.
  *
  * The header is attached only to the launcher's own document. The Microsoft login window runs
- * in its own partition (`windows/msftAuth.js`), so its requests never reach this handler; the
+ * in its own partition (`windows/msftAuth`), so its requests never reach this handler; the
  * filter stays so that nothing else loaded in the default session gets a policy that is not
  * its own.
  */
-function applyContentSecurityPolicy() {
+function applyContentSecurityPolicy(): void {
   const policy = [
     "default-src 'self'",
     isDev ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'" : "script-src 'self'",
@@ -52,7 +52,7 @@ function applyContentSecurityPolicy() {
     "form-action 'none'"
   ].join('; ')
 
-  const isLauncherDocument = (url) =>
+  const isLauncherDocument = (url: string) =>
     url.startsWith('file://') || Boolean(rendererUrl && url.startsWith(rendererUrl))
 
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
@@ -75,7 +75,7 @@ function applyContentSecurityPolicy() {
  * window, so both are denied. External links are handed to the system browser rather
  * than loaded inside a window that can talk to the preload bridge.
  */
-function restrictNavigation(window) {
+function restrictNavigation(window: BrowserWindow): void {
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://')) shell.openExternal(url)
     return { action: 'deny' }
@@ -89,25 +89,29 @@ function restrictNavigation(window) {
   })
 }
 
-let windowOpening = null
+let windowOpening: Promise<void> | null = null
 
 /**
  * Opens the main window, once. Loading the config is asynchronous (safeStorage decrypts
  * asynchronously since Electron 45), and a second launch or a macOS `activate` arriving in
  * that gap would otherwise open a second window over the same config and IPC handlers.
  */
-function createWindow() {
-  windowOpening ??= openMainWindow()
-    .catch((err) => logger.error('Could not open the main window', err))
-    .finally(() => { windowOpening = null })
+function createWindow(): Promise<void> {
+  if (!windowOpening) {
+    windowOpening = openMainWindow()
+      .catch((err) => { logger.error('Could not open the main window', err) })
+      .finally(() => { windowOpening = null })
+  }
   return windowOpening
 }
 
-async function openMainWindow() {
+async function openMainWindow(): Promise<void> {
   // Initialize config before anything else
   await ConfigManager.load()
 
-  mainWindow = new BrowserWindow({
+  // A local, so everything below works on this window and not on whatever `mainWindow`
+  // happens to hold by the time a callback runs.
+  const window = new BrowserWindow({
     width: 1000,
     height: 600,
     // The title bar is drawn by the renderer (components/common/TitleBar.jsx), so it can sit
@@ -122,27 +126,29 @@ async function openMainWindow() {
     }
   })
 
-  registerAllIPC(mainWindow)
-  restrictNavigation(mainWindow)
+  mainWindow = window
+
+  registerAllIPC(window)
+  restrictNavigation(window)
 
   if (isDev) {
     if (rendererUrl) {
-      mainWindow.loadURL(rendererUrl)
+      window.loadURL(rendererUrl)
     } else {
-      mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
+      window.loadFile(path.join(__dirname, '../renderer/index.html'))
     }
-    mainWindow.webContents.openDevTools()
+    window.webContents.openDevTools()
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
+    window.loadFile(path.join(__dirname, '../renderer/index.html'))
   }
 
-  mainWindow.on('closed', () => {
+  window.on('closed', () => {
     mainWindow = null
   })
 }
 
 /** Brings the existing window forward when the player opens the launcher a second time. */
-function focusMainWindow() {
+function focusMainWindow(): void {
   if (!mainWindow) {
     if (app.isReady()) createWindow()
     return
@@ -152,7 +158,7 @@ function focusMainWindow() {
   mainWindow.focus()
 }
 
-function startLauncher() {
+function startLauncher(): void {
   // Before anything else is logged, so the file has the whole run. Lives next to config.json,
   // not under the data directory: see ConfigManager.getLogsDirectory.
   Logger.enableFileLogging(ConfigManager.getLogsDirectory())
