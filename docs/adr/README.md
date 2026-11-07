@@ -57,6 +57,7 @@ made — but only the marked alternatives distinguish what was actually rejected
 | [0011](0011-enforce-indentation-per-area.md) | Enforce the indentation each area already uses | Accepted |
 | [0012](0012-content-addressed-pack-files.md) | Store pack files in the bucket by content hash | Proposed |
 | [0013](0013-the-game-outlives-the-launcher.md) | Let the game outlive the launcher | Accepted |
+| [0014](0014-skins-through-main-as-data-urls.md) | Change skins through the main process and hand textures over as data URLs | Accepted |
 
 ADRs 0001, 0007 and 0011 carry an addendum from the 2026-09-17 audit, and 0005 one from 2026-11-05.
 
