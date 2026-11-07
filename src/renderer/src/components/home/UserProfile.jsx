@@ -5,7 +5,7 @@ import SkinHead from '../common/SkinHead'
 
 const MENU_ITEM = 'w-full text-left text-sm rounded px-2 py-1.5 transition-colors duration-200 cursor-pointer bg-transparent border-none'
 
-export default function UserProfile({ onOpenSettings }) {
+export default function UserProfile({ onOpenSkins, onOpenSettings }) {
   const { account, logout, skinTexture } = useAuth()
   const { showStatus } = useStatus()
   const [menuOpen, setMenuOpen] = useState(false)
@@ -55,6 +55,13 @@ export default function UserProfile({ onOpenSettings }) {
           <div className="mb-3 pb-3 border-b border-white/10">
             <p className="font-bold text-sm text-white">{account.displayName}</p>
           </div>
+
+          <button
+            onClick={() => { setMenuOpen(false); onOpenSkins() }}
+            className={`${MENU_ITEM} text-white/70 hover:text-white hover:bg-white/5 mb-1`}
+          >
+            Gestor de Skins
+          </button>
 
           <button
             onClick={() => { setMenuOpen(false); onOpenSettings() }}
