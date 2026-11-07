@@ -5,7 +5,7 @@ the versioned copy; a local `CLAUDE.md` (gitignored) only imports it, so edit th
 
 ## Project
 
-NoNameLauncher — A Minecraft launcher built with Electron 37, React 19, and Tailwind CSS v4. Uses Microsoft authentication, Firestore for modpack distribution, and helios-core for game management.
+NoNameLauncher — A Minecraft launcher built with Electron 45, React 19, and Tailwind CSS v4. Uses Microsoft authentication, Firestore for modpack distribution, and helios-core for game management.
 
 ## Architecture Decisions
 
@@ -22,7 +22,7 @@ findings are in `TODO.md`, marked 📋 and tagged `S`/`B`/`D` + number, which po
 report's tables. If you have the report, read it before touching an area it flags.
 
 **TypeScript migration in progress.** [`TODO-Migracion.md`](TODO-Migracion.md) is a temporary
-checklist for it and for the steps that prepare it (Electron 44, Vitest), split into phases.
+checklist for it and for the steps that prepare it (Electron 45, Vitest), split into phases.
 Migration work lands on the `migration` integration branch through per-phase PRs, never on
 `main` directly. Read the checklist before starting migration work, mark items `[x]` with date and commit instead of
 deleting them, and update the docs each phase lists before calling the phase done. It is
@@ -39,7 +39,7 @@ pnpm package:linux  # AppImage
 pnpm package:mac    # DMG
 ```
 
-Package manager is **pnpm** (not npm or yarn). `package.json` lists `pnpm.onlyBuiltDependencies` — pnpm 10 skips postinstall scripts unless a package is on it, and without `electron` there the Electron binary is never downloaded and `pnpm dev` fails.
+Package manager is **pnpm** (not npm or yarn). `package.json` lists `pnpm.onlyBuiltDependencies` — pnpm 10 skips postinstall scripts unless a package is on it. `electron` is deliberately **not** there: since Electron 42 the package has no postinstall and downloads its binary on first use, but electron-vite reads `node_modules/electron/path.txt` directly and fails with "Electron uninstall" if the binary is missing. That is why `pnpm dev` and `pnpm preview` run `install-electron` first (it exits at once when the binary is already there).
 
 ## Verifying Changes
 
@@ -151,7 +151,7 @@ Launcher directory layout: `common/` (shared assets, libraries, versions, java, 
 
 `AuthManager` runs the Microsoft → XBL → XSTS → Minecraft chain through `helios-core/microsoft`, split in two halves: `exchangeAuthCode` / `exchangeRefreshToken` obtain the Microsoft token set, and `resolveMinecraftSession(msAccessToken)` walks it down to a playable session. The three callers compose them — `addMicrosoftAccount` (both), `refreshMSToken` (both), `refreshMCToken` (only the second, since the MS token is still good). Accounts live in `config.json` under `authenticationDatabase[uuid]` with two independent expiries (`expiresAt` for the MC token, `microsoft.expires_at` for the MS token).
 
-The three secrets — `accessToken`, `microsoft.access_token`, `microsoft.refresh_token` — are **not** on disk in the clear: `ConfigManager` folds them into one `secrets` blob encrypted with Electron's `safeStorage`, and the rest of the account stays readable. `safeStorage` needs `app.whenReady()`, which holds because `ConfigManager.load()` runs inside `createWindow()`.
+The three secrets — `accessToken`, `microsoft.access_token`, `microsoft.refresh_token` — are **not** on disk in the clear: `ConfigManager` folds them into one `secrets` blob encrypted with Electron's `safeStorage`, and the rest of the account stays readable. `safeStorage` needs `app.whenReady()`, which holds because `ConfigManager.load()` runs inside `createWindow()`. `ConfigManager` still uses the **synchronous** `safeStorage` methods, deprecated in Electron 45 and **removed in 46**: moving to `encryptStringAsync`/`decryptStringAsync` is pending in `TODO-Migracion.md` (existing blobs decrypt with the async API), and Electron must not go past 45 until it lands.
 
 Rules when touching auth ([ADR-0007](docs/adr/0007-encrypt-account-secrets-with-safestorage.md)):
 
@@ -422,8 +422,11 @@ Nothing app-side is still open from the 2026-09-17 audit; B1 (publishing) is in 
 - Only packages the **main process** `require`s at runtime belong in `dependencies` (`fs-extra`, `helios-core`, `helios-distribution-types`, `winston`) — `externalizeDepsPlugin` leaves exactly those out of the bundle and electron-builder ships them. Build-only tooling goes in `devDependencies`. `pnpm audit --prod` should stay at 0.
 - The working tree is CRLF (`core.autocrlf=true`). Scripted edits must match `\r\n`, and a `\uXXXX` escape typed into a tool call can arrive as the literal character — check regexes like `/^\uFEFF/` after writing them.
 - The TypeScript migration (TODO P5) does **not** depend on the ESM migration: electron-vite still emits the sandboxed preload as CJS from a `.ts` source.
+- The renderer's entry is `index.html` in its `root` (`src/renderer`), found by vite on its own. Do not add `build.rollupOptions.input` back: written as `./src/renderer/index.html` it resolved against that root, the dev dependency scan failed, and deps were pre-bundled on the fly with two copies of React ("Invalid hook call"). vite 8 bundles with Rolldown; `rollupOptions` is only an alias of `rolldownOptions` now.
+- Since Electron 43 a file dialog with no `defaultPath` opens in Downloads, not where the OS last left it. Pass one when there is an obvious starting point (the data directory picker starts at the current data directory).
+- The sandboxed preload (Electron 45+) can only `require('electron')`, and has no `Buffer`, `setImmediate` or Node shims. Use Web APIs there.
 - `pnpm-lock.yaml` is the only lockfile; the stale `package-lock.json` has been removed.
-- The renderer reads Firestore through `firebase/firestore/lite` (REST, no realtime, no offline queue); the initial chunk is ~0.9 MB. Do not import from `firebase/firestore`: it pulls the full SDK back in (~320 KB more) for nothing, since only one-off `getDoc`/`getDocs` reads are made. Lite has no request deadline, so the timeout race in `firestoreService` stays ([ADR-0009](docs/adr/0009-no-offline-mode.md)).
+- The renderer reads Firestore through `firebase/firestore/lite` (REST, no realtime, no offline queue); the initial chunk is ~1.0 MB (Firebase 13's lite build carries Firestore's BSON and vector types, which tree-shaking cannot drop). Do not import from `firebase/firestore`: it pulls the full SDK back in (~320 KB more) for nothing, since only one-off `getDoc`/`getDocs` reads are made. Lite has no request deadline, so the timeout race in `firestoreService` stays ([ADR-0009](docs/adr/0009-no-offline-mode.md)).
 - The skin manager is a **lazy chunk** (`React.lazy` in `HomeScreen`, ~900 KB minified, almost all three.js via `skinview3d`). Anything the home screen imports must not reach `skinview3d` or `skinview-utils`, or the chunk folds back into the initial bundle — that is why `SkinHead` carries its own CSS instead of importing `services/skinTextures.js`. The same holds for `SkinManagerSkeleton` (the Suspense fallback **and** the screen's own loading state, so loading is one continuous skeleton), the `SkinManagerLayout` frame it shares with the screen, `SkinCard` and `common/Spinner`, which all end up in the initial bundle. `skinview3d` pins three.js `^0.156`; check its release before bumping three on its own.
 
 ## Commits

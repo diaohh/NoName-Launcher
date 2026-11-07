@@ -67,3 +67,13 @@ so a single parse error silently wiped every setting the player had.
   game as `--accessToken` on the JVM command line, which other local processes of the same user
   can read. That is inherent to Mojang's argument format and cannot be avoided by a launcher;
   the guarantee of this ADR is about the renderer and the disk, not the game process.
+
+## Addendum (2026-11-06)
+
+- Electron 45 deprecates the synchronous `safeStorage.isEncryptionAvailable`, `encryptString`
+  and `decryptString` this ADR is built on, and Electron 46 removes them together with
+  Chromium's synchronous OSCrypt backend. The replacements are `isAsyncEncryptionAvailable`,
+  `encryptStringAsync` and `decryptStringAsync`, on the same per-platform key stores: a blob
+  written by `encryptString` decrypts with `decryptStringAsync`, so no re-encryption or config
+  migration is needed. The decision stands; only `ConfigManager.load`/`save` become async.
+  Tracked in `TODO-Migracion.md`, and Electron stays on 45 until it lands.

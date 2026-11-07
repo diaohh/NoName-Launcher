@@ -164,6 +164,10 @@ export function registerConfigIPC(mainWindow) {
   handle(Channels.DIALOG_OPEN_FOLDER, async (_event, options) => {
     const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
       title: options?.title || 'Seleccionar carpeta',
+      // Since Electron 43 a dialog with no defaultPath opens in Downloads instead of wherever
+      // the OS last left it. The only folder the launcher asks for is the data directory, so
+      // the picker starts from the current one.
+      defaultPath: ConfigManager.getDataDirectory(),
       properties: ['openDirectory']
     })
     return canceled ? null : filePaths[0]
