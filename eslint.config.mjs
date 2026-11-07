@@ -39,9 +39,9 @@ export default [
     }
   },
 
-  // 4 spaces: the managers, the utils and the auth window.
+  // 4 spaces: the managers, the utils, the auth window and the test support.
   {
-    files: ['src/main/managers/**/*.js', 'src/main/utils/**/*.js', 'src/main/windows/**/*.js'],
+    files: ['src/main/managers/**/*.js', 'src/main/utils/**/*.js', 'src/main/windows/**/*.js', 'src/main/testing/**/*.js'],
     plugins: { '@stylistic': stylistic },
     rules: { '@stylistic/indent': ['error', 4, { SwitchCase: 1 }] }
   },

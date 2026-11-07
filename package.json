@@ -9,6 +9,8 @@
   "scripts": {
     "dev": "install-electron && electron-vite dev",
     "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "build": "electron-vite build",
     "preview": "install-electron && electron-vite preview",
     "package": "electron-vite build && electron-builder --win",
@@ -50,6 +52,7 @@
     "skinview-utils": "^0.7.1",
     "skinview3d": "^3.4.2",
     "tailwindcss": "^4.3.5",
-    "vite": "^8.3.6"
+    "vite": "^8.3.6",
+    "vitest": "^5.1.0"
   }
 }
