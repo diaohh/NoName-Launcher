@@ -48,6 +48,8 @@
     "postcss": "^8.5.6",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "skinview-utils": "^0.7.1",
+    "skinview3d": "^3.4.2",
     "tailwindcss": "^4.2.1",
     "vite": "^6.0.0"
   }
