@@ -69,6 +69,14 @@ class ConfigManager {
         return path.join(this.getLauncherDirectory(), 'logs')
     }
 
+    /**
+     * `<launcherDir>/skins`, the skin vault. Next to the config rather than under the data
+     * directory: the skins are the player's own files, not a cache the launcher can download
+     * again, and moving the data directory must not leave them behind. See ADR-0014.
+     */
+    static getSkinsDirectory() {
+        return path.join(this.getLauncherDirectory(), 'skins')
+    }
 
     /**
      * Records the game the launcher started, so a launcher opened while that game is still

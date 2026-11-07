@@ -3,6 +3,7 @@ import { registerConfigIPC } from './config.ipc'
 import { registerDistributionIPC } from './distribution.ipc'
 import { registerLaunchIPC } from './launch.ipc'
 import { registerLogsIPC } from './logs.ipc'
+import { registerSkinsIPC } from './skins.ipc'
 import { registerWindowIPC } from './window.ipc'
 
 export function registerAllIPC(mainWindow) {
@@ -11,5 +12,6 @@ export function registerAllIPC(mainWindow) {
   registerDistributionIPC()
   registerLaunchIPC(mainWindow)
   registerLogsIPC(mainWindow)
+  registerSkinsIPC(mainWindow)
   registerWindowIPC(mainWindow)
 }

@@ -38,8 +38,8 @@ function applyContentSecurityPolicy() {
     // Tailwind injects a <style> element at runtime.
     "style-src 'self' 'unsafe-inline'",
     "font-src 'self' data:",
-    // Modpack icons and banners are arbitrary URLs stored in Firestore, and player
-    // skins are served by minotar.net.
+    // Modpack icons and banners are arbitrary URLs stored in Firestore. Skin and cape
+    // textures arrive from main as data: URLs (ADR-0014), so they add no origin here.
     "img-src 'self' data: https:",
     isDev
       ? "connect-src 'self' https: ws: wss:"

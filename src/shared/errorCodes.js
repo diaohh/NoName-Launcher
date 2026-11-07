@@ -66,6 +66,17 @@ export const ERROR_CODE = {
   // Logs
   LOGS_EXPORT_FAILED: 'LOGS_EXPORT_FAILED',
 
+  // Skin manager. A rejected token is not among them on purpose: the session is checked
+  // through AuthManager first, which answers with the AUTH_ codes above.
+  SKIN_PROFILE_FAILED: 'SKIN_PROFILE_FAILED',
+  SKIN_SAVE_FAILED: 'SKIN_SAVE_FAILED',
+  SKIN_RATE_LIMITED: 'SKIN_RATE_LIMITED',
+  SKIN_INVALID_FILE: 'SKIN_INVALID_FILE',
+  SKIN_INVALID_VALUE: 'SKIN_INVALID_VALUE',
+  SKIN_NOT_FOUND: 'SKIN_NOT_FOUND',
+  SKIN_IN_USE: 'SKIN_IN_USE',
+  SKIN_VAULT_FAILED: 'SKIN_VAULT_FAILED',
+
   // Filesystem
   PATH_OUTSIDE_BASE: 'PATH_OUTSIDE_BASE',
 
