@@ -71,11 +71,16 @@ Independientes entre si y de lo demas; pueden ir antes o intercalados.
   cookies de Microsoft que dejaron versiones anteriores en la sesion por defecto. Comprobado
   con un script en Electron: solo se borran las de Microsoft, la particion no persiste y queda
   vacia tras el logout. Falta probar un login real a mano
-- [ ] S9: addendum fechado en ADR-0007 (el `accessToken` viaja en la linea de comandos del juego)
+- [x] S9: addendum fechado en ADR-0007 (el `accessToken` viaja en la linea de comandos del juego)
+  — 06/11/2026: ya estaba hecho, en el addendum del 17/09/2026 de ADR-0007. Solo se quita el
+  item de `TODO.md`
 
 **Documentacion**
-- [ ] `TODO.md`: marcar los items de P5 correspondientes y quitar `firestore/lite` de la lista
-- [ ] `AGENTS.md`: la nota de Gotchas sobre el bundle de Firebase y la de ADR-0007 si cambia algo
+- [x] `TODO.md`: marcar los items de P5 correspondientes y quitar `firestore/lite` de la lista —
+  06/11/2026, `firestore/lite` y S9 cerrados, S7 reducido a PKCE
+- [x] `AGENTS.md`: la nota de Gotchas sobre el bundle de Firebase y la de ADR-0007 si cambia algo
+  — 06/11/2026: Gotchas reescrito para `firestore/lite`, regla de la particion de login en
+  "Authentication". ADR-0009 recibe un addendum (la carrera de 12 s sigue haciendo falta)
 
 ---
 
