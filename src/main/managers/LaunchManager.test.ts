@@ -2,10 +2,12 @@ import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import LaunchManager from './LaunchManager'
 import ConfigManager from './ConfigManager'
-import { createTempLauncher } from '../testing/tempLauncher'
+import { createTempLauncher, type TempLauncher } from '../testing/tempLauncher'
+import type { ModpackRam } from '../../shared/modpack'
+import type { SelectedServer } from './DistributionManager'
 
 /** Mojang's name for the platform the tests run on, and one that is never it. */
-const CURRENT_OS = { win32: 'windows', darwin: 'osx', linux: 'linux' }[process.platform]
+const CURRENT_OS = ({ win32: 'windows', darwin: 'osx', linux: 'linux' } as Partial<Record<string, string>>)[process.platform]
 const OTHER_OS = CURRENT_OS === 'windows' ? 'osx' : 'windows'
 
 describe('LaunchManager.rulesAllow', () => {
@@ -46,7 +48,7 @@ describe('LaunchManager.buildLaunchCommand', () => {
     const FABRIC = 'fabric-loader-0.16.0-1.20.1'
     const account = { displayName: 'Notch', uuid: '069a79f444e94726a5befca90e38aaf5', accessToken: 'mc-access-token' }
 
-    let launcher
+    let launcher: TempLauncher
 
     beforeEach(() => {
         launcher = createTempLauncher()
@@ -86,7 +88,7 @@ describe('LaunchManager.buildLaunchCommand', () => {
     })
 
     const librariesDir = () => path.join(ConfigManager.getCommonDirectory(), 'libraries')
-    const classpathOf = (args) => args[args.indexOf('-cp') + 1].split(path.delimiter)
+    const classpathOf = (args: string[]) => args[args.indexOf('-cp') + 1].split(path.delimiter)
 
     it('drops a placeholder with no value together with its --flag', async () => {
         const args = await LaunchManager.buildLaunchCommand(account, FABRIC, null)
@@ -110,7 +112,9 @@ describe('LaunchManager.buildLaunchCommand', () => {
     })
 
     describe('RAM', () => {
-        const server = (java) => ({ rawServer: { id: 'my-pack', java } })
+        const server = (java: ModpackRam): SelectedServer => ({
+            rawServer: { id: 'my-pack', name: 'My pack', maintenance: false, maintenanceMessage: null, manifest: null, java }
+        })
 
         it('uses the modpack\'s allocation by default', async () => {
             const args = await LaunchManager.buildLaunchCommand(account, FABRIC, server({ maxRam: '6G', minRam: '3G' }))

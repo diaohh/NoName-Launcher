@@ -2,37 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { LAUNCH_STEPS, PHASE_LABEL, PHASE_RANGE, launchStep, phasePercent } from './launchPhases'
 import type { PhaseType } from '../../../shared/launchProgress'
 
-/** Types that are not preparation phases and so have no slice, by design (ADR-0005). */
-const NOT_A_PHASE = new Set(['started', 'exit', 'error', 'game_startup', 'stdout', 'stderr'])
-
-// In declaration order, which is launch order.
+// In declaration order, which is launch order. That every phase LaunchManager emits has a
+// slice is not tested here: `PHASE_RANGE` is a `Record<PhaseType, …>` and LaunchManager
+// reports through the `LaunchProgress` union, so a missing one does not compile.
 const phases = Object.keys(PHASE_RANGE) as PhaseType[]
 
-/**
- * The `type` literals LaunchManager emits, read from its source. `PHASE_RANGE` is a
- * `Record<PhaseType, …>` now, but LaunchManager is still JavaScript and nothing checks what it
- * emits against the union; until it is converted (TODO-Migracion.md, Fase 5), this is the check.
- *
- * Read through vite's glob import rather than `fs`, so the renderer's tsconfig needs no node
- * types, and with either extension, so the check survives LaunchManager moving to `.ts`.
- */
-function emittedTypes(): Set<string> {
-  const sources = import.meta.glob<string>('../../../main/managers/LaunchManager.{js,ts}', { query: '?raw', import: 'default', eager: true })
-  const text = Object.values(sources).join('\n')
-  return new Set([...text.matchAll(/(?:^|[\s{,])type: '([a-z_]+)'/gm)].map(match => match[1]))
-}
-
 describe('launchPhases', () => {
-  it('gives every phase LaunchManager emits a slice of the bar', () => {
-    const types = emittedTypes()
-    expect(types.size).toBeGreaterThan(0)
-
-    for (const type of types) {
-      if (NOT_A_PHASE.has(type)) continue
-      expect(PHASE_RANGE, `phase "${type}" has no slice in PHASE_RANGE`).toHaveProperty(type)
-    }
-  })
-
   it('labels exactly the phases that have a slice', () => {
     expect(Object.keys(PHASE_LABEL).sort()).toEqual([...phases].sort())
   })

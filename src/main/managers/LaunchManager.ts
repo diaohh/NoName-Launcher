@@ -1,13 +1,13 @@
-import child_process from 'child_process'
+import child_process, { type ChildProcess } from 'child_process'
 import os from 'os'
 import path from 'path'
 import fs from 'fs-extra'
 import { app } from 'electron'
 import { validateSelectedJvm, latestOpenJDK, extractJdk, javaExecFromRoot, ensureJavaDirIsRoot, discoverBestJvmInstallation } from 'helios-core/java'
-import { downloadFile, downloadQueue, getExpectedDownloadSize, HashAlgo } from 'helios-core/dl'
+import { downloadFile, downloadQueue, getExpectedDownloadSize, HashAlgo, type Asset } from 'helios-core/dl'
 import ConfigManager from './ConfigManager'
 import AuthManager from './AuthManager'
-import DistributionManager from './DistributionManager'
+import DistributionManager, { type SelectedServer } from './DistributionManager'
 import ManifestManager from './ManifestManager'
 import ModLoaderManager from './ModLoaderManager'
 import MinecraftDownloadManager from './MinecraftDownloadManager'
@@ -17,12 +17,42 @@ import { mavenToRelativePath, mavenToUrl } from '../utils/MavenUtils'
 import { resolveInside } from '../utils/PathUtils'
 import { fetchWithTimeout } from '../utils/HttpUtils'
 import { readLines } from '../utils/GameOutput'
-import { createStartupTracker } from '../utils/StartupTracker'
+import { createStartupTracker, type StartupTracker } from '../utils/StartupTracker'
 import { ERROR_CODE } from '../../shared/errorCodes'
+import { LauncherError, errorCodeOf } from '../../shared/LauncherError'
+import type { LaunchProgress } from '../../shared/launchProgress'
+import type { LaunchStarted, LaunchStatus } from '../../shared/ipcContract'
+import type { Account } from '../types/config'
+import type { Argument, Library, Rule, VersionJson } from '../types/minecraft'
 
 const logger = Logger.getLogger('LaunchManager')
 
-const toMB = (bytes) => (bytes / 1024 / 1024).toFixed(1)
+const toMB = (bytes: number) => (bytes / 1024 / 1024).toFixed(1)
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+    value != null && typeof value === 'object' && !Array.isArray(value)
+
+type ProgressCallback = (progress: LaunchProgress) => void
+
+/** What the command line needs from the account; the rest of it never reaches the game. */
+export type LaunchAccount = Pick<Account, 'displayName' | 'uuid' | 'accessToken'>
+
+/** A library's artifact in one shape, whichever of the two the manifest declared it in. */
+export interface ResolvedArtifact {
+    relativePath: string
+    url: string | null
+    sha1: string | null
+    size: number
+}
+
+/** The values `${placeholders}` are filled from. A null one drops the argument. */
+type ArgContext = Record<string, string | null | undefined>
+
+/** What `running-game.json` records between the spawn and `close`. */
+export interface RunningGame {
+    pid: number
+    gameDir: string
+}
 
 // Minecraft 1.17 introduced the `arguments` manifest format and stopped shipping
 // natives as library classifiers. Older releases would need a separate code path.
@@ -38,13 +68,13 @@ const ORPHAN_CHECK_TIMEOUT_MS = 15 * 1000
  * The launcher features version manifests can condition arguments on. Anything not listed
  * is off — demo mode, Quick Play — which is what keeps those argument blocks out.
  */
-const LAUNCH_FEATURES = {
+const LAUNCH_FEATURES: Readonly<Record<string, boolean>> = {
     has_custom_resolution: true
 }
 
 /** Mojang's spelling of the platform in `rules[].os`. */
-const MOJANG_OS = { win32: 'windows', darwin: 'osx', linux: 'linux' }
-const MOJANG_ARCH = { ia32: 'x86', x64: 'x86_64', arm64: 'arm64' }
+const MOJANG_OS: Partial<Record<string, string>> = { win32: 'windows', darwin: 'osx', linux: 'linux' }
+const MOJANG_ARCH: Partial<Record<string, string>> = { ia32: 'x86', x64: 'x86_64', arm64: 'arm64' }
 
 /** An argument that is nothing but one placeholder, like the value half of `--xuid ${auth_xuid}`. */
 const BARE_PLACEHOLDER = /^\$\{[^}]+\}$/
@@ -61,10 +91,10 @@ const BARE_PLACEHOLDER = /^\$\{[^}]+\}$/
  */
 class LaunchManager {
 
-    static gameProcess = null
+    static gameProcess: ChildProcess | null = null
 
     /** Drives the second progress bar while the game starts up; null once it has exited. */
-    static startupTracker = null
+    static startupTracker: StartupTracker | null = null
 
     /**
      * Held for the length of the preparation, which is everything up to the spawn. Once the
@@ -74,16 +104,15 @@ class LaunchManager {
      */
     static launchInProgress = false
 
-    static assertSupportedVersion(minecraftVersion) {
+    static assertSupportedVersion(minecraftVersion: string): void {
         const [major, minor] = minecraftVersion.split('.').map(part => parseInt(part))
 
         if (major === 1 && minor < MIN_SUPPORTED_MINOR) {
-            const error = new Error(
+            throw new LauncherError(
+                ERROR_CODE.UNSUPPORTED_MC_VERSION,
                 `Minecraft ${minecraftVersion} no es compatible con este launcher. ` +
                 `Solo se admiten versiones 1.${MIN_SUPPORTED_MINOR} o superiores.`
             )
-            error.code = ERROR_CODE.UNSUPPORTED_MC_VERSION
-            throw error
         }
     }
 
@@ -91,7 +120,7 @@ class LaunchManager {
      * The Mojang version manifest declares the exact Java major it was built for.
      * The table is only a fallback for manifests that omit it.
      */
-    static getRequiredJavaVersion(minecraftVersion, versionJson) {
+    static getRequiredJavaVersion(minecraftVersion: string, versionJson: VersionJson | null | undefined): number {
         const declared = versionJson?.javaVersion?.majorVersion
         if (declared) return declared
 
@@ -103,7 +132,7 @@ class LaunchManager {
     /**
      * Bounded range: a modpack built for Java 17 must not be launched on Java 21.
      */
-    static javaSemverRange(majorVersion) {
+    static javaSemverRange(majorVersion: number): string {
         return `${majorVersion}.x`
     }
 
@@ -112,7 +141,7 @@ class LaunchManager {
      * platform's own separator, so `C:/…/bin/javaw.exe` (a hand-edited config.json) came back
      * unchanged and never validated; normalizing first makes both spellings work.
      */
-    static javaRoot(executable) {
+    static javaRoot(executable: string): string {
         return ensureJavaDirIsRoot(path.normalize(executable))
     }
 
@@ -120,7 +149,7 @@ class LaunchManager {
      * The executable when it runs and satisfies the Java major, otherwise null. Never throws:
      * a missing or broken runtime only means "not this one".
      */
-    static async checkJava(executable, requiredVersion) {
+    static async checkJava(executable: string | null, requiredVersion: number): Promise<string | null> {
         if (!executable) return null
 
         try {
@@ -143,7 +172,7 @@ class LaunchManager {
      * word, and the setting overwritten with it, so the choice did not survive a single launch
      * of a modpack on another major.
      */
-    static async requireManualJava(executable, requiredVersion) {
+    static async requireManualJava(executable: string, requiredVersion: number): Promise<string> {
         if (await this.checkJava(executable, requiredVersion)) return executable
 
         // Only for the message: which version the chosen one actually is, if it runs at all.
@@ -154,17 +183,15 @@ class LaunchManager {
             // Reported below as a Java that cannot be used.
         }
 
-        const error = new Error(actual
+        throw new LauncherError(ERROR_CODE.JAVA_MANUAL_INCOMPATIBLE, actual
             ? `El Java elegido en Ajustes es la version ${actual.semverStr} y este modpack necesita Java ${requiredVersion}. ` +
               `Elige un Java ${requiredVersion} o quita la ruta para que el launcher use el adecuado.`
             : `No se puede usar el Java elegido en Ajustes (${executable}). ` +
               'Elige otro o quita la ruta para que el launcher use el adecuado.')
-        error.code = ERROR_CODE.JAVA_MANUAL_INCOMPATIBLE
-        throw error
     }
 
     /** A Java of that major already installed on the system or in `<dataDir>/runtime`, or null. */
-    static async discoverJava(version, progressCallback) {
+    static async discoverJava(version: number, progressCallback?: ProgressCallback): Promise<string | null> {
         if (progressCallback) progressCallback({ type: 'java_discover', message: `Buscando Java ${version} en el sistema...` })
 
         const jvm = await discoverBestJvmInstallation(ConfigManager.getDataDirectory(), this.javaSemverRange(version))
@@ -177,14 +204,13 @@ class LaunchManager {
         return execPath
     }
 
-    static async downloadJava(version, progressCallback) {
+    static async downloadJava(version: number, progressCallback?: ProgressCallback): Promise<string> {
         if (!ConfigManager.getJavaAutoDownload()) {
-            const error = new Error(
+            throw new LauncherError(
+                ERROR_CODE.JAVA_UNAVAILABLE,
                 `No hay una instalacion valida de Java ${version} y la descarga automatica ` +
                 `esta desactivada. Activala en Ajustes o selecciona un Java ${version} manualmente.`
             )
-            error.code = ERROR_CODE.JAVA_UNAVAILABLE
-            throw error
         }
 
         const semverRange = this.javaSemverRange(version)
@@ -192,7 +218,7 @@ class LaunchManager {
         // them there, so they follow the configured data directory like every other
         // bulky artifact.
         const dataDir = ConfigManager.getDataDirectory()
-        let archivePath = null
+        let archivePath: string | null = null
 
         try {
             logger.info(`Downloading Java ${version}...`)
@@ -250,26 +276,27 @@ class LaunchManager {
      * cached under its major, never written over the player's setting. Alternating modpacks on
      * Java 17 and 21 used to rewrite `java.executable` on every launch.
      */
-    static async ensureJava(requiredVersion, progressCallback) {
+    static async ensureJava(requiredVersion: number, progressCallback?: ProgressCallback): Promise<string> {
         const manual = ConfigManager.getJavaExecutable()
         if (manual) return await this.requireManualJava(manual, requiredVersion)
 
         const cached = await this.checkJava(ConfigManager.getJavaRuntime(requiredVersion), requiredVersion)
         if (cached) return cached
 
-        let executable
+        let executable: string
         try {
             executable = await this.discoverJava(requiredVersion, progressCallback)
                 ?? await this.downloadJava(requiredVersion, progressCallback)
         } catch (err) {
             // helios-core's JavaGuard reports in English. The original is kept as the
             // cause and is already in the log; the player gets a message they can read.
-            if (err.code === ERROR_CODE.JAVA_UNAVAILABLE) throw err
+            if (err instanceof LauncherError && err.code === ERROR_CODE.JAVA_UNAVAILABLE) throw err
 
-            const error = new Error(`No se ha podido preparar Java ${requiredVersion}. Revisa los logs (Configuracion > Abrir carpeta de logs).`)
-            error.code = ERROR_CODE.JAVA_UNAVAILABLE
-            error.cause = err
-            throw error
+            throw new LauncherError(
+                ERROR_CODE.JAVA_UNAVAILABLE,
+                `No se ha podido preparar Java ${requiredVersion}. Revisa los logs (Configuracion > Abrir carpeta de logs).`,
+                err
+            )
         }
 
         ConfigManager.setJavaRuntime(requiredVersion, executable)
@@ -287,7 +314,7 @@ class LaunchManager {
      * declare `downloads.artifact`, Fabric declares a Maven `name` plus a repository
      * `url`. Returns null when the library carries no downloadable artifact.
      */
-    static resolveLibraryArtifact(lib) {
+    static resolveLibraryArtifact(lib: Library): ResolvedArtifact | null {
         const artifact = lib.downloads?.artifact
         if (artifact?.path) {
             return {
@@ -315,14 +342,14 @@ class LaunchManager {
      * artifact collide. Natives keep their classifier: `lwjgl:natives-windows` and
      * `lwjgl` are different entries on the classpath.
      */
-    static libraryKey(lib, artifact) {
+    static libraryKey(lib: Library, artifact: ResolvedArtifact): string {
         if (!lib.name) return artifact.relativePath
 
         const [group, artifactId, , classifier] = lib.name.split(':')
         return classifier ? `${group}:${artifactId}:${classifier}` : `${group}:${artifactId}`
     }
 
-    static async downloadModLoaderLibraries(versionString, progressCallback) {
+    static async downloadModLoaderLibraries(versionString: string, progressCallback?: ProgressCallback): Promise<void> {
         try {
             const commonDir = ConfigManager.getCommonDirectory()
             const librariesDir = path.join(commonDir, 'libraries')
@@ -333,8 +360,8 @@ class LaunchManager {
                 return
             }
 
-            const versionData = await fs.readJson(versionJsonPath)
-            const pending = []
+            const versionData: VersionJson = await fs.readJson(versionJsonPath)
+            const pending: Asset[] = []
 
             for (const lib of versionData.libraries || []) {
                 if (!this.rulesAllow(lib.rules)) continue
@@ -364,8 +391,10 @@ class LaunchManager {
                 }
 
                 pending.push({
-                    id: lib.name,
-                    hash: sha1,
+                    id: lib.name ?? artifact.relativePath,
+                    // helios never reads it, and `validateLocalFile` below treats an empty
+                    // hash like a missing one: the file existing is all it can check.
+                    hash: sha1 ?? '',
                     algo: HashAlgo.SHA1,
                     size: artifact.size,
                     url: artifact.url,
@@ -389,7 +418,7 @@ class LaunchManager {
                 }
             })
 
-            const failed = []
+            const failed: string[] = []
             for (const asset of pending) {
                 if (!await validateLocalFile(asset.path, asset.algo, asset.hash)) failed.push(asset.id)
             }
@@ -408,7 +437,7 @@ class LaunchManager {
      * when there is none or it cannot be fetched. Null is not fatal: the caller decides
      * whether an unverified local copy is acceptable.
      */
-    static async fetchPublishedSha1(artifactUrl, name) {
+    static async fetchPublishedSha1(artifactUrl: string | null, name: string | undefined): Promise<string | null> {
         if (!artifactUrl) return null
 
         try {
@@ -427,13 +456,14 @@ class LaunchManager {
         }
     }
 
-    static async readVersionJson(versionId) {
+    static async readVersionJson(versionId: string): Promise<VersionJson> {
         const versionJsonPath = ConfigManager.getVersionJsonPath(versionId)
         if (!fs.existsSync(versionJsonPath)) {
-            const error = new Error(`Falta el manifiesto de la version ${versionId}. Vuelve a lanzar para descargarlo.`)
-            error.code = ERROR_CODE.VERSION_JSON_MISSING
             logger.error(`Version manifest not found: ${versionJsonPath}`)
-            throw error
+            throw new LauncherError(
+                ERROR_CODE.VERSION_JSON_MISSING,
+                `Falta el manifiesto de la version ${versionId}. Vuelve a lanzar para descargarlo.`
+            )
         }
         return await fs.readJson(versionJsonPath)
     }
@@ -442,10 +472,10 @@ class LaunchManager {
      * Resolves a version manifest, merging it with its `inheritsFrom` parent when
      * the version belongs to a mod loader.
      *
-     * @returns {{ versionData: object, vanillaVersion: string }} The merged manifest
-     * and the vanilla version id, which is what the client jar and assets are keyed by.
+     * @returns The merged manifest and the vanilla version id, which is what the client jar
+     * and assets are keyed by.
      */
-    static async loadVersionManifest(versionId) {
+    static async loadVersionManifest(versionId: string): Promise<{ versionData: VersionJson, vanillaVersion: string }> {
         const versionData = await this.readVersionJson(versionId)
 
         if (!versionData.inheritsFrom) {
@@ -453,7 +483,7 @@ class LaunchManager {
         }
 
         const parentData = await this.readVersionJson(versionData.inheritsFrom)
-        const merged = {
+        const merged: VersionJson = {
             ...parentData,
             ...versionData,
             libraries: [...(parentData.libraries || []), ...(versionData.libraries || [])]
@@ -476,9 +506,7 @@ class LaunchManager {
      * passing `${clientid}` to the game verbatim is never right, and the caller decides what
      * to drop instead.
      */
-    static processArgTemplate(arg, argContext) {
-        if (typeof arg !== 'string') return arg
-
+    static processArgTemplate(arg: string, argContext: ArgContext): string | null {
         let unresolved = false
         const filled = arg.replace(/\$\{([^}]+)\}/g, (match, key) => {
             if (Object.hasOwn(argContext, key) && argContext[key] != null) return String(argContext[key])
@@ -489,13 +517,13 @@ class LaunchManager {
     }
 
     /** The OS version Mojang's `os.version` patterns are written against. */
-    static systemVersion() {
+    static systemVersion(): string {
         // Electron's reports the product version (macOS 14.2, Windows 10.0.22631); os.release()
         // is the kernel's, which on macOS is a Darwin number no Mojang rule was written for.
         return typeof process.getSystemVersion === 'function' ? process.getSystemVersion() : os.release()
     }
 
-    static ruleMatches(rule, features) {
+    static ruleMatches(rule: Rule, features: Readonly<Record<string, boolean>>): boolean {
         const ruleOs = rule.os
         if (ruleOs) {
             if (ruleOs.name && ruleOs.name !== (MOJANG_OS[process.platform] ?? process.platform)) return false
@@ -525,7 +553,7 @@ class LaunchManager {
      * `os.arch` (the x86-only `-Xss1M` landed on x64) and turned lwjgl's "allow, then
      * disallow osx" pair in 1.17–1.18 into "allow everywhere".
      */
-    static rulesAllow(rules, features = LAUNCH_FEATURES) {
+    static rulesAllow(rules: Rule[] | undefined, features = LAUNCH_FEATURES): boolean {
         if (!Array.isArray(rules) || rules.length === 0) return true
 
         let allowed = false
@@ -543,16 +571,20 @@ class LaunchManager {
      * `--xuid ${auth_xuid}`, and the launcher has neither (the XSTS token it requests carries
      * no xid). Both are optional for the game.
      *
-     * @returns {string[]} The flags and values that were dropped, for the log.
+     * A value that is not a string is skipped: `spawn` would refuse the whole command over it.
+     *
+     * @returns The flags and values that were dropped, for the log.
      */
-    static appendArguments(args, argList, argContext) {
-        const dropped = []
+    static appendArguments(args: string[], argList: Argument[], argContext: ArgContext): string[] {
+        const dropped: string[] = []
 
         for (const arg of argList) {
             if (typeof arg !== 'string' && !this.rulesAllow(arg.rules)) continue
 
-            const values = typeof arg === 'string' ? [arg] : [].concat(arg.value ?? [])
+            const values: unknown[] = typeof arg === 'string' ? [arg] : [arg.value ?? []].flat()
             for (const value of values) {
+                if (typeof value !== 'string') continue
+
                 const filled = this.processArgTemplate(value, argContext)
                 if (filled !== null) {
                     args.push(filled)
@@ -561,7 +593,8 @@ class LaunchManager {
 
                 const previous = args[args.length - 1]
                 if (BARE_PLACEHOLDER.test(value) && typeof previous === 'string' && previous.startsWith('--')) {
-                    dropped.push(args.pop())
+                    args.pop()
+                    dropped.push(previous)
                 }
                 dropped.push(value)
             }
@@ -570,15 +603,14 @@ class LaunchManager {
         return dropped
     }
 
-    static async buildLaunchCommand(account, versionId, server) {
+    static async buildLaunchCommand(account: LaunchAccount, versionId: string, server: SelectedServer | null): Promise<string[]> {
         const { versionData, vanillaVersion } = await this.loadVersionManifest(versionId)
 
         if (!versionData.arguments) {
-            const error = new Error(
+            throw new LauncherError(
+                ERROR_CODE.UNSUPPORTED_MANIFEST,
                 `El manifiesto de ${versionId} usa el formato antiguo (minecraftArguments), que no es compatible con este launcher.`
             )
-            error.code = ERROR_CODE.UNSUPPORTED_MANIFEST
-            throw error
         }
 
         const commonDir = ConfigManager.getCommonDirectory()
@@ -591,8 +623,8 @@ class LaunchManager {
         // after, so a later entry for the same artifact overrides the earlier one.
         // Without this the classpath would carry two versions of asm, guava or log4j
         // and the vanilla one would win.
-        const librariesByArtifact = new Map()
-        for (const lib of versionData.libraries) {
+        const librariesByArtifact = new Map<string, string>()
+        for (const lib of versionData.libraries ?? []) {
             if (!this.rulesAllow(lib.rules)) continue
             const artifact = this.resolveLibraryArtifact(lib)
             if (!artifact) continue
@@ -608,7 +640,7 @@ class LaunchManager {
 
         const classpath = libraries.join(process.platform === 'win32' ? ';' : ':')
 
-        const argContext = {
+        const argContext: ArgContext = {
             auth_player_name: account.displayName,
             version_name: versionId,
             game_directory: gameDir,
@@ -634,8 +666,8 @@ class LaunchManager {
         // while the player leaves that preference on. The slider in settings is otherwise
         // the authority.
         const useModpackRam = ConfigManager.getUseModpackRam()
-        const maxRAM = (useModpackRam && server?.rawServer?.java?.maxRam) || ConfigManager.getMaxRAM()
-        const minRAM = (useModpackRam && server?.rawServer?.java?.minRam) || ConfigManager.getMinRAM()
+        const maxRAM = (useModpackRam && server?.rawServer.java.maxRam) || ConfigManager.getMaxRAM()
+        const minRAM = (useModpackRam && server?.rawServer.java.minRam) || ConfigManager.getMinRAM()
 
         // A modpack can declare an inconsistent pair, and nothing validates it on the way in.
         // `-Xms` above `-Xmx` aborts the JVM before it prints anything, so the floor is never
@@ -664,15 +696,13 @@ class LaunchManager {
         return args
     }
 
-    static async launchMinecraft(progressCallback) {
+    static async launchMinecraft(progressCallback?: ProgressCallback): Promise<LaunchStarted> {
         // Checked before the try, and deliberately not reported through `progressCallback`:
         // an `{type:'error'}` event here would drive LaunchContext into its error state and
         // tear down the UI of the launch that is actually running.
         if (this.launchInProgress || this.gameProcess != null) {
             logger.warn('Refused a concurrent launch')
-            const error = new Error('Ya hay un lanzamiento en curso o Minecraft ya esta abierto.')
-            error.code = ERROR_CODE.LAUNCH_ALREADY_RUNNING
-            throw error
+            throw new LauncherError(ERROR_CODE.LAUNCH_ALREADY_RUNNING, 'Ya hay un lanzamiento en curso o Minecraft ya esta abierto.')
         }
 
         this.launchInProgress = true
@@ -683,9 +713,10 @@ class LaunchManager {
             // would rewrite jars it has open; starting a second one would fight over saves.
             const orphan = await this.findOrphanGame()
             if (orphan) {
-                const error = new Error('Minecraft sigue abierto desde una sesion anterior del launcher. Cierralo antes de volver a jugar.')
-                error.code = ERROR_CODE.LAUNCH_ALREADY_RUNNING
-                throw error
+                throw new LauncherError(
+                    ERROR_CODE.LAUNCH_ALREADY_RUNNING,
+                    'Minecraft sigue abierto desde una sesion anterior del launcher. Cierralo antes de volver a jugar.'
+                )
             }
 
             if (progressCallback) progressCallback({ type: 'auth', message: 'Validando cuenta...' })
@@ -695,38 +726,32 @@ class LaunchManager {
                 // The renderer decides whether to bounce the player to the login screen
                 // from `code`, not from this text, so a recoverable failure can keep its
                 // own message: a network blip must not read like a dead session.
-                const error = new Error(
+                throw new LauncherError(
+                    validation.code,
                     AuthManager.isTerminalError(validation.code)
                         ? 'Tu sesion ha caducado. Vuelve a iniciar sesion.'
                         : validation.message
                 )
-                error.code = validation.code
-                throw error
             }
 
             const account = AuthManager.getSelectedAccount()
             if (!account) {
-                const error = new Error('No hay ninguna cuenta iniciada. Inicia sesion con Microsoft.')
-                error.code = ERROR_CODE.AUTH_NO_ACCOUNT
-                throw error
+                throw new LauncherError(ERROR_CODE.AUTH_NO_ACCOUNT, 'No hay ninguna cuenta iniciada. Inicia sesion con Microsoft.')
             }
 
             const server = DistributionManager.getSelectedServer()
             if (!server) {
-                const error = new Error('No hay ningun modpack seleccionado.')
-                error.code = ERROR_CODE.LAUNCH_NO_SERVER
-                throw error
+                throw new LauncherError(ERROR_CODE.LAUNCH_NO_SERVER, 'No hay ningun modpack seleccionado.')
             }
 
             // The renderer re-reads the modpack document right before launching, so this
             // is the current value, not whatever was cached when the list was loaded.
             if (server.rawServer.maintenance) {
-                const error = new Error(
+                throw new LauncherError(
+                    ERROR_CODE.MODPACK_MAINTENANCE,
                     server.rawServer.maintenanceMessage
                     || 'El modpack esta en mantenimiento. Intentalo de nuevo en unos minutos.'
                 )
-                error.code = ERROR_CODE.MODPACK_MAINTENANCE
-                throw error
             }
 
             logger.info('Launching server:', server.rawServer.name)
@@ -819,10 +844,13 @@ class LaunchManager {
             // lets a failure take the same path as every other launch error, below.
             await this.waitForSpawn(child, normalizedJavaPath)
 
+            // Only undefined when the spawn failed, and `waitForSpawn` has rejected in that case.
+            const pid = child.pid as number
+
             this.gameProcess = child
-            this.recordRunningGame(child.pid, instanceDir)
-            logger.info('Minecraft process started, PID:', child.pid)
-            if (progressCallback) progressCallback({ type: 'started', message: 'Minecraft iniciado correctamente', pid: child.pid })
+            this.recordRunningGame(pid, instanceDir)
+            logger.info('Minecraft process started, PID:', pid)
+            if (progressCallback) progressCallback({ type: 'started', message: 'Minecraft iniciado correctamente', pid })
 
             // The second bar: `started` only means the OS started the JVM, and the window
             // takes a while longer. Created after `started` so its first report lands after it.
@@ -830,7 +858,7 @@ class LaunchManager {
                 if (progressCallback) progressCallback({ type: 'game_startup', ...progress })
             })
 
-            const forward = (type) => (lines) => {
+            const forward = (type: 'stdout' | 'stderr') => (lines: string[]) => {
                 this.startupTracker?.feed(lines)
                 if (progressCallback) progressCallback({ type, lines })
             }
@@ -854,11 +882,13 @@ class LaunchManager {
                 logger.error('Minecraft process error:', err)
             })
 
-            return { pid: child.pid }
+            return { pid }
         } catch (err) {
             logger.error('Launch failed:', err)
             if (progressCallback) {
-                progressCallback({ type: 'error', error: err.message, code: err.code || ERROR_CODE.UNKNOWN })
+                // The same code the IPC envelope gives the rejection (`errorCodeOf`), so the
+                // event and the failed `launch:game` call never disagree.
+                progressCallback({ type: 'error', error: err instanceof Error ? err.message : String(err), code: errorCodeOf(err) })
             }
             throw err
         } finally {
@@ -871,21 +901,20 @@ class LaunchManager {
      * could not (ENOENT, EACCES). Node still emits `close` after a failed spawn, which is why
      * the caller attaches its own `close` handler only after this resolves.
      */
-    static waitForSpawn(child, javaPath) {
+    static waitForSpawn(child: ChildProcess, javaPath: string): Promise<void> {
         return new Promise((resolve, reject) => {
             const onSpawn = () => {
                 child.off('error', onError)
                 resolve()
             }
-            const onError = (err) => {
+            const onError = (err: Error) => {
                 child.off('spawn', onSpawn)
-                const error = new Error(
+                reject(new LauncherError(
+                    ERROR_CODE.GAME_SPAWN_FAILED,
                     `No se ha podido iniciar Java (${javaPath}). ` +
-                    'Comprueba la ruta de Java en Ajustes, o quitala para que el launcher busque uno.'
-                )
-                error.code = ERROR_CODE.GAME_SPAWN_FAILED
-                error.cause = err
-                reject(error)
+                    'Comprueba la ruta de Java en Ajustes, o quitala para que el launcher busque uno.',
+                    err
+                ))
             }
             child.once('spawn', onSpawn)
             child.once('error', onError)
@@ -897,7 +926,7 @@ class LaunchManager {
      * `gameProcess`: nulling it here would tell `config:setDataDirectory` that no game is
      * running while the JVM is still shutting down with files open in the instance.
      */
-    static killGame() {
+    static killGame(): boolean {
         if (!this.gameProcess) return false
 
         logger.info('Killing Minecraft, PID:', this.gameProcess.pid)
@@ -914,7 +943,7 @@ class LaunchManager {
      * `running-game.json` stays on disk: it is what stops the next session from starting a
      * second game on top of this one (see `findOrphanGame`).
      */
-    static releaseGame() {
+    static releaseGame(): void {
         const child = this.gameProcess
         if (!child) return
 
@@ -931,11 +960,11 @@ class LaunchManager {
      * True while this launcher has a game running, or one survives from a previous session.
      * What `config:setDataDirectory` checks before moving the root out from under it.
      */
-    static async isGameRunning() {
+    static async isGameRunning(): Promise<boolean> {
         return this.gameProcess != null || await this.findOrphanGame() != null
     }
 
-    static recordRunningGame(pid, gameDir) {
+    static recordRunningGame(pid: number, gameDir: string): void {
         try {
             fs.writeJsonSync(ConfigManager.getRunningGamePath(), { pid, gameDir, startedAt: Date.now() })
         } catch (err) {
@@ -944,7 +973,7 @@ class LaunchManager {
         }
     }
 
-    static clearRunningGame() {
+    static clearRunningGame(): void {
         try {
             fs.removeSync(ConfigManager.getRunningGamePath())
         } catch (err) {
@@ -961,23 +990,24 @@ class LaunchManager {
      * which only a Minecraft started by this launcher does (`--gameDir`). A record that fails
      * either check is stale and deleted. When the command line cannot be read at all the guard
      * gives way rather than block: the cost is the behaviour from before it existed.
-     *
-     * @returns {Promise<{pid: number, gameDir: string} | null>}
      */
-    static async findOrphanGame() {
-        let record
+    static async findOrphanGame(): Promise<RunningGame | null> {
+        let record: unknown
         try {
             record = fs.readJsonSync(ConfigManager.getRunningGamePath())
         } catch {
             return null
         }
 
-        const valid = Number.isInteger(record?.pid) && record.pid > 0 && typeof record.gameDir === 'string'
-        if (valid && this.isProcessAlive(record.pid)) {
-            const commandLine = await this.readCommandLine(record.pid)
-            if (commandLine?.includes(record.gameDir)) {
-                logger.info(`Minecraft from a previous session is still running (PID ${record.pid})`)
-                return { pid: record.pid, gameDir: record.gameDir }
+        // The PID is interpolated into a PowerShell command by `readCommandLine`, so it is
+        // checked to be a positive integer before anything else touches it.
+        const pid = isPlainObject(record) ? record.pid : undefined
+        const gameDir = isPlainObject(record) ? record.gameDir : undefined
+        if (typeof pid === 'number' && Number.isInteger(pid) && pid > 0 && typeof gameDir === 'string' && this.isProcessAlive(pid)) {
+            const commandLine = await this.readCommandLine(pid)
+            if (commandLine?.includes(gameDir)) {
+                logger.info(`Minecraft from a previous session is still running (PID ${pid})`)
+                return { pid, gameDir }
             }
         }
 
@@ -985,19 +1015,19 @@ class LaunchManager {
         return null
     }
 
-    static isProcessAlive(pid) {
+    static isProcessAlive(pid: number): boolean {
         try {
             process.kill(pid, 0)
             return true
         } catch (err) {
             // EPERM: it exists, it just belongs to someone else.
-            return err.code === 'EPERM'
+            return (err as NodeJS.ErrnoException).code === 'EPERM'
         }
     }
 
     /** The full command line of a process, or null when it cannot be read. */
-    static readCommandLine(pid) {
-        const [file, args] = process.platform === 'win32'
+    static readCommandLine(pid: number): Promise<string | null> {
+        const [file, args]: [string, string[]] = process.platform === 'win32'
             ? ['powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`]]
             : ['ps', ['-p', String(pid), '-o', 'args=']]
 
@@ -1017,7 +1047,7 @@ class LaunchManager {
      * Lets the renderer rebuild its state after a reload: without it a refresh during a
      * game leaves the UI believing nothing is running, and the kill button never appears.
      */
-    static getStatus() {
+    static getStatus(): LaunchStatus {
         return {
             running: this.gameProcess != null,
             pid: this.gameProcess?.pid ?? null
