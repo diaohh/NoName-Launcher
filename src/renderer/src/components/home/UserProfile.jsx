@@ -54,7 +54,6 @@ export default function UserProfile({ onOpenSettings }) {
         <div className="absolute top-[60px] right-0 bg-[rgba(20,20,22,0.95)] backdrop-blur-[20px] border border-white/10 rounded-lg p-4 min-w-[220px] shadow-[0_10px_40px_rgba(0,0,0,0.5)]">
           <div className="mb-3 pb-3 border-b border-white/10">
             <p className="font-bold text-sm text-white">{account.displayName}</p>
-            <p className="text-[10px] text-white/40 mt-1 font-mono">{account.uuid}</p>
           </div>
 
           <button
