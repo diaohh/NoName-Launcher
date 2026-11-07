@@ -21,6 +21,13 @@ local working material and are never committed (latest: `2026-09-17-auditoria.md
 findings are in `TODO.md`, marked 📋 and tagged `S`/`B`/`D` + number, which points back to the
 report's tables. If you have the report, read it before touching an area it flags.
 
+**TypeScript migration in progress.** [`TODO-Migracion.md`](TODO-Migracion.md) is a temporary
+checklist for it and for the steps that prepare it (Electron 44, Vitest), split into phases.
+Migration work lands on the `migration` integration branch through per-phase PRs, never on
+`main` directly. Read the checklist before starting migration work, mark items `[x]` with date and commit instead of
+deleting them, and update the docs each phase lists before calling the phase done. It is
+deleted when the migration closes.
+
 ## Commands
 
 ```bash
