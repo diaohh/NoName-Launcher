@@ -2,8 +2,18 @@ import { MojangIndexProcessor, downloadQueue, getExpectedDownloadSize } from 'he
 import ConfigManager from './ConfigManager'
 import Logger from '../utils/Logger'
 import { ERROR_CODE } from '../../shared/errorCodes'
+import { LauncherError } from '../../shared/LauncherError'
+import type { StepProgress } from '../../shared/launchProgress'
+import type { VersionJson } from '../types/minecraft'
 
 const logger = Logger.getLogger('MinecraftDownloadManager')
+
+/** This manager's own sub-phases; `getPhaseDisplayName` turns them into the bar's header. */
+export type DownloadPhase = 'init' | 'validation' | 'download' | 'complete'
+
+export interface DownloadProgress extends StepProgress {
+    phase: DownloadPhase
+}
 
 class MinecraftDownloadManager {
 
@@ -13,16 +23,16 @@ class MinecraftDownloadManager {
      * @param progressCallback Receives `{ current, total, phase, message }`, the one
      * progress shape used across the launch flow. `phase` is this manager's own
      * sub-phase; the launch `type` is added by LaunchManager, which owns it.
-     * @returns {Promise<object>} The Mojang version manifest, which carries the
-     * required Java major version among other launch metadata.
+     * @returns The Mojang version manifest, which carries the required Java major version
+     * among other launch metadata.
      */
-    static async downloadMinecraft(minecraftVersion, progressCallback) {
+    static async downloadMinecraft(minecraftVersion: string, progressCallback?: (progress: DownloadProgress) => void): Promise<VersionJson> {
         try {
             logger.info('Starting Minecraft download for version:', minecraftVersion)
 
             const commonDir = ConfigManager.getCommonDirectory()
 
-            const report = (current, phase, message) => {
+            const report = (current: number, phase: DownloadPhase, message: string) => {
                 if (progressCallback) progressCallback({ current, total: 100, phase, message })
             }
 
@@ -42,7 +52,8 @@ class MinecraftDownloadManager {
                 report(stagePercent, 'validation', `Validando archivos... (${completedStages}/${totalStages})`)
             })
 
-            const versionJson = await mojangProcessor.getVersionJson()
+            // helios' own type leaves out `javaVersion`, which is what the launch reads from it.
+            const versionJson = await mojangProcessor.getVersionJson() as unknown as VersionJson
 
             const allDownloads = [
                 ...dlObjects.assets,
@@ -80,19 +91,18 @@ class MinecraftDownloadManager {
             // untouched. The original stays as the cause and in the log.
             logger.error('Minecraft download failed:', err)
 
-            const error = new Error(
+            throw new LauncherError(
+                ERROR_CODE.MC_DOWNLOAD_FAILED,
                 `No se han podido descargar los archivos de Minecraft ${minecraftVersion}. ` +
-                'Comprueba tu conexion e intentalo de nuevo.'
+                'Comprueba tu conexion e intentalo de nuevo.',
+                err
             )
-            error.code = ERROR_CODE.MC_DOWNLOAD_FAILED
-            error.cause = err
-            throw error
         }
     }
 
     /** Exactly the sub-phases `downloadMinecraft` reports, nothing it never emits. */
-    static getPhaseDisplayName(phase) {
-        const phases = {
+    static getPhaseDisplayName(phase: DownloadPhase): string {
+        const phases: Record<DownloadPhase, string> = {
             init: 'Preparando Minecraft',
             validation: 'Validando Minecraft',
             download: 'Descargando Minecraft',
