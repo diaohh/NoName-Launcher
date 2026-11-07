@@ -41,6 +41,15 @@ export const Channels = {
   // Logs
   LOGS_EXPORT: 'logs:export',
 
+  // Skins. Every call to Mojang happens in main, which holds the token; the renderer only
+  // ever receives textures as data URLs.
+  SKINS_GET_STATE: 'skins:getState',
+  SKINS_GET_ACTIVE_TEXTURE: 'skins:getActiveTexture',
+  SKINS_IMPORT: 'skins:import',
+  SKINS_RENAME: 'skins:rename',
+  SKINS_DELETE: 'skins:delete',
+  SKINS_SAVE: 'skins:save',
+
   // Window
   WINDOW_MINIMIZE: 'window:minimize',
   WINDOW_MAXIMIZE: 'window:maximize',

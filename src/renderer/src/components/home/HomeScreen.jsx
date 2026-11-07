@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { useServers } from '../../contexts/ServersContext'
 import DynamicBackground from './DynamicBackground'
 import ModpackLogo from './ModpackLogo'
@@ -10,13 +10,31 @@ import LogViewer from '../launch/LogViewer'
 import ServersError from './ServersError'
 import SettingsScreen from '../settings/SettingsScreen'
 import AppLogo from '../common/AppLogo'
+import SkinManagerSkeleton from '../skins/SkinManagerSkeleton'
+
+// The skin manager carries skinview3d and three.js, a few hundred KB the launcher does not
+// need until the player opens it, so it is a chunk of its own, loaded on demand.
+const SkinManagerScreen = lazy(() => import('../skins/SkinManagerScreen'))
 
 export default function HomeScreen() {
   const { selectedServer, error, reload } = useServers()
-  const [showSettings, setShowSettings] = useState(false)
+  // 'home', 'settings' or 'skins'. The other screens replace this one whole and come back
+  // through `onBack`.
+  const [screen, setScreen] = useState('home')
+  const goHome = () => setScreen('home')
 
-  if (showSettings) {
-    return <SettingsScreen onBack={() => setShowSettings(false)} />
+  if (screen === 'settings') {
+    return <SettingsScreen onBack={goHome} />
+  }
+
+  if (screen === 'skins') {
+    return (
+      // The skeleton is outside the lazy chunk and is also what the screen shows while main
+      // reads the profile, so opening the skin manager is one continuous loading state.
+      <Suspense fallback={<SkinManagerSkeleton onCancel={goHome} />}>
+        <SkinManagerScreen onBack={goHome} />
+      </Suspense>
+    )
   }
 
   return (
@@ -26,7 +44,10 @@ export default function HomeScreen() {
       <ServerSidebar />
 
       <main className="flex-1 min-w-0 flex flex-col relative">
-        <UserProfile onOpenSettings={() => setShowSettings(true)} />
+        <UserProfile
+          onOpenSkins={() => setScreen('skins')}
+          onOpenSettings={() => setScreen('settings')}
+        />
 
         {selectedServer ? (
           // One column, top to bottom: the logo takes whatever height is left, then the play

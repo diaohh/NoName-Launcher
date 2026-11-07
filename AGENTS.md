@@ -69,7 +69,8 @@ Main Process (src/main/)          Preload (src/preload/)       Renderer (src/ren
 │   ├── LaunchManager.js                                        │   └── firestoreService.js
 │   ├── ManifestManager.js                                      ├── hooks/useServers.js
 │   ├── ModLoaderManager.js                                     └── components/{feature}/
-│   └── MinecraftDownloadManager.js
+│   ├── MinecraftDownloadManager.js
+│   └── SkinManager.js (Mojang profile, skin vault)
 ├── constants.js (build-time MICROSOFT_CLIENT_ID)
 └── ipc/
     ├── result.js (handle() + envelope)
@@ -78,6 +79,7 @@ Main Process (src/main/)          Preload (src/preload/)       Renderer (src/ren
     ├── distribution.ipc.js
     ├── launch.ipc.js
     ├── logs.ipc.js (logs:export)
+    ├── skins.ipc.js (skins:*)
     └── window.ipc.js (controls, maximize state, close guard)
 ```
 
@@ -104,7 +106,7 @@ Events from main→renderer use `ipcRenderer.on` (e.g., launch progress, token e
 
 React Context API only (no Redux). Four providers wrap the app:
 
-- **AuthProvider** — Microsoft account, login/logout, token expiry monitoring
+- **AuthProvider** — Microsoft account, login/logout, token expiry monitoring, and `skinTexture` (the worn skin, read once per account through `skins:getActiveTexture` for the avatar; `updateSkinTexture` after a save)
 - **LaunchProvider** — Launch state machine (`idle` → `preparing` → `playing`), progress tracking, the game's `startup` (`game_startup`, the tracker's last step), game logs (last 500 lines)
 - **ServersProvider** — Modpack list from Firestore, server selection, module loading
 - **StatusProvider** — Transient messages. `useStatus().showStatus(message, type)` with `type` `error` (default), `success` or `info`, shown for `VISIBLE_MS` with a bar that runs out with the timer; `dismissStatus()` closes it early (the toast's own close button). A single `<StatusMessage />` host lives in `App.jsx` above every screen, so a message raised on the way out of one screen is still visible on the next. It is the **outermost** provider, so the others (AuthProvider tells the player why a session expired) can report through it
@@ -132,8 +134,11 @@ leaving a screen stuck on "Cargando...". Known violations are listed in `TODO.md
   - **Two roots, and they are not the same thing** ([ADR-0004](docs/adr/0004-two-roots-launcher-and-data-directory.md)). `getLauncherDirectory()` is the fixed app root and must never depend on a setting; `getDataDirectory()` is what "Directorio de datos" governs, and everything bulky hangs off it — `common/`, `instances/`, `manifests/`, `<dataDir>/runtime/<arch>`. **Build new paths on `getDataDirectory()`** unless they belong next to the config
   - `settings.launcher.dataDirectory` is `null` by default ("wherever the launcher lives"); an unusable stored path falls back to the default with a warning and is **not** rewritten
 - **helios-core** — Java detection/download, Minecraft asset downloading, authentication helpers
+- **Mojang profile API** (`api.minecraftservices.com/minecraft/profile`, main-side only) — the worn skin and the owned capes, and where "Gestor de Skins" saves them ([ADR-0014](docs/adr/0014-skins-through-main-as-data-urls.md)). `SkinManager` is the only caller; textures reach the renderer as `data:` URLs, never as Mojang URLs
+  - The vault is `<launcherDir>/skins/` (next to the config, **not** the data directory, and shared by every account): `<sha256>.png` per skin plus `index.json` (`name`, `variant` — `null` until known, the renderer infers it —, `textureUrl`). The worn skin is matched by `textureUrl` first and by hash second, because Mojang re-encodes uploads; after an upload the entry sent claims the new URL. Every profile read adds the worn skin to the vault, so a change can never lose it
+  - Import, rename and delete hit the disk at once; skin, model and cape only change with "Guardar", which sends just what differs from the profile. Delete goes to the system trash and is refused for the worn skin (`SKIN_IN_USE`). A PNG is checked by header only — 64x64 or 64x32 — in main, on import and before upload
 
-Launcher directory layout: `common/` (shared assets, libraries, versions, java, forge), `manifests/<sha256>.json` (verified manifest cache), `instances/<serverId>/` (mods, natives, per-modpack game dir, plus `.nnl-state.json`).
+Launcher directory layout: `common/` (shared assets, libraries, versions, java, forge), `manifests/<sha256>.json` (verified manifest cache), `instances/<serverId>/` (mods, natives, per-modpack game dir, plus `.nnl-state.json`). Under the fixed launcher root instead: `config.json`, `logs/`, `running-game.json` and `skins/`.
 
 ### Authentication
 
@@ -267,7 +272,7 @@ The required Java major comes from the Mojang manifest (`javaVersion.majorVersio
 ### Shared Utilities (`src/main/utils`)
 
 - `Logger` — one winston root logger; `getLogger(name)` returns a child labelled with the name. Console transport (coloured) plus, after `Logger.enableFileLogging(ConfigManager.getLogsDirectory())` in `main/index.js`, a file transport at `<launcherDir>/logs/launcher.log` rotating at 5 MB × 5 files. An `Error` argument is rendered as stack + `code` + cause chain (never `util.inspect` at unlimited depth, which dumped got's request headers), other objects at depth 3, and the final line goes through a token redactor. The redactor is a safety net: **never log a token, nor an object that may carry one**. helios-core's own internal loggers still use its console-only `LoggerUtil`.
-- `FileUtils` — `hashFile` / `validateLocalFile`, streaming. Every downloaded artifact is validated with it; never re-implement hashing with `readFileSync`. `validateLocalFile` with no expected hash accepts **any file that exists**, and helios writes downloads straight to their final path. So never pass it a null hash if one can be obtained: loader libraries without `sha1` (Fabric's `fabric-loader` and `intermediary`) get theirs from the maven via `LaunchManager.fetchPublishedSha1`.
+- `FileUtils` — `hashFile` / `validateLocalFile`, streaming. Every downloaded artifact is validated with it; never re-implement hashing with `readFileSync`. `validateLocalFile` with no expected hash accepts **any file that exists**, and helios writes downloads straight to their final path. So never pass it a null hash if one can be obtained: loader libraries without `sha1` (Fabric's `fabric-loader` and `intermediary`) get theirs from the maven via `LaunchManager.fetchPublishedSha1`. `writeFileAtomicSync` (tmp + fsync + rename) is the one atomic writer, shared by `config.json` and the skin vault.
 - `PathUtils` — `resolveInside` / `isSafeRelativePath`. Every path built from manifest, renderer or network data goes through `resolveInside`.
 - `HttpUtils` — `fetchWithTimeout` for small JSON/text requests. Never call bare `fetch` in main.
 - `MavenUtils` — `mavenToRelativePath` / `mavenToUrl` for Maven-coordinate libraries.
@@ -325,7 +330,7 @@ VITE_FIREBASE_PROJECT_ID=...
 - All UI text is in **Spanish**; logs and code identifiers in English
 - Managers are static classes (no instantiation)
 - IPC channel names use colon notation: `category:action`
-- Skin avatars use minotar.net API
+- The avatar is drawn from the worn skin texture (`components/common/SkinHead.jsx`, CSS only); minotar.net is gone ([ADR-0014](docs/adr/0014-skins-through-main-as-data-urls.md))
 - `usersAllowed` in Firestore filters by Minecraft **username** (not UUID)
 - Indentation: 4 spaces in `src/main/{managers,utils,windows}`, 2 spaces in `src/main/index.js`, `src/main/ipc`, `src/preload`, `src/shared` and the whole renderer — match the file you are editing
 - Error codes are shared constants in `src/shared/errorCodes.js`, never inline strings
@@ -392,6 +397,10 @@ The mechanisms for this exist and are the ones to reuse (branch `fix/p1-hardenin
   on blur, not per keystroke
 - **Exported logs**: `logs:export` takes the text from the renderer but never a path — the path is
   whatever the native save dialog answered — and writes it through `Logger.redact`
+- **Skins**: same rule for `skins:import`, whose path comes from the native open dialog;
+  `skins.ipc.js` checks vault ids (`/^[0-9a-f]{64}$/`), names (`cleanSkinName`, 32 chars) and the
+  save choice. Profile bodies are parsed by `SkinManager.parseProfile`, and a texture URL is only
+  followed on `textures.minecraft.net`, over https
 - **Process probing**: `LaunchManager.readCommandLine(pid)` interpolates the PID into a PowerShell
   command, so it is only ever called with a PID already checked to be a positive integer
 
@@ -407,6 +416,7 @@ Nothing app-side is still open from the 2026-09-17 audit; B1 (publishing) is in 
 - The TypeScript migration (TODO P5) does **not** depend on the ESM migration: electron-vite still emits the sandboxed preload as CJS from a `.ts` source.
 - `pnpm-lock.yaml` is the only lockfile; the stale `package-lock.json` has been removed.
 - Renderer bundle is ~1.2 MB, dominated by the Firebase SDK; only `getDoc`/`getDocs` are used, so `firebase/firestore/lite` is enough.
+- The skin manager is a **lazy chunk** (`React.lazy` in `HomeScreen`, ~900 KB minified, almost all three.js via `skinview3d`). Anything the home screen imports must not reach `skinview3d` or `skinview-utils`, or the chunk folds back into the initial bundle — that is why `SkinHead` carries its own CSS instead of importing `services/skinTextures.js`. The same holds for `SkinManagerSkeleton` (the Suspense fallback **and** the screen's own loading state, so loading is one continuous skeleton), the `SkinManagerLayout` frame it shares with the screen, `SkinCard` and `common/Spinner`, which all end up in the initial bundle. `skinview3d` pins three.js `^0.156`; check its release before bumping three on its own.
 
 ## Commits
 
@@ -419,6 +429,6 @@ refactor(distro): drop the distribution.json flow
 build: add portable Windows target
 ```
 
-Scopes in use: `launch`, `java`, `auth`, `distro`, `servers`, `download`, `game`, `fabric`, `ui`, `config`.
+Scopes in use: `launch`, `java`, `auth`, `distro`, `servers`, `download`, `game`, `fabric`, `ui`, `config`, `skins`.
 
 (UI text stays in Spanish — this rule is only about commits, code identifiers and logs.)

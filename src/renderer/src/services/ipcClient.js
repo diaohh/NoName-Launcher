@@ -60,6 +60,14 @@ export const ipc = {
   logs: {
     export: invoke('logsExport')
   },
+  skins: {
+    getState: invoke('skinsGetState'),
+    getActiveTexture: invoke('skinsGetActiveTexture'),
+    import: invoke('skinsImport'),
+    rename: invoke('skinsRename'),
+    delete: invoke('skinsDelete'),
+    save: invoke('skinsSave')
+  },
   events: {
     onTokenExpired: (cb) => window.electronAPI.onTokenExpired(cb)
   },

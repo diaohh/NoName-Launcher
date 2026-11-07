@@ -11,7 +11,8 @@ A custom Minecraft launcher built with Electron, React, and Tailwind CSS. Featur
 - **Automatic Java Management** — Reads the required Java version from the Minecraft manifest, reuses a compatible JVM if one is installed, downloads it otherwise. A Java picked by hand in Settings is always respected: a modpack that needs another version refuses to start instead of silently switching
 - **Fabric Support** — Loader profile resolved from the Fabric Meta API. Forge is implemented but not yet reachable end to end (see the loader table below)
 - **Per-Modpack Settings** — RAM allocation defined per modpack, used by default; a launcher-wide slider takes over when the per-modpack override is switched off in Settings
-- **Dynamic UI** — Modpack banners, player skin display via Minotar, glassmorphism dark theme with its own title bar
+- **Skin Manager** — A 3D viewer of the account's skin, a local vault of skins imported from PNG files (rename and delete from the right-click menu), classic or slim model, and the capes the account owns; "Guardar" applies the change on Mojang (see [ADR-0014](docs/adr/0014-skins-through-main-as-data-urls.md))
+- **Dynamic UI** — Modpack banners, the player's head drawn from their own skin, glassmorphism dark theme with its own title bar
 - **Launch Feedback** — One progress bar split into steps (verify, download, prepare, start), each checked as the launch moves past it, the last one following the game to its title screen; the game log can be copied or saved from the logs dialog
 - **The Game Outlives the Launcher** — Closing the launcher never closes Minecraft; closing it mid-download asks first (see [ADR-0013](docs/adr/0013-the-game-outlives-the-launcher.md))
 - **Cross-Platform** — Windows (NSIS installer + portable), Linux (AppImage), macOS (DMG)
@@ -38,6 +39,7 @@ A custom Minecraft launcher built with Electron, React, and Tailwind CSS. Featur
 | Backend | Firebase Firestore |
 | Game Engine | [helios-core](https://github.com/dscalzi/helios-core) 2.x — signatures changed in 2.x, check `node_modules/helios-core/dist/**/*.d.ts` |
 | Auth | Microsoft Azure AD (OAuth 2.0) |
+| Skin viewer | [skinview3d](https://github.com/bs-community/skinview3d) 3.x (three.js), loaded only with the skin manager |
 
 ## Prerequisites
 
@@ -157,6 +159,7 @@ The launcher root is `%APPDATA%/.nonamelauncher` on Windows (`~/Library/Applicat
 config.json          Launcher settings + account database
 logs/                launcher.log, rotated at 5 MB, five files kept (Settings → "Abrir carpeta de logs")
 running-game.json    The game started by the launcher, while it runs (stops a second one starting on top)
+skins/               The skin vault: one <sha256>.png per skin plus index.json, shared by every account
 ```
 
 Everything bulky lives under the **data directory**, which defaults to that same root and can be moved from Settings → Launcher:
@@ -168,7 +171,7 @@ manifests/           Verified pack manifests, keyed by sha256
 instances/<id>/      Per-modpack game directory (mods, config, saves, natives)
 ```
 
-`config.json` and `logs/` always stay in the launcher root — the config is what records where the data directory is, and the logs have to be findable even when the data directory is what broke. Changing the setting affects new downloads only; existing files are not moved.
+`config.json`, `logs/` and `skins/` always stay in the launcher root — the config is what records where the data directory is, and the logs have to be findable even when the data directory is what broke. Changing the setting affects new downloads only; existing files are not moved.
 
 Only one launcher runs at a time: opening it again brings the existing window to the front.
 
@@ -244,14 +247,16 @@ src/
 │   │   ├── DistributionManager  # Modpack data + file validation/download
 │   │   ├── LaunchManager   # Java, launch command, game process
 │   │   ├── ModLoaderManager     # Forge / Fabric installation
-│   │   └── MinecraftDownloadManager  # Vanilla assets via helios-core
+│   │   ├── MinecraftDownloadManager  # Vanilla assets via helios-core
+│   │   └── SkinManager     # Mojang profile (skin, capes) + local skin vault
 │   ├── utils/              # Logger, file hashing
 │   └── ipc/                # IPC channel handlers
 ├── preload/                # Context bridge (main ↔ renderer)
 │   └── index.js
 ├── shared/                 # Bundled into more than one process — must stay dependency-free
 │   ├── channels.js         # IPC channel names, read by the handlers and the preload
-│   └── errorCodes.js       # The only source of IPC error codes
+│   ├── errorCodes.js       # The only source of IPC error codes
+│   └── skins.js            # Skin name limit and models, checked on both sides
 └── renderer/src/           # React application
     ├── App.jsx             # Root component + providers
     ├── contexts/           # Auth, Launch, Servers, Status
@@ -262,7 +267,8 @@ src/
         ├── common/         # Modal (portal + Escape), status message
         ├── home/           # Main screen (sidebar, background, profile)
         ├── launch/         # Play button, kill button, progress bar, log viewer
-        └── settings/       # Settings screen
+        ├── settings/       # Settings screen
+        └── skins/          # Skin manager (lazy-loaded: 3D viewer, vault, capes)
 ```
 
 ## Contributing

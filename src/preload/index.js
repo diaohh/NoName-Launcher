@@ -52,6 +52,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Logs
   logsExport: (text) => ipcRenderer.invoke(Channels.LOGS_EXPORT, text),
 
+  // Skins
+  skinsGetState: () => ipcRenderer.invoke(Channels.SKINS_GET_STATE),
+  skinsGetActiveTexture: () => ipcRenderer.invoke(Channels.SKINS_GET_ACTIVE_TEXTURE),
+  skinsImport: () => ipcRenderer.invoke(Channels.SKINS_IMPORT),
+  skinsRename: (id, name) => ipcRenderer.invoke(Channels.SKINS_RENAME, id, name),
+  skinsDelete: (id) => ipcRenderer.invoke(Channels.SKINS_DELETE, id),
+  skinsSave: (choice) => ipcRenderer.invoke(Channels.SKINS_SAVE, choice),
+
   // Token expiration event (main -> renderer)
   onTokenExpired: subscribe(Channels.AUTH_TOKEN_EXPIRED),
 

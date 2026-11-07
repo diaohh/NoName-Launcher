@@ -4,6 +4,7 @@ import os from 'os'
 import { safeStorage } from 'electron'
 import Logger from '../utils/Logger'
 import { resolveInside } from '../utils/PathUtils'
+import { writeFileAtomicSync } from '../utils/FileUtils'
 import { ERROR_CODE } from '../../shared/errorCodes'
 
 const logger = Logger.getLogger('ConfigManager')
@@ -66,6 +67,15 @@ class ConfigManager {
      */
     static getLogsDirectory() {
         return path.join(this.getLauncherDirectory(), 'logs')
+    }
+
+    /**
+     * `<launcherDir>/skins`, the skin vault. Next to the config rather than under the data
+     * directory: the skins are the player's own files, not a cache the launcher can download
+     * again, and moving the data directory must not leave them behind. See ADR-0014.
+     */
+    static getSkinsDirectory() {
+        return path.join(this.getLauncherDirectory(), 'skins')
     }
 
     /**
@@ -359,23 +369,10 @@ class ConfigManager {
      */
     static save() {
         const data = JSON.stringify(this.toDiskConfig(), null, 4)
-        const tmpPath = `${this.configPath}.tmp`
 
         try {
-            const fd = fs.openSync(tmpPath, 'w')
-            try {
-                fs.writeFileSync(fd, data, 'utf-8')
-                fs.fsyncSync(fd)
-            } finally {
-                fs.closeSync(fd)
-            }
-            fs.renameSync(tmpPath, this.configPath)
+            writeFileAtomicSync(this.configPath, data)
         } catch (err) {
-            try {
-                fs.removeSync(tmpPath)
-            } catch {
-                // Nothing more to do; the next save overwrites it.
-            }
             logger.error('Failed to save config', err)
 
             const error = new Error('No se ha podido guardar la configuracion. Comprueba que hay espacio en disco y permiso de escritura.')
