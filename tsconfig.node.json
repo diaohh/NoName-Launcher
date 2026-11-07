@@ -1,0 +1,27 @@
+// Main process, preload and src/shared. electron-vite compiles; tsc only checks
+// (`pnpm typecheck:node` passes --noEmit and drops `composite`, which only the editor needs).
+{
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
+
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+
+    // Incremental migration: JavaScript is compiled alongside but not checked, and every
+    // .ts file is strict from the day it is written.
+    "allowJs": true,
+    "checkJs": false,
+    "strict": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["src/main/**/*", "src/preload/**/*", "src/shared/**/*"]
+}
