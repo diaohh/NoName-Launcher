@@ -58,6 +58,7 @@ made — but only the marked alternatives distinguish what was actually rejected
 | [0012](0012-content-addressed-pack-files.md) | Store pack files in the bucket by content hash | Proposed |
 | [0013](0013-the-game-outlives-the-launcher.md) | Let the game outlive the launcher | Accepted |
 | [0014](0014-skins-through-main-as-data-urls.md) | Change skins through the main process and hand textures over as data URLs | Accepted |
+| [0015](0015-incremental-typescript-migration.md) | Migrate to TypeScript incrementally, strict in every `.ts` file | Accepted |
 
 ADRs 0001, 0007 and 0011 carry an addendum from the 2026-09-17 audit, and 0005 one from 2026-11-05.
 
@@ -68,7 +69,5 @@ Decisions already taken and documented only as rules in `AGENTS.md` (formerly th
 
 - **State in the Context API, no Redux** — four providers, why the launcher's state is small
   enough and what `StatusContext` replaced.
-- **No test runner** — verification through throwaway esbuild-bundled scripts, why the sources
-  cannot run under plain node, and what that costs.
 - **Mod loaders are ours, not helios-core's** — Fabric via the Meta API, Forge via the
   official installer, NeoForge planned and the version-id trap.

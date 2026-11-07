@@ -94,12 +94,12 @@ export function registerConfigIPC(mainWindow) {
 
   handle(Channels.CONFIG_SET_JAVA_EXECUTABLE, async (_event, executable) => {
     ConfigManager.setJavaExecutable(requireJavaExecutable(executable))
-    ConfigManager.save()
+    await ConfigManager.save()
   })
 
   handle(Channels.CONFIG_SET_JAVA_AUTO_DOWNLOAD, async (_event, value) => {
     ConfigManager.setJavaAutoDownload(requireBoolean(value, 'Descarga automatica de Java'))
-    ConfigManager.save()
+    await ConfigManager.save()
   })
 
   handle(Channels.CONFIG_SET_MAX_RAM, async (_event, megabytes) => {
@@ -108,7 +108,7 @@ export function registerConfigIPC(mainWindow) {
     }
     const clamped = Math.min(Math.max(Math.round(megabytes), RAM_MIN_MB), maxAllowedRamMB())
     ConfigManager.setMaxRAM(ConfigManager.formatRamFromMB(clamped))
-    ConfigManager.save()
+    await ConfigManager.save()
 
     // Answers with what was actually stored, minimum included: setMaxRAM pulls the floor
     // down with the ceiling, and the settings screen has to show that.
@@ -120,22 +120,22 @@ export function registerConfigIPC(mainWindow) {
 
   handle(Channels.CONFIG_SET_USE_MODPACK_RAM, async (_event, value) => {
     ConfigManager.setUseModpackRam(requireBoolean(value, 'Usar la RAM del modpack'))
-    ConfigManager.save()
+    await ConfigManager.save()
   })
 
   handle(Channels.CONFIG_SET_GAME_WIDTH, async (_event, width) => {
     ConfigManager.setGameWidth(requireInteger(width, GAME_WIDTH, 'El ancho'))
-    ConfigManager.save()
+    await ConfigManager.save()
   })
 
   handle(Channels.CONFIG_SET_GAME_HEIGHT, async (_event, height) => {
     ConfigManager.setGameHeight(requireInteger(height, GAME_HEIGHT, 'El alto'))
-    ConfigManager.save()
+    await ConfigManager.save()
   })
 
   handle(Channels.CONFIG_SET_FULLSCREEN, async (_event, value) => {
     ConfigManager.setFullscreen(requireBoolean(value, 'Pantalla completa'))
-    ConfigManager.save()
+    await ConfigManager.save()
   })
 
   handle(Channels.CONFIG_SET_DATA_DIRECTORY, async (_event, dir) => {
@@ -148,7 +148,7 @@ export function registerConfigIPC(mainWindow) {
     }
 
     ConfigManager.setDataDirectory(dir)
-    ConfigManager.save()
+    await ConfigManager.save()
     return ConfigManager.getDataDirectory()
   })
 

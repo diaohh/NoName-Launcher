@@ -178,9 +178,28 @@ Only one launcher runs at a time: opening it again brings the existing window to
 ## Development
 
 ```bash
-pnpm dev     # electron-vite dev server, hot reload for the renderer
-pnpm lint    # ESLint (flat config) — the repo stays at 0 errors
+pnpm dev        # electron-vite dev server, hot reload for the renderer
+pnpm lint       # ESLint (flat config) — the repo stays at 0 errors
+pnpm test       # Vitest (pnpm test:watch to keep it running)
+pnpm typecheck  # tsc --noEmit over the main/preload and renderer projects
 ```
+
+### Contributing
+
+Before opening a pull request, `pnpm lint` and `pnpm typecheck` must report 0 errors,
+`pnpm test` must pass and `pnpm build` must compile. electron-vite strips TypeScript types
+without checking them, so `pnpm typecheck` is the only thing that does.
+
+- **The code is moving to TypeScript** ([ADR-0015](docs/adr/0015-incremental-typescript-migration.md)).
+  New files are `.ts`/`.tsx` with `strict` on; existing JavaScript is converted file by file
+  and is not type-checked until then.
+- **Tests sit next to the file they cover** (`ConfigManager.test.js` beside `ConfigManager.js`)
+  and run on node through Vitest, with `electron` replaced by a stub
+  (`src/main/testing/electron.js`). Coverage is deliberately small: a test is worth adding when
+  the behaviour would otherwise fail without anyone noticing.
+- **Indentation depends on the area** — 4 spaces in `src/main/managers`, `utils`, `windows` and
+  `testing`, 2 everywhere else, `.ts` included. ESLint enforces it
+  ([ADR-0011](docs/adr/0011-enforce-indentation-per-area.md)).
 
 Design decisions and the reasoning behind the conventions below live in
 [docs/adr/](docs/adr/README.md). Coding agents read [AGENTS.md](AGENTS.md), which states the

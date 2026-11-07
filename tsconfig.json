@@ -1,0 +1,9 @@
+// Solution file for editors. The checks run per project (`pnpm typecheck`): the main process,
+// the preload and src/shared on node; the renderer and src/shared in the browser. See ADR-0015.
+{
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.node.json" },
+    { "path": "./tsconfig.web.json" }
+  ]
+}

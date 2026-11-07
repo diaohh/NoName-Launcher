@@ -89,9 +89,23 @@ function restrictNavigation(window) {
   })
 }
 
+let windowOpening = null
+
+/**
+ * Opens the main window, once. Loading the config is asynchronous (safeStorage decrypts
+ * asynchronously since Electron 45), and a second launch or a macOS `activate` arriving in
+ * that gap would otherwise open a second window over the same config and IPC handlers.
+ */
 function createWindow() {
+  windowOpening ??= openMainWindow()
+    .catch((err) => logger.error('Could not open the main window', err))
+    .finally(() => { windowOpening = null })
+  return windowOpening
+}
+
+async function openMainWindow() {
   // Initialize config before anything else
-  ConfigManager.load()
+  await ConfigManager.load()
 
   mainWindow = new BrowserWindow({
     width: 1000,

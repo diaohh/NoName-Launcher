@@ -240,7 +240,7 @@ class AuthManager {
             microsoft.expiresAt
         )
 
-        ConfigManager.save()
+        await ConfigManager.save()
         logger.info('Microsoft account added successfully')
 
         return session
@@ -302,7 +302,7 @@ class AuthManager {
             if (this.isTerminalError(code)) {
                 logger.warn(`Refresh failed with a terminal error (${code}), logging out user`)
                 try {
-                    this.removeAccount(uuid)
+                    await this.removeAccount(uuid)
                 } catch (saveErr) {
                     // The account is already gone from memory, which is what logs the player
                     // out; a disk that refuses the write must not turn this into a crash.
@@ -330,7 +330,7 @@ class AuthManager {
             account.microsoft.expires_at
         )
 
-        ConfigManager.save()
+        await ConfigManager.save()
         logger.info('MC token refreshed successfully')
     }
 
@@ -349,7 +349,7 @@ class AuthManager {
             microsoft.expiresAt
         )
 
-        ConfigManager.save()
+        await ConfigManager.save()
         logger.info('MS and MC tokens refreshed successfully')
     }
 
@@ -359,9 +359,9 @@ class AuthManager {
         return ConfigManager.getAccountByUUID(uuid)
     }
 
-    static removeAccount(uuid) {
+    static async removeAccount(uuid) {
         ConfigManager.removeAccount(uuid)
-        ConfigManager.save()
+        await ConfigManager.save()
         logger.info('Account removed:', uuid)
     }
 
