@@ -19,7 +19,7 @@ Nada pendiente. Cerrado el 05/11/2026: icono (`resources/icon.png`, el del estud
 
 ## P3 — Limpieza de codigo
 
-- [ ] **`useIpcResource` — opcional, a la espera de un tercer llamante** — `AuthContext` y `SettingsScreen` reimplementan cada uno su maquina loading/error para un fetch al montar ([ADR-0008](docs/adr/0008-useeffect-only-for-external-systems.md)). Con dos llamantes un hook comun aun no supera el limite de YAGNI: hacerlo cuando aparezca el tercero. Descartada una libreria de fetching: el renderer ya carga ~1.2 MB de Firebase y P5 lo quiere **mas pequeño**
+- [ ] **`useIpcResource` — el tercer llamante ya existe** — `AuthContext`, `SettingsScreen` y, desde el 06/11/2026, `SkinManagerScreen` reimplementan cada uno su maquina loading/error para un fetch al montar ([ADR-0008](docs/adr/0008-useeffect-only-for-external-systems.md)). El gestor de skins no se migro en su lote para no mezclar un refactor con la feature, y su carga no es del todo generica: post-procesa las texturas (miniaturas, modelo detectado) y vuelve a leer tras un guardado fallido sin perder la eleccion del jugador, asi que el hook tendria que aceptar un loader arbitrario y exponer `reload`. Hacerlo como cambio aparte, migrando los tres. Descartada una libreria de fetching: el renderer ya carga ~1.2 MB de Firebase y P5 lo quiere **mas pequeño**; React Query se volvio a valorar para el gestor de skins y tampoco compensa todavia ([ADR-0014](docs/adr/0014-skins-through-main-as-data-urls.md))
 
 ## P4 — Funcionalidades faltantes
 
