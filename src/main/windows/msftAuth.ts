@@ -1,7 +1,8 @@
-import { BrowserWindow, session } from 'electron'
+import { BrowserWindow, session, type Event } from 'electron'
 import Logger from '../utils/Logger'
 import { MICROSOFT_CLIENT_ID } from '../constants'
-import { ERROR_CODE } from '../../shared/errorCodes'
+import { ERROR_CODE, type ErrorCode } from '../../shared/errorCodes'
+import { LauncherError } from '../../shared/LauncherError'
 
 const logger = Logger.getLogger('MsftAuth')
 
@@ -41,7 +42,7 @@ const ALLOWED_HOSTS = new Set([
 ])
 
 /** The `error` values Microsoft puts in the redirect that the launcher words on its own. */
-const OAUTH_ERRORS = {
+const OAUTH_ERRORS: Record<string, { code: ErrorCode, message: string }> = {
     access_denied: {
         code: ERROR_CODE.OAUTH_ACCESS_DENIED,
         message: 'Has cancelado el inicio de sesion con Microsoft.'
@@ -56,15 +57,12 @@ const OAUTH_ERRORS = {
     }
 }
 
-function oauthError(code, message) {
-    const error = new Error(message)
-    error.code = code
-    return error
-}
+const oauthError = (code: ErrorCode, message: string) => new LauncherError(code, message)
 
-let msftAuthWindow = null
+let msftAuthWindow: BrowserWindow | null = null
 
-export function createMsftAuthWindow() {
+/** Resolves with the authorization code Microsoft redirects back with. */
+export function createMsftAuthWindow(): Promise<string> {
     return new Promise((resolve, reject) => {
         if (msftAuthWindow) {
             reject(oauthError(ERROR_CODE.OAUTH_WINDOW_OPEN, 'Ya hay una ventana de inicio de sesion abierta.'))
@@ -89,10 +87,10 @@ export function createMsftAuthWindow() {
         // and for a window the player shut, and only the second is a cancellation.
         let settled = false
 
-        const finish = (settle, value) => {
+        const finish = (settle: () => void) => {
             if (settled) return
             settled = true
-            settle(value)
+            settle()
 
             // Never close the window from inside a navigation event. `did-redirect-navigation`
             // fires while the redirect is still in flight, and destroying the webContents at
@@ -103,7 +101,7 @@ export function createMsftAuthWindow() {
             })
         }
 
-        const isAllowed = (uri) => {
+        const isAllowed = (uri: string) => {
             try {
                 return ALLOWED_HOSTS.has(new URL(uri).host)
             } catch {
@@ -116,7 +114,7 @@ export function createMsftAuthWindow() {
          * `did-navigate`; listening to only one of them left the window hanging on some
          * flows. Whichever arrives first settles the promise, the other is a no-op.
          */
-        const handleNavigation = (_event, uri) => {
+        const handleNavigation = (_event: Event, uri: string) => {
             if (!uri.startsWith(REDIRECT_URI)) return
 
             const query = new URL(uri).searchParams
@@ -124,20 +122,21 @@ export function createMsftAuthWindow() {
             const code = query.get('code')
             if (code) {
                 logger.info('Authorization code received')
-                finish(resolve, code)
+                finish(() => resolve(code))
                 return
             }
 
             // Without this the window just sat there forever after a cancellation.
             const errorParam = query.get('error')
             if (errorParam) {
-                const known = OAUTH_ERRORS[errorParam]
+                // `error` is whatever the redirect carried, so only the table's own keys count.
+                const known = Object.hasOwn(OAUTH_ERRORS, errorParam) ? OAUTH_ERRORS[errorParam] : undefined
                 const message = known?.message
                     || query.get('error_description')
                     || 'Microsoft ha rechazado el inicio de sesion.'
 
                 logger.warn(`Authorization failed: ${errorParam}`)
-                finish(reject, oauthError(known?.code ?? ERROR_CODE.OAUTH_FAILED, message))
+                finish(() => reject(oauthError(known?.code ?? ERROR_CODE.OAUTH_FAILED, message)))
             }
         }
 
@@ -176,7 +175,7 @@ export function createMsftAuthWindow() {
 }
 
 /** Forgets the Microsoft account the sign-in window last used. Called on logout. */
-export async function clearMsftAuthSession() {
+export async function clearMsftAuthSession(): Promise<void> {
     await session.fromPartition(AUTH_PARTITION).clearStorageData()
 }
 
@@ -185,16 +184,17 @@ export async function clearMsftAuthSession() {
  * default session. Nothing writes them there any more, so this only cleans up after an upgrade
  * and finds nothing on every later start.
  */
-export async function purgeLegacyAuthCookies() {
+export async function purgeLegacyAuthCookies(): Promise<void> {
     const cookies = session.defaultSession.cookies
-    const isMicrosoft = (domain) => {
-        const host = domain.replace(/^\./, '')
+    const hostOf = (domain: string | undefined) => (domain ?? '').replace(/^\./, '')
+    const isMicrosoft = (domain: string | undefined) => {
+        const host = hostOf(domain)
         return MICROSOFT_COOKIE_DOMAINS.some((d) => host === d || host.endsWith(`.${d}`))
     }
 
     const stale = (await cookies.get({})).filter((cookie) => isMicrosoft(cookie.domain))
     await Promise.all(stale.map((cookie) => {
-        const url = `https://${cookie.domain.replace(/^\./, '')}${cookie.path}`
+        const url = `https://${hostOf(cookie.domain)}${cookie.path ?? '/'}`
         return cookies.remove(url, cookie.name)
     }))
 
