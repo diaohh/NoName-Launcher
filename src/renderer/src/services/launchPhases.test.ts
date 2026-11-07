@@ -1,21 +1,23 @@
 import { describe, expect, it } from 'vitest'
 import { LAUNCH_STEPS, PHASE_LABEL, PHASE_RANGE, launchStep, phasePercent } from './launchPhases'
+import type { PhaseType } from '../../../shared/launchProgress'
 
 /** Types that are not preparation phases and so have no slice, by design (ADR-0005). */
 const NOT_A_PHASE = new Set(['started', 'exit', 'error', 'game_startup', 'stdout', 'stderr'])
 
-const phases = Object.keys(PHASE_RANGE)
+// In declaration order, which is launch order.
+const phases = Object.keys(PHASE_RANGE) as PhaseType[]
 
 /**
- * The `type` literals LaunchManager emits, read from its source. A phase without a slice
- * does not fail anywhere: the step runs and the bar freezes on the previous message. Until
- * the progress event is a typed union (TODO-Migracion.md, Fase 4), this is the only check.
+ * The `type` literals LaunchManager emits, read from its source. `PHASE_RANGE` is a
+ * `Record<PhaseType, …>` now, but LaunchManager is still JavaScript and nothing checks what it
+ * emits against the union; until it is converted (TODO-Migracion.md, Fase 5), this is the check.
  *
  * Read through vite's glob import rather than `fs`, so the renderer's tsconfig needs no node
  * types, and with either extension, so the check survives LaunchManager moving to `.ts`.
  */
-function emittedTypes() {
-  const sources = import.meta.glob('../../../main/managers/LaunchManager.{js,ts}', { query: '?raw', import: 'default', eager: true })
+function emittedTypes(): Set<string> {
+  const sources = import.meta.glob<string>('../../../main/managers/LaunchManager.{js,ts}', { query: '?raw', import: 'default', eager: true })
   const text = Object.values(sources).join('\n')
   return new Set([...text.matchAll(/(?:^|[\s{,])type: '([a-z_]+)'/gm)].map(match => match[1]))
 }
@@ -37,7 +39,7 @@ describe('launchPhases', () => {
 
   it('covers 0-100 with contiguous slices, in launch order', () => {
     expect(PHASE_RANGE[phases[0]][0]).toBe(0)
-    expect(PHASE_RANGE[phases.at(-1)][1]).toBe(100)
+    expect(PHASE_RANGE[phases[phases.length - 1]][1]).toBe(100)
 
     for (let i = 1; i < phases.length; i++) {
       expect(PHASE_RANGE[phases[i]][0], phases[i]).toBe(PHASE_RANGE[phases[i - 1]][1])
@@ -47,7 +49,8 @@ describe('launchPhases', () => {
   it('cuts the steps on phase boundaries', () => {
     const boundaries = new Set(phases.flatMap(type => PHASE_RANGE[type]))
 
-    for (const step of LAUNCH_STEPS.filter(step => step.until != null)) {
+    for (const step of LAUNCH_STEPS) {
+      if (step.until == null) continue
       expect(boundaries.has(step.until), step.label).toBe(true)
     }
   })
@@ -58,11 +61,12 @@ describe('launchPhases', () => {
     for (const type of phases) {
       for (let current = 0; current <= 4; current++) {
         const step = launchStep(type, phasePercent(type, current, 4))
+        const percent = step.percent ?? 0
         const movedBack = step.index < previous.index
-          || (step.index === previous.index && step.percent < previous.percent)
+          || (step.index === previous.index && percent < previous.percent)
 
         expect(movedBack, `${type} ${current}/4`).toBe(false)
-        previous = step
+        previous = { index: step.index, percent }
       }
     }
   })

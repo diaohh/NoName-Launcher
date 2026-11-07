@@ -1,3 +1,5 @@
+import type { PhaseType } from '../../../shared/launchProgress'
+
 /**
  * The slice of the progress bar each launch phase owns.
  *
@@ -10,7 +12,7 @@
  * measurements: the two download phases get the most because they are what actually
  * takes time on a cold instance.
  */
-export const PHASE_RANGE = {
+export const PHASE_RANGE: Record<PhaseType, readonly [floor: number, ceiling: number]> = {
   auth: [0, 4],
   manifest: [4, 8],
   validation: [8, 20],
@@ -32,7 +34,7 @@ export const PHASE_RANGE = {
  * `download` rarely needs its entry: MinecraftDownloadManager sends its own sub-phase name,
  * already in Spanish, and that is what the header shows instead.
  */
-export const PHASE_LABEL = {
+export const PHASE_LABEL: Record<PhaseType, string> = {
   auth: 'Verificando cuenta',
   manifest: 'Leyendo modpack',
   validation: 'Validando archivos',
@@ -52,7 +54,7 @@ export const PHASE_LABEL = {
  *
  * `game_startup` deliberately has no slice in PHASE_RANGE: when it arrives the preparation
  * is already at 100%, so the startup is a step of its own, 0-100, driven by milestones
- * in the game's output (main/utils/StartupTracker.js). It is also the one type that repeats,
+ * in the game's output (main/utils/StartupTracker). It is also the one type that repeats,
  * which is harmless precisely because it stays out of the phase map.
  */
 export const STARTUP_LABEL = 'Arrancando Minecraft'
@@ -70,26 +72,41 @@ export const STARTUP_LABEL = 'Arrancando Minecraft'
  *
  * The last step is the game's own startup, `game_startup`, on its own 0-100 scale.
  */
-export const LAUNCH_STEPS = [
+export interface LaunchStep {
+  label: string
+  /** Where the step ends on PHASE_RANGE's scale. The last step, the game's startup, has none. */
+  until?: number
+}
+
+export const LAUNCH_STEPS: readonly LaunchStep[] = [
   { label: 'Verificar', until: 20 },
   { label: 'Descargar', until: 68 },
   { label: 'Preparar', until: 100 },
   { label: 'Iniciar' }
 ]
 
+export function isPhaseType(type: string): type is PhaseType {
+  return Object.hasOwn(PHASE_RANGE, type)
+}
+
+/** Where a preparation step ends; the first one starts at 0. */
+function stepEnd(index: number): number {
+  return LAUNCH_STEPS[index]?.until ?? 100
+}
+
 /**
  * Which preparation step a progress event belongs to, and how far through that step the
  * launch is (0-100, or null while nothing countable has arrived).
  */
-export function launchStep(type, percent) {
+export function launchStep(type: string, percent: number | null): { index: number, percent: number | null } {
+  if (!isPhaseType(type)) return { index: 0, percent: null }
   const range = PHASE_RANGE[type]
-  if (!range) return { index: 0, percent: null }
 
-  const index = LAUNCH_STEPS.findIndex(step => range[0] < step.until)
+  const index = LAUNCH_STEPS.findIndex(step => step.until != null && range[0] < step.until)
   if (percent == null) return { index, percent: null }
 
-  const from = index === 0 ? 0 : LAUNCH_STEPS[index - 1].until
-  const until = LAUNCH_STEPS[index].until
+  const from = index === 0 ? 0 : stepEnd(index - 1)
+  const until = stepEnd(index)
   const fraction = Math.min(1, Math.max(0, (percent - from) / (until - from)))
   return { index, percent: Math.round(fraction * 100) }
 }
@@ -101,11 +118,10 @@ export function launchStep(type, percent) {
  * A phase that reports no countable total lands on its floor and waits there. That is
  * still forward movement, which is the whole point.
  */
-export function phasePercent(type, current, total) {
-  const range = PHASE_RANGE[type]
-  if (!range) return null
+export function phasePercent(type: string, current: number, total: number): number | null {
+  if (!isPhaseType(type)) return null
 
-  const [floor, ceiling] = range
+  const [floor, ceiling] = PHASE_RANGE[type]
   if (!(total > 0) || !(current >= 0)) return floor
 
   const fraction = Math.min(1, current / total)

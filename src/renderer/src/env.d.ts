@@ -4,9 +4,6 @@
 declare const __APP_VERSION__: string
 
 interface Window {
-  /**
-   * The bridge `src/preload` exposes. Loosely typed until the IPC contract map exists
-   * (TODO-Migracion.md, Fase 4); only `services/ipcClient` should read it.
-   */
-  electronAPI: Record<string, (...args: unknown[]) => unknown>
+  /** The bridge `src/preload` exposes. Only `services/ipcClient` should read it. */
+  electronAPI: import('../../shared/ipcContract').ElectronAPI
 }
