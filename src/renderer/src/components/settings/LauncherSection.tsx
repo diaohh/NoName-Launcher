@@ -1,9 +1,12 @@
 import { ipc } from '../../services/ipcClient'
+import { errorMessage } from '../../services/errors'
 import { useStatus } from '../../contexts/StatusContext'
+import type { LauncherSettings } from '../../../../shared/ipcContract'
+import type { UpdateSetting } from './SettingsScreen'
 
 const buttonClass = 'bg-white/5 border border-white/10 rounded px-4 py-2.5 text-sm text-white/70 hover:bg-white/10 hover:border-accent-green hover:text-white transition-all duration-200 cursor-pointer'
 
-export default function LauncherSection({ settings, onUpdate }) {
+export default function LauncherSection({ settings, onUpdate }: { settings: LauncherSettings, onUpdate: UpdateSetting }) {
   const { showStatus } = useStatus()
 
   // The stored path can differ from the effective one: an unusable directory falls back
@@ -23,7 +26,7 @@ export default function LauncherSection({ settings, onUpdate }) {
       const applied = await ipc.config.setDataDirectory(result)
       onUpdate('dataDirectory', applied)
     } catch (err) {
-      showStatus(err.message || 'No se ha podido cambiar el directorio de datos', 'error')
+      showStatus(errorMessage(err, 'No se ha podido cambiar el directorio de datos'), 'error')
     }
   }
 
@@ -34,7 +37,7 @@ export default function LauncherSection({ settings, onUpdate }) {
       const applied = await ipc.config.setDataDirectory(null)
       onUpdate('dataDirectory', applied)
     } catch (err) {
-      showStatus(err.message || 'No se ha podido restablecer el directorio de datos', 'error')
+      showStatus(errorMessage(err, 'No se ha podido restablecer el directorio de datos'), 'error')
     }
   }
 
@@ -42,7 +45,7 @@ export default function LauncherSection({ settings, onUpdate }) {
     try {
       await ipc.shell.openDataDirectory()
     } catch (err) {
-      showStatus(err.message || 'No se ha podido abrir la carpeta de datos', 'error')
+      showStatus(errorMessage(err, 'No se ha podido abrir la carpeta de datos'), 'error')
     }
   }
 
@@ -50,7 +53,7 @@ export default function LauncherSection({ settings, onUpdate }) {
     try {
       await ipc.shell.openLogsDirectory()
     } catch (err) {
-      showStatus(err.message || 'No se ha podido abrir la carpeta de logs', 'error')
+      showStatus(errorMessage(err, 'No se ha podido abrir la carpeta de logs'), 'error')
     }
   }
 

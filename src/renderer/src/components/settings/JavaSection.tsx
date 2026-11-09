@@ -1,20 +1,30 @@
 import { useState } from 'react'
 import { ipc } from '../../services/ipcClient'
+import { errorMessage } from '../../services/errors'
 import { useStatus } from '../../contexts/StatusContext'
+import type { LauncherSettings } from '../../../../shared/ipcContract'
+import type { SaveSettings, UpdateSetting } from './SettingsScreen'
 import ToggleSwitch from './ToggleSwitch'
 
-const formatGB = (mb) => `${(mb / 1024).toFixed(1).replace(/\.0$/, '')} GB`
+const formatGB = (mb: number) => `${(mb / 1024).toFixed(1).replace(/\.0$/, '')} GB`
 
-export default function JavaSection({ settings, onUpdate, onSave }) {
+interface JavaSectionProps {
+  settings: LauncherSettings
+  onUpdate: UpdateSetting
+  onSave: SaveSettings
+}
+
+export default function JavaSection({ settings, onUpdate, onSave }: JavaSectionProps) {
   const { showStatus } = useStatus()
   // Mirrors the input while it is being typed, so a half-written number is not written to
   // disk on every keystroke. Null means "show whatever the settings say".
-  const [draftRam, setDraftRam] = useState(null)
+  const [draftRam, setDraftRam] = useState<number | null>(null)
 
   const step = settings.ramStepMB
   const minRam = settings.minAllowedRamMB
   const maxRam = settings.maxAllowedRamMB
-  const currentRam = draftRam ?? settings.maxRamMB
+  // Empty when the stored value cannot be read as an amount of memory, as it showed before.
+  const currentRam = draftRam ?? settings.maxRamMB ?? ''
 
   const handlePickJava = async () => {
     // Main rejects anything that is not a java/javaw executable, so the field only changes
@@ -32,7 +42,7 @@ export default function JavaSection({ settings, onUpdate, onSave }) {
       await ipc.config.setJavaExecutable(result)
       onUpdate('javaExecutable', result)
     } catch (err) {
-      showStatus(err.message || 'No se ha podido guardar la ruta de Java', 'error')
+      showStatus(errorMessage(err, 'No se ha podido guardar la ruta de Java'), 'error')
     }
   }
 
@@ -40,16 +50,16 @@ export default function JavaSection({ settings, onUpdate, onSave }) {
     onSave({ javaExecutable: null }, () => ipc.config.setJavaExecutable(null), 'No se ha podido restablecer la ruta de Java')
   }
 
-  const handleAutoDownloadToggle = (checked) => {
+  const handleAutoDownloadToggle = (checked: boolean) => {
     onSave({ javaAutoDownload: checked }, () => ipc.config.setJavaAutoDownload(checked), 'No se ha podido guardar la descarga automatica de Java')
   }
 
-  const handleUseModpackRamToggle = (checked) => {
+  const handleUseModpackRamToggle = (checked: boolean) => {
     onSave({ useModpackRam: checked }, () => ipc.config.setUseModpackRam(checked), 'No se ha podido guardar la preferencia de RAM')
   }
 
   /** Persists on release, not on every pixel of the drag: each write hits config.json. */
-  const commitRam = async (megabytes) => {
+  const commitRam = async (megabytes: number) => {
     setDraftRam(null)
     try {
       // The main process clamps and answers with what it stored — including a minimum it
@@ -58,7 +68,7 @@ export default function JavaSection({ settings, onUpdate, onSave }) {
       onUpdate('maxRamMB', applied.maxRamMB)
       onUpdate('minRamMB', applied.minRamMB)
     } catch (err) {
-      showStatus(err.message || 'No se ha podido guardar la memoria asignada', 'error')
+      showStatus(errorMessage(err, 'No se ha podido guardar la memoria asignada'), 'error')
     }
   }
 
@@ -146,8 +156,8 @@ export default function JavaSection({ settings, onUpdate, onSave }) {
             value={currentRam}
             disabled={ramDisabled}
             onChange={(e) => setDraftRam(parseInt(e.target.value))}
-            onPointerUp={(e) => commitRam(parseInt(e.target.value))}
-            onKeyUp={(e) => commitRam(parseInt(e.target.value))}
+            onPointerUp={(e) => commitRam(parseInt(e.currentTarget.value))}
+            onKeyUp={(e) => commitRam(parseInt(e.currentTarget.value))}
             className="flex-1 h-1.5 appearance-none rounded-full bg-white/10 cursor-pointer accent-accent-green"
           />
           <input

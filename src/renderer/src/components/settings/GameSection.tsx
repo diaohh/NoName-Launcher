@@ -1,8 +1,18 @@
-import { useState } from 'react'
+import { useState, type KeyboardEvent } from 'react'
 import { ipc } from '../../services/ipcClient'
+import type { LauncherSettings } from '../../../../shared/ipcContract'
+import type { SaveSettings } from './SettingsScreen'
 import ToggleSwitch from './ToggleSwitch'
 
-const PRESETS = [
+interface Preset {
+  label: string
+  w: number
+  h: number
+}
+
+type Dimension = 'gameWidth' | 'gameHeight'
+
+const PRESETS: readonly Preset[] = [
   { label: '1280 x 720', w: 1280, h: 720 },
   { label: '1366 x 768', w: 1366, h: 768 },
   { label: '1600 x 900', w: 1600, h: 900 },
@@ -10,34 +20,37 @@ const PRESETS = [
   { label: '2560 x 1440', w: 2560, h: 1440 },
 ]
 
-const DIMENSIONS = {
+const DIMENSIONS: Record<Dimension, { persist: (value: number) => Promise<void>, failure: string }> = {
   gameWidth: { persist: (value) => ipc.config.setGameWidth(value), failure: 'No se ha podido guardar el ancho' },
   gameHeight: { persist: (value) => ipc.config.setGameHeight(value), failure: 'No se ha podido guardar el alto' }
 }
 
 const inputClass = 'w-24 bg-white/5 border border-white/10 rounded px-3 py-2 text-sm text-white focus:border-accent-green focus:outline-none transition-colors duration-200 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none'
 
-export default function GameSection({ settings, onSave }) {
+export default function GameSection({ settings, onSave }: { settings: LauncherSettings, onSave: SaveSettings }) {
   // What is being typed, per field, until it loses focus. Saving on every keystroke sent
   // "1", "12", "128" on the way to "1280" — values main rightly rejects — and a width under
   // 640 used to stay on screen while the disk kept the old one.
-  const [draft, setDraft] = useState({})
+  const [draft, setDraft] = useState<Partial<Record<Dimension, string>>>({})
 
-  const editDimension = (key, text) => setDraft(prev => ({ ...prev, [key]: text }))
+  const editDimension = (key: Dimension, text: string) => setDraft(prev => ({ ...prev, [key]: text }))
 
-  const commitDimension = (key) => {
-    if (draft[key] === undefined) return
+  const commitDimension = (key: Dimension) => {
+    const text = draft[key]
+    if (text === undefined) return
 
-    const value = Number(draft[key])
+    const value = Number(text)
     setDraft(({ [key]: _committed, ...rest }) => rest)
     if (value === settings[key]) return
 
     // Range and integer checks live in main, which answers with the message to show.
     const { persist, failure } = DIMENSIONS[key]
-    onSave({ [key]: value }, () => persist(value), failure)
+    const change: Partial<LauncherSettings> = {}
+    change[key] = value
+    onSave(change, () => persist(value), failure)
   }
 
-  const handlePreset = (preset) => {
+  const handlePreset = (preset: Preset) => {
     setDraft({})
     onSave(
       { gameWidth: preset.w, gameHeight: preset.h },
@@ -49,15 +62,15 @@ export default function GameSection({ settings, onSave }) {
     )
   }
 
-  const handleFullscreenToggle = (checked) => {
+  const handleFullscreenToggle = (checked: boolean) => {
     onSave({ fullscreen: checked }, () => ipc.config.setFullscreen(checked), 'No se ha podido guardar la pantalla completa')
   }
 
-  const blurOnEnter = (e) => {
+  const blurOnEnter = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') e.currentTarget.blur()
   }
 
-  const isActivePreset = (p) => settings.gameWidth === p.w && settings.gameHeight === p.h
+  const isActivePreset = (p: Preset) => settings.gameWidth === p.w && settings.gameHeight === p.h
 
   return (
     <div className="space-y-6">

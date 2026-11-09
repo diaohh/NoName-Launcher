@@ -1,11 +1,23 @@
 import { useState, useEffect } from 'react'
 import { ipc } from '../../services/ipcClient'
+import { errorMessage } from '../../services/errors'
 import { useStatus } from '../../contexts/StatusContext'
+import type { LauncherSettings } from '../../../../shared/ipcContract'
 import JavaSection from './JavaSection'
 import GameSection from './GameSection'
 import LauncherSection from './LauncherSection'
 
-function CloseButton({ onClick }) {
+/** For values main has already stored and answered with (RAM, data directory, Java path). */
+export type UpdateSetting = <K extends keyof LauncherSettings>(key: K, value: LauncherSettings[K]) => void
+
+/** Shows `changes` at once, writes them through `persist`, and reverts them if main refuses. */
+export type SaveSettings = (
+  changes: Partial<LauncherSettings>,
+  persist: () => Promise<unknown>,
+  failureMessage: string
+) => Promise<void>
+
+function CloseButton({ onClick }: { onClick: () => void }) {
   return (
     <button
       onClick={onClick}
@@ -20,9 +32,9 @@ function CloseButton({ onClick }) {
   )
 }
 
-export default function SettingsScreen({ onBack }) {
+export default function SettingsScreen({ onBack }: { onBack: () => void }) {
   const { showStatus } = useStatus()
-  const [settings, setSettings] = useState(null)
+  const [settings, setSettings] = useState<LauncherSettings | null>(null)
   const [failed, setFailed] = useState(false)
 
   useEffect(() => {
@@ -36,15 +48,15 @@ export default function SettingsScreen({ onBack }) {
         if (ignore) return
         console.error('Failed to load settings:', err)
         setFailed(true)
-        showStatus(err.message || 'No se han podido cargar los ajustes', 'error')
+        showStatus(errorMessage(err, 'No se han podido cargar los ajustes'), 'error')
       })
 
     return () => { ignore = true }
   }, [showStatus])
 
   /** For values main has already stored and answered with (RAM, data directory, Java path). */
-  const updateSetting = (key, value) => {
-    setSettings(prev => ({ ...prev, [key]: value }))
+  const updateSetting: UpdateSetting = (key, value) => {
+    setSettings(prev => prev && { ...prev, [key]: value })
   }
 
   /**
@@ -52,15 +64,17 @@ export default function SettingsScreen({ onBack }) {
    * (CONFIG_INVALID_VALUE) or cannot write it (CONFIG_SAVE_FAILED), the screen goes back to
    * what is actually stored and says why: it never shows a value the disk did not receive.
    */
-  const saveSettings = async (changes, persist, failureMessage) => {
-    const previous = Object.fromEntries(Object.keys(changes).map(key => [key, settings[key]]))
-    setSettings(prev => ({ ...prev, ...changes }))
+  const saveSettings: SaveSettings = async (changes, persist, failureMessage) => {
+    if (!settings) return
+    const keys = Object.keys(changes) as (keyof LauncherSettings)[]
+    const previous: Partial<LauncherSettings> = Object.fromEntries(keys.map(key => [key, settings[key]]))
+    setSettings(prev => prev && { ...prev, ...changes })
 
     try {
       await persist()
     } catch (err) {
-      setSettings(prev => ({ ...prev, ...previous }))
-      showStatus(err.message || failureMessage, 'error')
+      setSettings(prev => prev && { ...prev, ...previous })
+      showStatus(errorMessage(err, failureMessage), 'error')
     }
   }
 
