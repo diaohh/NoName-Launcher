@@ -21,11 +21,6 @@ local working material and are never committed (latest: `2026-09-17-auditoria.md
 findings are in `TODO.md`, marked 📋 and tagged `S`/`B`/`D` + number, which points back to the
 report's tables. If you have the report, read it before touching an area it flags.
 
-**TypeScript migration, pending release.** Every source is TypeScript since 2026-11-08
-([ADR-0015](docs/adr/0015-incremental-typescript-migration.md)). Until the `migration` branch is
-merged into `main` — the last step, tracked in `TODO.md` P5 — anything that builds on the
-migration branches off `migration` and goes back through a PR into it, never into `main`.
-
 ## Commands
 
 ```bash
