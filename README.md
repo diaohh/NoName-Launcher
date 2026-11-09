@@ -44,7 +44,8 @@ A custom Minecraft launcher built with Electron, React, and Tailwind CSS. Featur
 
 ## Prerequisites
 
-- [Node.js](https://nodejs.org/) 20+
+- [Node.js](https://nodejs.org/) 22.18+ (Vitest needs 22.12; the modpack publishing tools in
+  `tools/pack-publish` load TypeScript natively, which is on by default from 22.18)
 - [pnpm](https://pnpm.io/) package manager
 - A [Microsoft Azure](https://portal.azure.com/) registered application (for OAuth)
 - A [Firebase](https://firebase.google.com/) project with Firestore enabled
@@ -274,7 +275,7 @@ src/
 │   │   ├── ModLoaderManager     # Forge / Fabric installation
 │   │   ├── MinecraftDownloadManager  # Vanilla assets via helios-core
 │   │   └── SkinManager     # Mojang profile (skin, capes) + local skin vault
-│   ├── utils/              # Logger, file hashing, paths, HTTP, Maven, pack policies
+│   ├── utils/              # Logger, file hashing, paths, HTTP, Maven, game output
 │   ├── types/              # What main reads: config.json, the pack manifest, Mojang JSON
 │   ├── windows/            # The Microsoft sign-in window
 │   └── ipc/                # IPC handlers, one typed map
@@ -287,6 +288,7 @@ src/
 │   ├── LauncherError.ts    # The error main throws, rebuilt in the renderer
 │   ├── launchProgress.ts   # The launch:progress union
 │   ├── modpack.ts          # The Firestore modpack document
+│   ├── PackPolicy.ts       # Manifest policies and ignore globs, shared with tools/pack-publish
 │   └── skins.ts            # Skin name limit and models, checked on both sides
 └── renderer/src/           # React application
     ├── App.tsx             # Root component + providers

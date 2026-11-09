@@ -23,5 +23,7 @@
     "noUncheckedIndexedAccess": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src/renderer/src/**/*", "src/shared/**/*"]
+  "include": ["src/renderer/src/**/*", "src/shared/**/*"],
+  // Tests run on node; the node project checks the ones in src/shared.
+  "exclude": ["src/shared/**/*.test.ts"]
 }

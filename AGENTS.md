@@ -90,6 +90,7 @@ Shared (src/shared/, bundled into all three)
 ├── channels.ts · errorCodes.ts · LauncherError.ts
 ├── ipcContract.ts (what every channel carries)
 ├── launchProgress.ts (the launch:progress union)
+├── PackPolicy.ts (manifest policies and ignore globs, also run by tools/pack-publish)
 └── modpack.ts · skins.ts
 ```
 
@@ -304,7 +305,7 @@ The required Java major comes from the Mojang manifest (`javaVersion.majorVersio
 - `MavenUtils` — `mavenToRelativePath` / `mavenToUrl` for Maven-coordinate libraries.
 - `GameOutput` — `readLines(stream, onLines)`: whole lines from a child's stdout/stderr, one callback per chunk.
 - `StartupTracker` — `STARTUP_MILESTONES` and `createStartupTracker(report)`, the heuristic behind the `game_startup` bar.
-- `PackPolicy` — `globToRegExp` / `resolvePolicy` / `strictRoots` for manifest ignore globs and per-path policies. **Deliberately duplicated** in `tools/pack-publish/generate.mjs`, which runs on plain node and cannot import these extensionless sources; change both together.
+- `PackPolicy` lives in **`src/shared/PackPolicy.ts`**, not here — `globToRegExp` / `compileIgnore` / `resolvePolicy` / `strictRoots` for manifest ignore globs and per-path policies, plus the `FilePolicy`/`PolicyRule` types. It is the one copy: `tools/pack-publish/generate.mjs` imports the same file on plain node through native type stripping (Node 22.18+), so it takes **no runtime import** (only `import type`), only erasable syntax (`erasableSyntaxOnly` in `tsconfig.node.json`) and no build-time global. `PackPolicy.test.ts` loads it on plain node to catch a break before publishing day.
 
 The data shapes main reads from disk and the network live in `src/main/types/` — `config.ts` (`config.json`, in memory and as written), `manifest.ts` (the pack manifest) and `minecraft.ts` (Mojang version JSON and Fabric's profile, only the fields that are read). They are types, not proof: what arrives as `unknown` becomes one of them through a guard (`ManifestManager.assertShape`, `ConfigManager.validateConfig`, `DistributionManager.parseServerData`, `SkinManager.parseProfile`), never through a bare cast.
 
@@ -451,6 +452,8 @@ Nothing app-side is still open from the 2026-09-17 audit; B1 (publishing) is in 
 - Since Electron 43 a file dialog with no `defaultPath` opens in Downloads, not where the OS last left it. Pass one when there is an obvious starting point (the data directory picker starts at the current data directory).
 - The sandboxed preload (Electron 45+) can only `require('electron')`, and has no `Buffer`, `setImmediate` or Node shims. Use Web APIs there.
 - `pnpm-lock.yaml` is the only lockfile; the stale `package-lock.json` has been removed.
+- `src/shared/package.json` (`{ "type": "module" }`) is not a stray file. The root `package.json` declares no module type (that is the ESM item in `TODO.md`), so plain node warns `MODULE_TYPELESS_PACKAGE_JSON` every time `tools/pack-publish` loads `PackPolicy.ts`; declaring `src/shared` ESM silences it. electron-vite, tsc and Vitest ignore it. `PackPolicy.test.ts` fails if the warning comes back.
+- Node 22.18+ is the floor: Vitest 5 needs 22.12, and `tools/pack-publish` needs type stripping on by default (`generate.mjs` stops with a message on an older Node).
 - The renderer reads Firestore through `firebase/firestore/lite` (REST, no realtime, no offline queue); the initial chunk is ~1.0 MB (Firebase 13's lite build carries Firestore's BSON and vector types, which tree-shaking cannot drop). Do not import from `firebase/firestore`: it pulls the full SDK back in (~320 KB more) for nothing, since only one-off `getDoc`/`getDocs` reads are made. Lite has no request deadline, so the timeout race in `firestoreService` stays ([ADR-0009](docs/adr/0009-no-offline-mode.md)).
 - The skin manager is a **lazy chunk** (`React.lazy` in `HomeScreen`, ~900 KB minified, almost all three.js via `skinview3d`). Anything the home screen imports must not reach `skinview3d` or `skinview-utils`, or the chunk folds back into the initial bundle — that is why `SkinHead` carries its own CSS instead of importing `services/skinTextures.ts`. The same holds for `SkinManagerSkeleton` (the Suspense fallback **and** the screen's own loading state, so loading is one continuous skeleton), the `SkinManagerLayout` frame it shares with the screen, `SkinCard` and `common/Spinner`, which all end up in the initial bundle. `skinview3d` pins three.js `^0.156`; check its release before bumping three on its own.
 
