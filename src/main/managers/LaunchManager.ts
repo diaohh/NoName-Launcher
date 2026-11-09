@@ -2,7 +2,7 @@ import child_process, { type ChildProcess } from 'child_process'
 import os from 'os'
 import path from 'path'
 import fs from 'fs-extra'
-import { app } from 'electron'
+import { app, screen } from 'electron'
 import { validateSelectedJvm, latestOpenJDK, extractJdk, javaExecFromRoot, ensureJavaDirIsRoot, discoverBestJvmInstallation } from 'helios-core/java'
 import { downloadFile, downloadQueue, getExpectedDownloadSize, HashAlgo, type Asset } from 'helios-core/dl'
 import ConfigManager from './ConfigManager'
@@ -603,6 +603,32 @@ class LaunchManager {
         return dropped
     }
 
+    /**
+     * The size the game window is created at (`--width`/`--height`).
+     *
+     * Windowed, it is the one in Ajustes. In fullscreen it is the primary monitor's current
+     * mode: Minecraft creates its window with `glfwCreateWindow(width, height, monitor)`, and
+     * GLFW switches the monitor to the video mode closest to that size — so passing Ajustes'
+     * 1280x720 flipped a 1080p screen to 720p and back, rearranging every open window. Asking
+     * for the mode the monitor is already in is the one size GLFW leaves alone. Dropping the
+     * flags is not a way out: the game would fall back to 854x480 and switch modes anyway.
+     *
+     * Minecraft opens on the primary monitor, the same one `getPrimaryDisplay()` reports.
+     * GLFW counts video modes in physical pixels on Windows and Linux, and in points on macOS,
+     * which is what Electron's DIP size already is there. A `fullscreenResolution` the player
+     * picked in the game's Video Settings still applies, since the game switches to it after
+     * the window exists.
+     */
+    static gameResolution(): { width: number, height: number } {
+        if (!ConfigManager.getFullscreen()) {
+            return { width: ConfigManager.getGameWidth(), height: ConfigManager.getGameHeight() }
+        }
+
+        const { size, scaleFactor } = screen.getPrimaryDisplay()
+        const scale = process.platform === 'darwin' ? 1 : scaleFactor
+        return { width: Math.round(size.width * scale), height: Math.round(size.height * scale) }
+    }
+
     static async buildLaunchCommand(account: LaunchAccount, versionId: string, server: SelectedServer | null): Promise<string[]> {
         const { versionData, vanillaVersion } = await this.loadVersionManifest(versionId)
 
@@ -639,6 +665,7 @@ class LaunchManager {
         libraries.push(clientJar)
 
         const classpath = libraries.join(process.platform === 'win32' ? ';' : ':')
+        const resolution = this.gameResolution()
 
         const argContext: ArgContext = {
             auth_player_name: account.displayName,
@@ -650,8 +677,8 @@ class LaunchManager {
             auth_access_token: account.accessToken,
             user_type: 'msa',
             version_type: versionData.type || 'release',
-            resolution_width: ConfigManager.getGameWidth().toString(),
-            resolution_height: ConfigManager.getGameHeight().toString(),
+            resolution_width: resolution.width.toString(),
+            resolution_height: resolution.height.toString(),
             natives_directory: nativesDir,
             // Both come from package.json: `app.getName()` resolves to productName and
             // `app.getVersion()` to version, so the launcher has one identity, not three.

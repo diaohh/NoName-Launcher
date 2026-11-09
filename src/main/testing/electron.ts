@@ -5,7 +5,7 @@ import path from 'path'
  * Stand-in for the `electron` module under Vitest, wired in by the alias in
  * `vitest.config.mjs`. The real package only resolves to the path of a binary when it is
  * imported from plain node, so anything that reaches `ConfigManager` (`safeStorage`) or
- * `LaunchManager` (`app`) would not load at all.
+ * `LaunchManager` (`app`, `screen`) would not load at all.
  *
  * Only what the code under test touches is here. A test that needs more adds it, rather
  * than this file growing an imitation of Electron.
@@ -70,4 +70,9 @@ export const powerMonitor = {
     removeListener() {}
 }
 
-export default { app, powerMonitor, safeStorage }
+// A 1080p monitor at 125% scaling, as Windows reports it to Electron: 1536x864 in DIPs.
+export const screen = {
+    getPrimaryDisplay: () => ({ size: { width: 1536, height: 864 }, scaleFactor: 1.25 })
+}
+
+export default { app, powerMonitor, safeStorage, screen }

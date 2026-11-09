@@ -42,7 +42,7 @@ A change is done when `pnpm lint` and `pnpm typecheck` report 0 errors, `pnpm te
 
 **Tests** run on Vitest with their own `vitest.config.mjs` (electron-vite's config builds three targets and is not reused). They sit **next to the file they cover** (`X.test.ts` beside `X.ts`), with no `test/` folder and **no coverage target**: coverage is minimal on purpose, limited to what fails silently and what the migration rewrites. A test pins a rule of this file, not an implementation detail — and what the compiler already enforces (a phase without a slice, a channel missing from a layer) is not tested twice.
 
-- `electron` is aliased to `src/main/testing/electron.ts`, a stub with only what the code under test touches (`safeStorage`, `app`, `powerMonitor`). `safeStorageControl` switches it to no keyring, an undecryptable blob or a slow encryption; reset it in `afterEach`.
+- `electron` is aliased to `src/main/testing/electron.ts`, a stub with only what the code under test touches (`safeStorage`, `app`, `powerMonitor`, `screen` — a 1080p primary display at 125%). `safeStorageControl` switches it to no keyring, an undecryptable blob or a slow encryption; reset it in `afterEach`.
 - `src/main/testing/tempLauncher.ts` → `createTempLauncher()` points `ConfigManager` at a fresh temp directory on the default config, writes `config.json` and synthetic version manifests into `common/versions/**`, and `cleanup()` resets the static state. It is the one shared helper; add to it instead of starting another.
 - `__MICROSOFT_CLIENT_ID__` and `__APP_VERSION__` are defined by the Vitest config, not read from `.env`.
 
@@ -227,6 +227,12 @@ semantics — with rules an entry starts **disallowed** and the **last** matchin
 `argContext` is never passed literally: the argument is dropped, and a bare `${x}` takes the
 `--flag` in front of it along (this is how `--clientId`/`--xuid` disappear).
 
+`--width`/`--height` come from `LaunchManager.gameResolution()`: Ajustes' resolution when
+windowed, and the primary monitor's current mode in fullscreen (physical pixels; points on
+macOS). Minecraft creates its fullscreen window at that size and GLFW switches the monitor to
+the closest video mode, so any other size changes the player's screen mode and rearranges their
+windows. Do not drop the flags in fullscreen either: the game would fall back to 854×480.
+
 Invariants to preserve when touching this flow:
 
 - **Only one launch at a time.** `LaunchManager.launchInProgress` guards the preparation and `gameProcess != null` guards the rest; a second call is rejected with `LAUNCH_ALREADY_RUNNING` **before** the try, so it never emits `{type:'error'}` and tears down the UI of the launch that is actually running. `killGame()` does not clear `gameProcess` — the `close` handler is the only place that does. The renderer resynchronises after a reload through `launch:getStatus`
@@ -322,6 +328,17 @@ above the modal overlay, so the window stays movable and closable with a dialog 
 gives it the first row and the screens fill the rest — size screens with `h-full`/`w-full`,
 **never `h-screen`**, or they overflow the window by the bar's height. The Microsoft sign-in
 window keeps its native frame.
+
+The window opens at 1000×600 and cannot shrink below **900×560** (`minWidth`/`minHeight` in
+`main/index.ts`), which still fits a 720p screen — or 1080p at 150% scaling — with the taskbar.
+Lay screens out for that minimum, not for the default.
+
+Ajustes (`components/settings/SettingsScreen.tsx`) is **one category at a time**: a vertical
+tablist on the left (Juego, Java, Launcher, opening on Juego) and the open tab on the right. The
+window is wider than it is tall, so the tabs spend width instead of height, and no tab scrolls at
+the minimum size; the panel's `overflow-y-auto` is only a safety net. Only the open tab is
+mounted, which is safe because the typed values commit on blur. A new category is an entry in
+`TABS`, and one that would not fit 900×560 is split rather than scrolled.
 
 The home screen with a modpack selected is **one flex column**, all in the flow: the logo box
 (`flex-1 min-h-0`, so `ModpackLogo` scales down into whatever height is left), JUGAR, and a slot
