@@ -8,6 +8,8 @@ import {
   where,
   orderBy,
 } from 'firebase/firestore/lite'
+import { isSha256Hex } from '../../../shared/guards'
+import { isVisibleTo } from './modpackVisibility'
 import type { Modpack } from '../../../shared/modpack'
 
 const NETWORK_TIMEOUT_MS = 12000
@@ -96,7 +98,8 @@ function toModpack(id: string, data: Record<string, unknown>): Modpack {
   }
 
   const manifest = data.manifest
-  if (isPlainObject(manifest) && typeof manifest.url === 'string' && typeof manifest.hash === 'string') {
+  // Main's rule too (`parseServerData`): a hash that is not a sha256 means no manifest.
+  if (isPlainObject(manifest) && typeof manifest.url === 'string' && isSha256Hex(manifest.hash)) {
     const version = text(manifest.version)
     modpack.manifest = { url: manifest.url, hash: manifest.hash }
     if (version != null) modpack.manifest.version = version
@@ -123,23 +126,19 @@ export async function getModpacks(username: string | null): Promise<Modpack[]> {
 
   snapshot.forEach((docSnap) => {
     const data = toModpack(docSnap.id, docSnap.data())
-
-    // Client-side filtering: empty usersAllowed = everyone can see
-    const allowed = data.usersAllowed || []
-    if (allowed.length === 0 || (username && allowed.includes(username))) {
-      modpacks.push(data)
-    }
+    // The query already filters the flags on the server; `usersAllowed` can only be read here.
+    if (isVisibleTo(data, username)) modpacks.push(data)
   })
 
   return modpacks
 }
 
 /**
- * Re-read a single modpack document.
+ * Re-read a single modpack document, unfiltered: the caller applies `isVisibleTo`.
  *
  * Called right before launching: the list is fetched once when the launcher opens, so
  * a player who left it running would otherwise never see a `maintenance` flag raised
- * afterwards, nor a manifest published in the meantime.
+ * afterwards, a modpack withdrawn, nor a manifest published in the meantime.
  */
 export async function getModpack(modpackId: string): Promise<Modpack | null> {
   const docSnap = await withTimeout(getDoc(doc(db, 'modpacks', modpackId)))

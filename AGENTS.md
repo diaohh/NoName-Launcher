@@ -127,7 +127,7 @@ Every effect that stays needs all four: **cleanup** for anything it subscribes t
 **cancellation** of async work (an `ignore` flag or `AbortController` — StrictMode
 double-invokes and a dependency change re-runs it), a **dependency array that matches what the
 body reads**, and an **error path** that reaches the user through `useStatus()` instead of
-leaving a screen stuck on "Cargando...". Known violations are listed in `TODO.md` P3.
+leaving a screen stuck on "Cargando...".
 
 **A read on mount goes through `hooks/useIpcResource`**, not a hand-written effect:
 `useIpcResource(load, onError)` returns `{ data, loading, failed, reload, setData }` and carries
@@ -179,7 +179,7 @@ Firestore data is fetched in the renderer, then sent to main via `distro:setServ
 
 The document is checked twice, by the same rules: `firestoreService.toModpack` turns it into a `Modpack` for the UI (an optional field of the wrong type is dropped, a missing `name` becomes the id), and `DistributionManager.parseServerData` checks main's own subset again, since nothing that crosses the IPC boundary is trusted.
 
-The renderer re-reads the modpack document in `useServers.prepareLaunch()` **when PLAY is pressed**, not when the list loads — otherwise a player who left the launcher open would never see a `maintenance` flag raised afterwards, nor a manifest published in the meantime. `LaunchManager` checks the flag again as defence in depth.
+The renderer re-reads the modpack document in `useServers.prepareLaunch()` **when PLAY is pressed**, not when the list loads — otherwise a player who left the launcher open would never see a `maintenance` flag raised afterwards, nor a manifest published in the meantime. The fresh copy must pass the catalogue's own rule, `services/modpackVisibility.isVisibleTo` (public, enabled, `usersAllowed`), which `getModpacks` applies too, so a modpack withdrawn in the meantime cannot launch from the stale list. `LaunchManager` checks `maintenance` again as defence in depth; visibility is not repeated there, since only the fresh copy can carry it as false and it never reaches main.
 
 ### Launch Flow (`LaunchManager.launchMinecraft`)
 
@@ -429,7 +429,8 @@ The mechanisms for this exist and are the ones to reuse (branch `fix/p1-hardenin
 - **Process probing**: `LaunchManager.readCommandLine(pid)` interpolates the PID into a PowerShell
   command, so it is only ever called with a PID already checked to be a positive integer
 
-Nothing app-side is still open from the 2026-09-17 audit; B1 (publishing) is in `TODO.md` P1.
+Still open from the 2026-09-17 audit, all in `TODO.md`: B16 (cache pruning) and S7 (PKCE), plus
+B1 (publishing), on hold because it changes the bucket.
 
 ## Gotchas
 

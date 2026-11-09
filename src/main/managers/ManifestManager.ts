@@ -8,6 +8,7 @@ import { isSafeRelativePath } from '../utils/PathUtils'
 import { fetchWithTimeout } from '../utils/HttpUtils'
 import { ERROR_CODE, type ErrorCode } from '../../shared/errorCodes'
 import { LauncherError } from '../../shared/LauncherError'
+import { isSha256Hex } from '../../shared/guards'
 import type { ManifestPointer, PackManifest } from '../types/manifest'
 
 const logger = Logger.getLogger('ManifestManager')
@@ -52,7 +53,15 @@ class ManifestManager {
         return `${baseUrl}/files/${encoded}`
     }
 
+    /**
+     * The hash comes from the Firestore document. It is checked here, where it becomes a path,
+     * and not only where it arrives: `fetch` deletes a cached file whose hash does not match,
+     * and `"../config"` would have named `config.json`.
+     */
     static cachePath(hash: string): string {
+        if (!isSha256Hex(hash)) {
+            throw this.manifestError(ERROR_CODE.MANIFEST_INVALID, `El hash del manifest no es un sha256 valido: ${JSON.stringify(hash)}`)
+        }
         return path.join(ConfigManager.getDataDirectory(), 'manifests', `${hash}.json`)
     }
 
@@ -88,7 +97,7 @@ class ManifestManager {
         for (const file of files) {
             const valid = isPlainObject(file)
                 && typeof file.path === 'string' && file.path
-                && typeof file.hash === 'string' && file.hash
+                && isSha256Hex(file.hash)
                 && typeof file.size === 'number'
                 && isOptional(file.policy, isPolicy)
             if (!valid) throw invalid(`Entrada de manifest invalida: ${JSON.stringify(file)}`)
