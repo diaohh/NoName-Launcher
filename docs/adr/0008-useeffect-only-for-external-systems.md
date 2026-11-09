@@ -80,3 +80,13 @@ Every effect that stays satisfies all four:
 - **Leave it to `react-hooks/exhaustive-deps`.** The lint rule catches dependency arrays only.
   It says nothing about cancellation, nothing about error paths, and nothing about whether the
   effect should exist — which is the part that is worth writing down.
+
+## Addendum (2026-11-08)
+
+The shared hook exists: `hooks/useIpcResource(load, onError)` carries the four rules for a read
+on mount, and `AuthContext`, `SettingsScreen` and `SkinManagerScreen` use it. The third caller
+was the skin manager rather than `useServers`, whose read is Firestore, not IPC, and keeps its
+own effect; so does `AuthContext`'s avatar texture, which is keyed by account. `onError` goes
+through `useEffectEvent` (React 19.2+), so callers pass an inline arrow without it becoming a
+dependency that restarts the load. `AuthContext`'s two jobs were already split into separate
+effects before this.

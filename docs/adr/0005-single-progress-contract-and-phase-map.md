@@ -80,3 +80,22 @@ loader libraries — so the second phase restarted the count.
   preparation steps are cuts across `PHASE_RANGE` and a phase belongs to the step its floor falls
   in, so the slices remain the only table a new phase has to be added to. `game_startup` is the
   last step, still on its own scale and still outside `PHASE_RANGE`.
+
+## Addendum (2026-11-07)
+
+- The contract is now a type. `LaunchProgress` in `src/shared/launchProgress.ts` is a
+  discriminated union on `type` — phases, lifecycle, `game_startup`, `stdout`/`stderr` — and
+  `LaunchManager.launchMinecraft` takes a callback typed with it. `StepProgress` is the
+  `{ current, total, message }` the managers underneath report.
+- `PHASE_RANGE` and `PHASE_LABEL` are `Record<PhaseType, …>`, so a phase with no slice is a
+  compile error. The test that read the `type` literals out of `LaunchManager`'s source to
+  check the same thing was removed with it.
+- What the compiler cannot see yet is `LaunchContext`'s switch, which is still JavaScript; its
+  exhaustiveness check (`never` in the `default`) comes with the renderer's conversion.
+
+## Addendum (2026-11-08)
+
+The renderer is TypeScript now, and `LaunchContext`'s switch assigns the event to `never` in its
+`default`: a `type` of the union with no `case` does not compile. Every way the bar could freeze
+on the previous message without an error (a phase with no slice, a phase with no `case`) is now
+a compile error.

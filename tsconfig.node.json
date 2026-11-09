@@ -1,0 +1,30 @@
+// Main process, preload and src/shared. electron-vite compiles; tsc only checks
+// (`pnpm typecheck:node` passes --noEmit and drops `composite`, which only the editor needs).
+{
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
+
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+
+    // Every source is TypeScript (ADR-0015), and strict. An index into an array or a record
+    // may be missing: a regex group, a split, a list read from a manifest.
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noFallthroughCasesInSwitch": true,
+
+    // src/shared/PackPolicy.ts also runs on plain node (tools/pack-publish), whose type
+    // stripping only erases types: no enum, namespace or parameter property anywhere here.
+    "erasableSyntaxOnly": true
+  },
+  "include": ["src/main/**/*", "src/preload/**/*", "src/shared/**/*"]
+}

@@ -6,6 +6,9 @@
  *
  * No usa red ni credenciales: solo lee del disco y escribe manifest.json.
  * El esquema esta documentado en docs/manifest.md.
+ *
+ * Las politicas y los globs de `ignore` se resuelven con el mismo codigo que el launcher,
+ * src/shared/PackPolicy.ts, que Node carga quitando los tipos: hace falta Node 22.18+.
  */
 
 import fs from 'fs'
@@ -13,7 +16,6 @@ import path from 'path'
 import crypto from 'crypto'
 
 const FORMAT_VERSION = 1
-const VALID_POLICIES = ['strict', 'seed', 'additive', 'ignore']
 const HASH_CONCURRENCY = 8
 
 // ---------------------------------------------------------------- utilidades
@@ -23,47 +25,14 @@ function fail(msg) {
   process.exit(1)
 }
 
-/** Convierte un glob (`**`, `*`, `?`) en RegExp anclado. Solo lo que necesita `ignore`. */
-function globToRegExp(pattern) {
-  let re = ''
-  for (let i = 0; i < pattern.length; i++) {
-    const c = pattern[i]
-    if (c === '*') {
-      if (pattern[i + 1] === '*') {
-        if (pattern[i + 2] === '/') {
-          re += '(?:.*/)?'
-          i += 2
-        } else {
-          re += '.*'
-          i += 1
-        }
-      } else {
-        re += '[^/]*'
-      }
-    } else if (c === '?') {
-      re += '[^/]'
-    } else if ('\\^$.|+()[]{}'.includes(c)) {
-      re += '\\' + c
-    } else {
-      re += c
-    }
-  }
-  return new RegExp(`^${re}$`)
+// Antes del import: con un import estatico, un Node sin type stripping fallaria al cargar el
+// modulo con ERR_UNKNOWN_FILE_EXTENSION, sin decir que lo que falta es una version mas nueva.
+if (!process.features.typescript) {
+  fail(`Node ${process.version} no carga TypeScript, y el generador lee las politicas de\n`
+     + '  src/shared/PackPolicy.ts. Hace falta Node 22.18+ (o 23.6+).')
 }
 
-/** Gana la regla cuyo `path` sea el prefijo mas largo que coincida. */
-function resolvePolicy(relPath, rules) {
-  let best = null
-  for (const rule of rules) {
-    const rulePath = rule.path.replace(/\/+$/, '')
-    if (relPath === rulePath || relPath.startsWith(`${rulePath}/`)) {
-      if (!best || rulePath.length > best.path.length) {
-        best = { path: rulePath, policy: rule.policy }
-      }
-    }
-  }
-  return best
-}
+const { POLICIES, compileIgnore, resolvePolicy } = await import('../../src/shared/PackPolicy.ts')
 
 /** Rutas relativas en formato POSIX, ordenables y validas como sufijo de URL. */
 function walk(dir, base = dir, out = []) {
@@ -158,15 +127,15 @@ if (!version) {
 const rules = config.policies || []
 for (const rule of rules) {
   if (!rule.path || !rule.policy) fail(`regla de politica invalida: ${JSON.stringify(rule)}`)
-  if (!VALID_POLICIES.includes(rule.policy)) {
-    fail(`politica desconocida "${rule.policy}" en "${rule.path}". Validas: ${VALID_POLICIES.join(', ')}`)
+  if (!POLICIES.includes(rule.policy)) {
+    fail(`politica desconocida "${rule.policy}" en "${rule.path}". Validas: ${POLICIES.join(', ')}`)
   }
 }
 
 // ------------------------------------------------------------------- escaneo
 
 const ignorePatterns = config.ignore || []
-const ignoreRegexes = ignorePatterns.map(globToRegExp)
+const isIgnored = compileIgnore(ignorePatterns)
 
 const allPaths = walk(filesDir).sort()
 const ignored = []
@@ -175,7 +144,7 @@ const unmatched = []
 const selected = []
 
 for (const relPath of allPaths) {
-  if (ignoreRegexes.some((re) => re.test(relPath))) {
+  if (isIgnored(relPath)) {
     ignored.push(relPath)
     continue
   }

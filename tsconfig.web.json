@@ -1,0 +1,29 @@
+// Renderer and src/shared. No node types: the renderer is sandboxed and has no `process`,
+// `Buffer` or `fs`, and the checker should say so. `pnpm typecheck:web` passes --noEmit.
+{
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.web.tsbuildinfo",
+
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["vite/client"],
+    "jsx": "react-jsx",
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+
+    // Every source is TypeScript (ADR-0015), and strict. An index into an array or a record
+    // may be missing: a regex group, a split, a list read from a manifest.
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["src/renderer/src/**/*", "src/shared/**/*"],
+  // Tests run on node; the node project checks the ones in src/shared.
+  "exclude": ["src/shared/**/*.test.ts"]
+}

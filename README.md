@@ -33,8 +33,9 @@ A custom Minecraft launcher built with Electron, React, and Tailwind CSS. Featur
 
 | Layer | Technology |
 |-------|-----------|
-| Framework | Electron 37 |
+| Framework | Electron 45 |
 | Frontend | React 19, Tailwind CSS v4 |
+| Language | TypeScript 6.0 (`strict`), checked by `pnpm typecheck` |
 | Build | electron-vite, electron-builder |
 | Backend | Firebase Firestore |
 | Game Engine | [helios-core](https://github.com/dscalzi/helios-core) 2.x — signatures changed in 2.x, check `node_modules/helios-core/dist/**/*.d.ts` |
@@ -43,7 +44,8 @@ A custom Minecraft launcher built with Electron, React, and Tailwind CSS. Featur
 
 ## Prerequisites
 
-- [Node.js](https://nodejs.org/) 20+
+- [Node.js](https://nodejs.org/) 22.18+ (Vitest needs 22.12; the modpack publishing tools in
+  `tools/pack-publish` load TypeScript natively, which is on by default from 22.18)
 - [pnpm](https://pnpm.io/) package manager
 - A [Microsoft Azure](https://portal.azure.com/) registered application (for OAuth)
 - A [Firebase](https://firebase.google.com/) project with Firestore enabled
@@ -178,9 +180,29 @@ Only one launcher runs at a time: opening it again brings the existing window to
 ## Development
 
 ```bash
-pnpm dev     # electron-vite dev server, hot reload for the renderer
-pnpm lint    # ESLint (flat config) — the repo stays at 0 errors
+pnpm dev        # electron-vite dev server, hot reload for the renderer
+pnpm lint       # ESLint (flat config) — the repo stays at 0 errors
+pnpm test       # Vitest (pnpm test:watch to keep it running)
+pnpm typecheck  # tsc --noEmit over the main/preload and renderer projects
 ```
+
+### Contributing
+
+Before opening a pull request, `pnpm lint` and `pnpm typecheck` must report 0 errors,
+`pnpm test` must pass and `pnpm build` must compile. electron-vite strips TypeScript types
+without checking them, so `pnpm typecheck` is the only thing that does.
+
+- **Everything under `src/` is TypeScript** ([ADR-0015](docs/adr/0015-incremental-typescript-migration.md)),
+  with `strict` and `noUncheckedIndexedAccess` on and no JavaScript allowed. Data from outside
+  (IPC arguments, Firestore, the manifest, Mojang) arrives as `unknown` and is narrowed by a
+  runtime check, never by a bare cast.
+- **Tests sit next to the file they cover** (`ConfigManager.test.ts` beside `ConfigManager.ts`)
+  and run on node through Vitest, with `electron` replaced by a stub
+  (`src/main/testing/electron.ts`). Coverage is deliberately small: a test is worth adding when
+  the behaviour would otherwise fail without anyone noticing.
+- **Indentation depends on the area** — 4 spaces in `src/main/managers`, `utils`, `windows`,
+  `testing` and `types`, 2 everywhere else, `.ts` included. ESLint enforces it
+  ([ADR-0011](docs/adr/0011-enforce-indentation-per-area.md)).
 
 Design decisions and the reasoning behind the conventions below live in
 [docs/adr/](docs/adr/README.md). Coding agents read [AGENTS.md](AGENTS.md), which states the
@@ -188,13 +210,16 @@ same rules in the form they need while editing.
 
 Two conventions are easy to break from outside and are worth reading before a first change:
 
-- **Adding an IPC call means touching four layers** — `src/shared/channels.js`, the
-  `*.ipc.js` handler, `src/preload/index.js`, and `src/renderer/src/services/ipcClient.js`.
-  A channel missing from any of them is dead code. The handlers and the preload both read the
-  names from `channels.js`, so a rename cannot leave them out of step.
+- **Every IPC call is declared in `src/shared/ipcContract.ts`** — the name in
+  `src/shared/channels.ts`, what it takes and returns in the contract, then the handler in its
+  `*.ipc.ts` map, the method in `src/preload/index.ts` and the wrapper in
+  `src/renderer/src/services/ipcClient.ts`. Each layer is typed against the contract, so one
+  that misses the channel does not compile. Handlers get their arguments as `unknown` and
+  validate them: the renderer is not trusted.
 - **Errors cross the IPC boundary in a `{ ok, code, message }` envelope**, never as a thrown
-  `Error`. Handlers register through `handle()` from `src/main/ipc/result.js`; codes are
-  shared constants in `src/shared/errorCodes.js`. Never branch on message text.
+  `Error`. Handlers are registered from one map through `handleAll()` in
+  `src/main/ipc/result.ts`; main throws `LauncherError` with a code from
+  `src/shared/errorCodes.ts`. Never branch on message text.
 
 ### Gotchas
 
@@ -206,14 +231,15 @@ Two conventions are easy to break from outside and are worth reading before a fi
   unable to start from a clean install, and it stayed hidden for weeks because the existing
   `node_modules` still had the package on disk. It will only reproduce after
   `rm -rf node_modules && pnpm install`.
-- **`package.json` lists `pnpm.onlyBuiltDependencies`.** pnpm 10 skips postinstall scripts
-  unless a package is on that list; without `electron` there the binary is never downloaded and
-  `pnpm dev` fails.
+- **The Electron binary is downloaded on first use, not on install.** Since Electron 42 the
+  package has no postinstall script; `pnpm dev` and `pnpm preview` run `install-electron`
+  first, because electron-vite expects the binary to be there already. The first `pnpm dev`
+  after a clean install takes a little longer while it downloads.
 - **`resources/` is electron-vite's public directory for the main process.** The window icon
   is imported as `resources/icon.png?asset&asarUnpack`, which resolves to a path next to the
   bundle rather than copying the file, so `electron-builder.yml` has to ship it explicitly
   (`files` + `asarUnpack`). The same file is the installer/executable icon.
-- **Logs go through `src/main/utils/Logger.js`**, one winston logger with a console and a
+- **Logs go through `src/main/utils/Logger.ts`**, one winston logger with a console and a
   rotating file transport. Error objects are written as stack, code and cause chain, and
   anything that looks like a token is redacted — but that is a safety net: never log a token,
   or an object that may carry one. helios-core's own internal loggers still write to the
@@ -240,7 +266,7 @@ Packaged output goes to `dist/`. The application icon is `resources/icon.png` (1
 ```
 src/
 ├── main/                   # Electron main process
-│   ├── index.js            # BrowserWindow setup
+│   ├── index.ts            # BrowserWindow setup
 │   ├── managers/           # Business logic (static classes)
 │   │   ├── AuthManager     # Microsoft OAuth + Minecraft auth
 │   │   ├── ConfigManager   # Local config persistence
@@ -249,19 +275,26 @@ src/
 │   │   ├── ModLoaderManager     # Forge / Fabric installation
 │   │   ├── MinecraftDownloadManager  # Vanilla assets via helios-core
 │   │   └── SkinManager     # Mojang profile (skin, capes) + local skin vault
-│   ├── utils/              # Logger, file hashing
-│   └── ipc/                # IPC channel handlers
+│   ├── utils/              # Logger, file hashing, paths, HTTP, Maven, game output
+│   ├── types/              # What main reads: config.json, the pack manifest, Mojang JSON
+│   ├── windows/            # The Microsoft sign-in window
+│   └── ipc/                # IPC handlers, one typed map
 ├── preload/                # Context bridge (main ↔ renderer)
-│   └── index.js
+│   └── index.ts
 ├── shared/                 # Bundled into more than one process — must stay dependency-free
-│   ├── channels.js         # IPC channel names, read by the handlers and the preload
-│   ├── errorCodes.js       # The only source of IPC error codes
-│   └── skins.js            # Skin name limit and models, checked on both sides
+│   ├── channels.ts         # IPC channel names, read by the handlers and the preload
+│   ├── ipcContract.ts      # What every channel carries; a layer missing one does not compile
+│   ├── errorCodes.ts       # The only source of IPC error codes
+│   ├── LauncherError.ts    # The error main throws, rebuilt in the renderer
+│   ├── launchProgress.ts   # The launch:progress union
+│   ├── modpack.ts          # The Firestore modpack document
+│   ├── PackPolicy.ts       # Manifest policies and ignore globs, shared with tools/pack-publish
+│   └── skins.ts            # Skin name limit and models, checked on both sides
 └── renderer/src/           # React application
-    ├── App.jsx             # Root component + providers
+    ├── App.tsx             # Root component + providers
     ├── contexts/           # Auth, Launch, Servers, Status
-    ├── services/           # ipcClient, Firebase, Firestore queries, launchPhases
-    ├── hooks/              # useServers
+    ├── services/           # ipcClient, Firebase, Firestore queries, launchPhases, errors
+    ├── hooks/              # useServers, useIpcResource
     └── components/
         ├── auth/           # Login screen
         ├── common/         # Modal (portal + Escape), status message
@@ -275,7 +308,7 @@ src/
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/my-feature`)
-3. Run `pnpm lint` — the repo stays at 0 errors
+3. Run `pnpm lint`, `pnpm typecheck`, `pnpm test` and `pnpm build` — see [Contributing](#contributing) under Development
 4. Commit your changes using [Conventional Commits](https://www.conventionalcommits.org/) in English, one logical change per commit
 5. Push to the branch (`git push origin feature/my-feature`)
 6. Open a Pull Request

@@ -4,10 +4,17 @@ Publishing tools for modpacks. They turn a folder of mods and configs into a man
 the launcher can sync against, and upload it to an S3-compatible CDN.
 
 The manifest format is the contract between these scripts and the launcher — see
-[`docs/manifest.md`](../../docs/manifest.md). `generate.mjs` and
-`src/main/utils/PackPolicy.js` deliberately duplicate the glob and policy matching,
-because the tools run on plain node while the launcher sources are bundled with
-extensionless imports. **Change both together.**
+[`docs/manifest.md`](../../docs/manifest.md). The glob and policy matching is not copied
+here: `generate.mjs` imports the launcher's own
+[`src/shared/PackPolicy.ts`](../../src/shared/PackPolicy.ts), so the publisher and the
+player's launcher can never disagree on what a rule or an `ignore` glob matches.
+
+## Requirements
+
+- **Node 22.18+** (or 23.6+). Node loads `PackPolicy.ts` by stripping its types, with no
+  build step and no dependency, and that is on by default from those versions. On an older
+  Node `generate.mjs` stops with a message saying so.
+- [rclone](https://rclone.org/), for `publish.mjs` only.
 
 ## Pack layout
 
