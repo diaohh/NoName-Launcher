@@ -1,11 +1,19 @@
-import { useStatus } from '../../contexts/StatusContext'
+import type { ReactNode } from 'react'
+import { useStatus, type StatusType } from '../../contexts/StatusContext'
+
+interface StatusStyle {
+  card: string
+  badge: string
+  bar: string
+  glyph: ReactNode
+}
 
 /**
  * One look per `type` passed to `showStatus`: a light, tinted card with the icon on the left,
  * the message, a close button, and a bar along the bottom that runs out with the timer. An
  * unknown type falls back to `info` rather than to the alarming one.
  */
-const STYLES = {
+const STYLES: Record<StatusType, StatusStyle> = {
   error: {
     card: 'bg-red-100 border-red-400',
     badge: 'bg-red-500',

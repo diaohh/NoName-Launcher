@@ -1,5 +1,5 @@
 /** A small ring that spins in the current text colour, still for reduced motion. */
-export default function Spinner({ className = 'w-4 h-4' }) {
+export default function Spinner({ className = 'w-4 h-4' }: { className?: string }) {
   return (
     <svg className={`${className} animate-spin motion-reduce:animate-none`} viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.3" strokeWidth="3" />

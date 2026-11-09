@@ -1,27 +1,34 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+
+interface ModalProps {
+  open: boolean
+  /** Called by Escape, the backdrop and the close button. */
+  onClose: () => void
+  title: string
+  /** Extra controls in the header, left of the close button. */
+  actions?: ReactNode
+  /** Action row pinned under the scrollable body. */
+  footer?: ReactNode
+  /** Tailwind max-width class for the panel. */
+  size?: string
+  children: ReactNode
+}
 
 /**
  * Centered dialog on the launcher's glass surface.
  *
  * Rendered through a portal so it escapes the stacking contexts of the home screen, whose
  * background, sidebar and launch overlay all carry their own z-index.
- *
- * @param {boolean} open
- * @param {() => void} onClose   Called by Escape, the backdrop and the close button.
- * @param {string} title
- * @param {React.ReactNode} [actions] Extra controls in the header, left of the close button.
- * @param {React.ReactNode} [footer]  Action row pinned under the scrollable body.
- * @param {string} [size]        Tailwind max-width class for the panel.
  */
-export default function Modal({ open, onClose, title, actions, footer, size = 'max-w-[560px]', children }) {
-  const panelRef = useRef(null)
+export default function Modal({ open, onClose, title, actions, footer, size = 'max-w-[560px]', children }: ModalProps) {
+  const panelRef = useRef<HTMLDivElement>(null)
 
   // The keyboard is outside the React tree, which is the whole reason this is an effect.
   useEffect(() => {
     if (!open) return
 
-    const handleKeyDown = (e) => {
+    const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
     }
 

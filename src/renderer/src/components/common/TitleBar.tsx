@@ -1,10 +1,17 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { ipc } from '../../services/ipcClient'
 
 const DRAG = '[-webkit-app-region:drag]'
 const NO_DRAG = '[-webkit-app-region:no-drag]'
 
-function WindowButton({ onClick, label, danger = false, children }) {
+interface WindowButtonProps {
+  onClick: () => void
+  label: string
+  danger?: boolean
+  children: ReactNode
+}
+
+function WindowButton({ onClick, label, danger = false, children }: WindowButtonProps) {
   return (
     <button
       onClick={onClick}
