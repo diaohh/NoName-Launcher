@@ -3,7 +3,9 @@ import { MicrosoftAuth, MicrosoftErrorCode, type MicrosoftResponse } from 'helio
 import { RestResponseStatus } from 'helios-core/common'
 import ConfigManager from './ConfigManager'
 import Logger from '../utils/Logger'
-import { MICROSOFT_CLIENT_ID } from '../constants'
+import { fetchWithTimeout } from '../utils/HttpUtils'
+import { MICROSOFT_CLIENT_ID, MICROSOFT_REDIRECT_URI, MICROSOFT_SCOPE } from '../constants'
+import { isPlainObject } from '../../shared/guards'
 import { ERROR_CODE, isTerminalAuthCode, type ErrorCode } from '../../shared/errorCodes'
 import { LauncherError, errorCodeOf } from '../../shared/LauncherError'
 import type { AccountValidation, SessionExpired } from '../../shared/ipcContract'
@@ -41,6 +43,9 @@ export interface MinecraftSession {
     displayName: string
     mcExpires: number
 }
+
+/** Microsoft's OAuth token endpoint for personal accounts, the one helios calls too. */
+const TOKEN_ENDPOINT = 'https://login.microsoftonline.com/consumers/oauth2/v2.0/token'
 
 /** got reports a request that never reached the server with one of these and no response. */
 const TRANSPORT_ERROR_CODES = new Set([
@@ -174,11 +179,11 @@ class AuthManager {
     }
 
     /**
-     * Trades a fresh authorization code for a Microsoft token set.
-     *
+     * Trades a fresh authorization code for a Microsoft token set. `codeVerifier` is the PKCE
+     * secret of the sign-in window that produced the code (`windows/msftAuth.ts`).
      */
-    static async exchangeAuthCode(authCode: string): Promise<MicrosoftTokenSet> {
-        return await this.requestMicrosoftTokens(authCode, false)
+    static async exchangeAuthCode(authCode: string, codeVerifier: string): Promise<MicrosoftTokenSet> {
+        return await this.requestMicrosoftTokens({ grant_type: 'authorization_code', code: authCode, code_verifier: codeVerifier })
     }
 
     /**
@@ -186,24 +191,53 @@ class AuthManager {
      * refresh token, so the caller must persist the one that comes back.
      */
     static async exchangeRefreshToken(refreshToken: string): Promise<MicrosoftTokenSet> {
-        return await this.requestMicrosoftTokens(refreshToken, true)
+        return await this.requestMicrosoftTokens({ grant_type: 'refresh_token', refresh_token: refreshToken })
     }
 
-    static async requestMicrosoftTokens(credential: string, isRefresh: boolean): Promise<MicrosoftTokenSet> {
+    /**
+     * The token request, made here rather than through helios: its `getAccessToken` has no way
+     * to send a PKCE `code_verifier`. Both grants go through it, so there is one path to
+     * Microsoft's token endpoint. A failure is described in the shape `classifyRestError`
+     * reads from helios (status and body), so both are classified by the same rules.
+     */
+    static async requestMicrosoftTokens(grant: Record<string, string>): Promise<MicrosoftTokenSet> {
+        const kind = grant.grant_type === 'refresh_token' ? 'refresh' : 'auth code'
         try {
-            const response = await MicrosoftAuth.getAccessToken(credential, isRefresh, MICROSOFT_CLIENT_ID)
-
-            if (response.responseStatus !== RestResponseStatus.SUCCESS) {
-                throw this.classifyRestError('getAccessToken', response)
+            let response: Response
+            try {
+                response = await fetchWithTimeout(TOKEN_ENDPOINT, 'el token de Microsoft', {
+                    method: 'POST',
+                    body: new URLSearchParams({
+                        client_id: MICROSOFT_CLIENT_ID,
+                        scope: MICROSOFT_SCOPE,
+                        redirect_uri: MICROSOFT_REDIRECT_URI,
+                        ...grant
+                    })
+                })
+            } catch (err) {
+                // NETWORK_TIMEOUT or NETWORK_ERROR: the request never got an answer.
+                logger.warn(`Token request (${kind}) failed before reaching Microsoft`)
+                throw this.authError(ERROR_CODE.AUTH_NETWORK, MESSAGES.NETWORK, err)
             }
 
-            logger.info(`Microsoft access token obtained (${isRefresh ? 'refresh' : 'auth code'})`)
+            const body: unknown = await response.json().catch(() => null)
+            if (!response.ok) {
+                throw this.classifyRestError(`Token request (${kind})`, { error: { response: { statusCode: response.status, body } } })
+            }
 
-            const data = this.dataOf(response)
+            if (!isPlainObject(body)
+                || typeof body.access_token !== 'string'
+                || typeof body.refresh_token !== 'string'
+                || typeof body.expires_in !== 'number') {
+                logger.error(`Token request (${kind}) answered without a usable token set`)
+                throw this.authError(ERROR_CODE.AUTH_UNKNOWN, MESSAGES.UNKNOWN)
+            }
+
+            logger.info(`Microsoft access token obtained (${kind})`)
             return {
-                accessToken: data.access_token,
-                refreshToken: data.refresh_token,
-                expiresAt: this.calculateExpiryDate(new Date().getTime(), data.expires_in)
+                accessToken: body.access_token,
+                refreshToken: body.refresh_token,
+                expiresAt: this.calculateExpiryDate(new Date().getTime(), body.expires_in)
             }
         } catch (err) {
             // Never flatten a classified failure back into UNKNOWN: losing the code here
@@ -272,8 +306,8 @@ class AuthManager {
         }
     }
 
-    static async addMicrosoftAccount(authCode: string): Promise<MinecraftSession> {
-        const microsoft = await this.exchangeAuthCode(authCode)
+    static async addMicrosoftAccount(authCode: string, codeVerifier: string): Promise<MinecraftSession> {
+        const microsoft = await this.exchangeAuthCode(authCode, codeVerifier)
         const session = await this.resolveMinecraftSession(microsoft.accessToken)
 
         ConfigManager.addMicrosoftAccount(

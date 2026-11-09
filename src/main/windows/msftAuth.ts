@@ -1,12 +1,34 @@
+import crypto from 'crypto'
 import { BrowserWindow, session, type Event } from 'electron'
 import Logger from '../utils/Logger'
-import { MICROSOFT_CLIENT_ID } from '../constants'
+import { MICROSOFT_CLIENT_ID, MICROSOFT_REDIRECT_URI, MICROSOFT_SCOPE } from '../constants'
 import { ERROR_CODE, type ErrorCode } from '../../shared/errorCodes'
 import { LauncherError } from '../../shared/LauncherError'
 
 const logger = Logger.getLogger('MsftAuth')
 
-const REDIRECT_URI = 'https://login.microsoftonline.com/common/oauth2/nativeclient'
+const AUTHORIZE_URL = 'https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize'
+
+/**
+ * PKCE (RFC 7636), which RFC 8252 asks of every public client: the code Microsoft redirects
+ * with is only redeemable together with this verifier, which never leaves the main process.
+ * The code itself goes to the renderer and comes back in `auth:login`, so a code read on the
+ * way is worth nothing without it.
+ *
+ * Kept for the last sign-in only: there is one sign-in window at a time, and `takeCodeVerifier`
+ * hands it out once.
+ */
+let pendingVerifier: { code: string, verifier: string } | null = null
+
+const base64url = (bytes: Buffer) => bytes.toString('base64url')
+
+/** The verifier of the sign-in that produced `code`, once; null for any other code. */
+export function takeCodeVerifier(code: string): string | null {
+    if (pendingVerifier?.code !== code) return null
+    const { verifier } = pendingVerifier
+    pendingVerifier = null
+    return verifier
+}
 
 /**
  * The sign-in window gets a session of its own, never the launcher's default one.
@@ -83,6 +105,11 @@ export function createMsftAuthWindow(): Promise<string> {
         })
         msftAuthWindow = window
 
+        // Fresh for every window: a code from an earlier sign-in can no longer be redeemed.
+        const verifier = base64url(crypto.randomBytes(32))
+        const state = base64url(crypto.randomBytes(16))
+        pendingVerifier = null
+
         // One flag for the whole window. `closed` fires both for a flow that completed
         // and for a window the player shut, and only the second is a cancellation.
         let settled = false
@@ -115,13 +142,21 @@ export function createMsftAuthWindow(): Promise<string> {
          * flows. Whichever arrives first settles the promise, the other is a no-op.
          */
         const handleNavigation = (_event: Event, uri: string) => {
-            if (!uri.startsWith(REDIRECT_URI)) return
+            if (!uri.startsWith(MICROSOFT_REDIRECT_URI)) return
 
             const query = new URL(uri).searchParams
 
             const code = query.get('code')
             if (code) {
+                // A redirect this window did not start (`state` is ours and random) is refused,
+                // whatever code it carries.
+                if (query.get('state') !== state) {
+                    logger.warn('Authorization redirect with a state that does not match, refused')
+                    finish(() => reject(oauthError(ERROR_CODE.OAUTH_FAILED, 'La respuesta de Microsoft no corresponde a este inicio de sesion. Intentalo de nuevo.')))
+                    return
+                }
                 logger.info('Authorization code received')
+                pendingVerifier = { code, verifier }
                 finish(() => resolve(code))
                 return
             }
@@ -163,12 +198,16 @@ export function createMsftAuthWindow(): Promise<string> {
             reject(oauthError(ERROR_CODE.OAUTH_WINDOW_CLOSED, 'Has cerrado la ventana antes de completar el inicio de sesion.'))
         })
 
-        const authUrl = 'https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize?' +
-            'prompt=select_account&' +
-            `client_id=${MICROSOFT_CLIENT_ID}&` +
-            'response_type=code&' +
-            'scope=XboxLive.signin%20offline_access&' +
-            `redirect_uri=${REDIRECT_URI}`
+        const authUrl = `${AUTHORIZE_URL}?${new URLSearchParams({
+            prompt: 'select_account',
+            client_id: MICROSOFT_CLIENT_ID,
+            response_type: 'code',
+            scope: MICROSOFT_SCOPE,
+            redirect_uri: MICROSOFT_REDIRECT_URI,
+            code_challenge: base64url(crypto.createHash('sha256').update(verifier).digest()),
+            code_challenge_method: 'S256',
+            state
+        })}`
 
         window.loadURL(authUrl)
     })

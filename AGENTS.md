@@ -159,7 +159,7 @@ Launcher directory layout: `common/` (shared assets, libraries, versions, java, 
 
 ### Authentication
 
-`AuthManager` runs the Microsoft → XBL → XSTS → Minecraft chain through `helios-core/microsoft`, split in two halves: `exchangeAuthCode` / `exchangeRefreshToken` obtain the Microsoft token set, and `resolveMinecraftSession(msAccessToken)` walks it down to a playable session. The three callers compose them — `addMicrosoftAccount` (both), `refreshMSToken` (both), `refreshMCToken` (only the second, since the MS token is still good). Accounts live in `config.json` under `authenticationDatabase[uuid]` with two independent expiries (`expiresAt` for the MC token, `microsoft.expires_at` for the MS token).
+`AuthManager` runs the Microsoft → XBL → XSTS → Minecraft chain, split in two halves: `exchangeAuthCode` / `exchangeRefreshToken` obtain the Microsoft token set through our own request to the token endpoint (`requestMicrosoftTokens`, since helios' `getAccessToken` cannot send a PKCE verifier), and `resolveMinecraftSession(msAccessToken)` walks it down to a playable session. The three callers compose them — `addMicrosoftAccount` (both), `refreshMSToken` (both), `refreshMCToken` (only the second, since the MS token is still good). Accounts live in `config.json` under `authenticationDatabase[uuid]` with two independent expiries (`expiresAt` for the MC token, `microsoft.expires_at` for the MS token).
 
 The three secrets — `accessToken`, `microsoft.access_token`, `microsoft.refresh_token` — are **not** on disk in the clear: `ConfigManager` folds them into one `secrets` blob encrypted with Electron's `safeStorage`, and the rest of the account stays readable. `safeStorage` needs `app.whenReady()`, which holds because `ConfigManager.load()` runs inside `createWindow()`. Only the **asynchronous** methods are used (`isAsyncEncryptionAvailable`, `encryptStringAsync`, `decryptStringAsync`; the synchronous ones were removed in Electron 46), so `load()` and `save()` return promises: **await them**. A blob `decryptStringAsync` flags with `shouldReEncrypt` is rewritten on load.
 
@@ -170,6 +170,7 @@ Rules when touching auth ([ADR-0007](docs/adr/0007-encrypt-account-secrets-with-
 - The refresh is **scheduled from `expiresAt`**, not polled: `AuthManager.startTokenRefreshScheduler` arms a `setTimeout` 5 min before expiry, bounded to `[15 s, 30 min]`, backs off `[1, 2, 5, 10 min]` on a recoverable failure and notifies the renderer only on a terminal one. Starting is idempotent, and `powerMonitor.on('resume')` re-checks after a suspend. Re-arm it with `scheduleTokenRefresh()` after anything that changes the selected account.
 - Never send the Minecraft `accessToken` to the renderer; the renderer only needs `username`/`uuid`/`displayName`.
 - The Microsoft sign-in window runs in its own **in-memory** partition (`msft-auth` in `windows/msftAuth.ts`), never in the default session, and the logout handler empties it. Microsoft's cookies are a live web session for the player's account: they must not reach the disk nor outlive a logout. `purgeLegacyAuthCookies` removes the ones older versions left in the default session.
+- The sign-in uses **PKCE and `state`** (RFC 8252). `windows/msftAuth.ts` makes a fresh `code_verifier` and `state` per window, refuses a redirect whose `state` is not its own, and keeps the verifier in main: the code goes to the renderer and back through `auth:login`, which redeems it only with `takeCodeVerifier(code)` — the last window's code, once. Never send the verifier to the renderer. The redirect URI and scope are `MICROSOFT_REDIRECT_URI` / `MICROSOFT_SCOPE` in `constants.ts`, shared by the window and the token request, which must match
 - `microsoft.expires_at` is the expiry of the MS **access** token (~1 h), not of the refresh token (~90 days). Never treat it as "the session is over".
 - A decryption failure costs the session only: `purgeSession` clears `authenticationDatabase` and `selectedAccount` and leaves every setting alone. If `safeStorage.isEncryptionAvailable()` is false, credentials are **not persisted at all** rather than written in plaintext.
 - `usersAllowed` filtering in `firestoreService` is UX only ([ADR-0006](docs/adr/0006-usersallowed-is-ux-not-access-control.md)), and cannot currently be enforced in Security Rules either — the launcher has no Firebase identity, so `request.auth` is always `null`. See the stand-by entry in `TODO.md`.
@@ -449,8 +450,8 @@ The mechanisms for this exist and are the ones to reuse (branch `fix/p1-hardenin
 - **Process probing**: `LaunchManager.readCommandLine(pid)` interpolates the PID into a PowerShell
   command, so it is only ever called with a PID already checked to be a positive integer
 
-Still open from the 2026-09-17 audit, all in `TODO.md`: B16 (cache pruning) and S7 (PKCE), plus
-B1 (publishing), on hold because it changes the bucket.
+Still open from the 2026-09-17 audit, all in `TODO.md`: B16 (cache pruning, pending a decision on
+whether it pays off) and B1 (publishing), on hold because it changes the bucket.
 
 ## Gotchas
 
