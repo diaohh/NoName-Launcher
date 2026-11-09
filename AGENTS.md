@@ -329,6 +329,10 @@ gives it the first row and the screens fill the rest — size screens with `h-fu
 **never `h-screen`**, or they overflow the window by the bar's height. The Microsoft sign-in
 window keeps its native frame.
 
+The window opens at 1000×600 and cannot shrink below **900×560** (`minWidth`/`minHeight` in
+`main/index.ts`), which still fits a 720p screen — or 1080p at 150% scaling — with the taskbar.
+Lay screens out for that minimum, not for the default.
+
 The home screen with a modpack selected is **one flex column**, all in the flow: the logo box
 (`flex-1 min-h-0`, so `ModpackLogo` scales down into whatever height is left), JUGAR, and a slot
 of fixed height for the launch tracker that stays reserved while empty, so pressing JUGAR does

@@ -114,6 +114,12 @@ async function openMainWindow(): Promise<void> {
   const window = new BrowserWindow({
     width: 1000,
     height: 600,
+    // The smallest window every screen is laid out for: Ajustes' tallest tab (Java) fits with
+    // no scroll and the skin manager keeps both columns. It also fits a 720p screen — or a
+    // 1080p one at 150% scaling, which is the same 1280x720 in logical pixels — with the
+    // taskbar taken out.
+    minWidth: 900,
+    minHeight: 560,
     // The title bar is drawn by the renderer (components/common/TitleBar.jsx), so it can sit
     // on the same glass as the rest of the launcher.
     frame: false,
