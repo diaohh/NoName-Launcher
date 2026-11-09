@@ -1,6 +1,13 @@
 import { useServers } from '../../contexts/ServersContext'
+import type { Modpack } from '../../../../shared/modpack'
 
-function ServerIcon({ server, isActive, onSelect }) {
+interface ServerIconProps {
+  server: Modpack
+  isActive: boolean
+  onSelect: (id: string) => void
+}
+
+function ServerIcon({ server, isActive, onSelect }: ServerIconProps) {
   const hasIcon = server.icon != null
 
   return (

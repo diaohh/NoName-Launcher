@@ -15,7 +15,7 @@ import { useState } from 'react'
  * button's fixed offset, which pinned it to 110px in the default 1000x600 window. 55vh only
  * stops a square logo from taking over a tall screen.
  */
-export default function ModpackLogo({ url, name }) {
+export default function ModpackLogo({ url, name }: { url: string, name: string }) {
   const [loaded, setLoaded] = useState(false)
   const [failed, setFailed] = useState(false)
 

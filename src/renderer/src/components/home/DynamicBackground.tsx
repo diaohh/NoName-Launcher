@@ -1,5 +1,7 @@
 import { useState } from 'react'
 
+type BannerStatus = 'loaded' | 'failed'
+
 /**
  * Crossfades between modpack banners over a fixed grey gradient.
  *
@@ -16,14 +18,13 @@ import { useState } from 'react'
  * Firestore, and interpolating it into `url('…')` let a quote in it break out of the value;
  * as an attribute it is never parsed as CSS at all.
  */
-export default function DynamicBackground({ bannerUrl }) {
-  // url -> 'loaded' | 'failed'
-  const [status, setStatus] = useState({})
+export default function DynamicBackground({ bannerUrl }: { bannerUrl: string | undefined }) {
+  const [status, setStatus] = useState<Record<string, BannerStatus>>({})
 
   const target = bannerUrl && status[bannerUrl] !== 'failed' ? bannerUrl : null
   const loaded = Object.keys(status).filter(url => status[url] === 'loaded')
 
-  const settle = (url, result) => setStatus(prev => ({ ...prev, [url]: result }))
+  const settle = (url: string, result: BannerStatus) => setStatus(prev => ({ ...prev, [url]: result }))
 
   return (
     <div className="fixed inset-0 z-0 overflow-hidden bg-linear-to-b from-[#4d4d4d] to-[#1a1a1a]">

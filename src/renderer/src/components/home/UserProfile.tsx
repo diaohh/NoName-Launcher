@@ -1,19 +1,25 @@
 import { useState, useRef, useEffect } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { useStatus } from '../../contexts/StatusContext'
+import { errorMessage } from '../../services/errors'
 import SkinHead from '../common/SkinHead'
 
 const MENU_ITEM = 'w-full text-left text-sm rounded px-2 py-1.5 transition-colors duration-200 cursor-pointer bg-transparent border-none'
 
-export default function UserProfile({ onOpenSkins, onOpenSettings }) {
+interface UserProfileProps {
+  onOpenSkins: () => void
+  onOpenSettings: () => void
+}
+
+export default function UserProfile({ onOpenSkins, onOpenSettings }: UserProfileProps) {
   const { account, logout, skinTexture } = useAuth()
   const { showStatus } = useStatus()
   const [menuOpen, setMenuOpen] = useState(false)
-  const menuRef = useRef(null)
+  const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    function handleClickOutside(e) {
-      if (menuRef.current && !menuRef.current.contains(e.target)) {
+    function handleClickOutside(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setMenuOpen(false)
       }
     }
@@ -28,7 +34,7 @@ export default function UserProfile({ onOpenSkins, onOpenSettings }) {
     try {
       await logout()
     } catch (err) {
-      showStatus(err.message || 'No se ha podido cerrar la sesion', 'error')
+      showStatus(errorMessage(err, 'No se ha podido cerrar la sesion'), 'error')
     }
   }
 

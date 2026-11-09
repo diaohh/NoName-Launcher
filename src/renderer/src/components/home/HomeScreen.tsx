@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useState, type CSSProperties } from 'react'
 import { useServers } from '../../contexts/ServersContext'
 import DynamicBackground from './DynamicBackground'
 import ModpackLogo from './ModpackLogo'
@@ -18,9 +18,8 @@ const SkinManagerScreen = lazy(() => import('../skins/SkinManagerScreen'))
 
 export default function HomeScreen() {
   const { selectedServer, error, reload } = useServers()
-  // 'home', 'settings' or 'skins'. The other screens replace this one whole and come back
-  // through `onBack`.
-  const [screen, setScreen] = useState('home')
+  // The other screens replace this one whole and come back through `onBack`.
+  const [screen, setScreen] = useState<'home' | 'settings' | 'skins'>('home')
   const goHome = () => setScreen('home')
 
   if (screen === 'settings') {
@@ -60,7 +59,7 @@ export default function HomeScreen() {
           // it cannot be a Tailwind class — those are generated at build time — and goes in as a
           // CSS variable that both read.
           <div
-            style={{ '--accent': selectedServer.accentColor ?? 'var(--color-accent-orange)' }}
+            style={{ '--accent': selectedServer.accentColor ?? 'var(--color-accent-orange)' } as CSSProperties}
             className="w-full h-full flex flex-col items-center gap-3 px-8 pt-6 pb-[clamp(16px,3vh,40px)]"
           >
             <div className="flex-1 min-h-0 w-full flex flex-col items-center justify-center">

@@ -1,3 +1,5 @@
+import type { CatalogueError } from '../../hooks/useServers'
+
 /**
  * Shown in place of the launcher wordmark when the catalogue could not be read.
  *
@@ -5,7 +7,7 @@
  * no modpacks assigned" — the one thing the player must not conclude when the real problem
  * is the network.
  */
-export default function ServersError({ error, onRetry }) {
+export default function ServersError({ error, onRetry }: { error: CatalogueError, onRetry: () => void }) {
   const isNetwork = error.kind === 'network'
 
   return (
