@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-11-09
-- **Commit**: (pending)
+- **Commit**: `21aa4a7`
 
 ## Context
 
