@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState, type KeyboardEvent } from 'react'
+import { useCallback, useState, type KeyboardEvent } from 'react'
 import { ipc } from '../../services/ipcClient'
 import { errorMessage, isTerminalAuthError } from '../../services/errors'
+import { useIpcResource } from '../../hooks/useIpcResource'
 import { capeFrontStyle, describeSkin } from '../../services/skinTextures'
 import { useAuth } from '../../contexts/AuthContext'
 import { useStatus } from '../../contexts/StatusContext'
@@ -63,8 +64,18 @@ export default function SkinManagerScreen({ onBack }: { onBack: () => void }) {
   const { logout, updateSkinTexture } = useAuth()
   const { showStatus } = useStatus()
 
-  const [vault, setVault] = useState<SkinVault | null>(null)
-  const [failed, setFailed] = useState(false)
+  /** Says what failed, and leaves when the session is gone for good, as JUGAR does. */
+  const reportFailure = async (err: unknown, fallback: string) => {
+    showStatus(errorMessage(err, fallback), 'error')
+    if (isTerminalAuthError(err)) await logout()
+  }
+
+  // Fetch on mount: the profile and the vault, through main. "Reintentar" is `reload`.
+  const { data: vault, setData: setVault, failed, reload } = useIpcResource(loadSkinState, (err) => {
+    console.error('Failed to load the skin manager:', err)
+    reportFailure(err, 'No se ha podido cargar el gestor de skins')
+  })
+
   // The player's pending choice; `undefined` means "what the account is wearing now". Kept as
   // overrides on top of the loaded state, so a reload after a failed save keeps it. A cape id
   // of null is a choice too: no cape.
@@ -78,12 +89,6 @@ export default function SkinManagerScreen({ onBack }: { onBack: () => void }) {
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ id: string, position: MenuPosition } | null>(null)
 
-  /** Says what failed, and leaves when the session is gone for good, as JUGAR does. */
-  const reportFailure = useCallback(async (err: unknown, fallback: string) => {
-    showStatus(errorMessage(err, fallback), 'error')
-    if (isTerminalAuthError(err)) await logout()
-  }, [showStatus, logout])
-
   const reportViewerError = useCallback((err: unknown) => {
     console.error('The skin viewer could not load a texture:', err)
     showStatus('No se ha podido mostrar esa textura.', 'error')
@@ -91,37 +96,9 @@ export default function SkinManagerScreen({ onBack }: { onBack: () => void }) {
 
   const closeMenu = useCallback(() => setMenu(null), [])
 
-  // Fetch on mount: the profile and the vault, through main.
-  useEffect(() => {
-    let ignore = false
-
-    loadSkinState()
-      .then(loaded => {
-        if (!ignore) setVault(loaded)
-      })
-      .catch(err => {
-        if (ignore) return
-        console.error('Failed to load the skin manager:', err)
-        setFailed(true)
-        reportFailure(err, 'No se ha podido cargar el gestor de skins')
-      })
-
-    return () => { ignore = true }
-  }, [reportFailure])
-
-  const retry = async () => {
-    setFailed(false)
-    try {
-      setVault(await loadSkinState())
-    } catch (err) {
-      setFailed(true)
-      reportFailure(err, 'No se ha podido cargar el gestor de skins')
-    }
-  }
-
   // The same skeleton HomeScreen shows while this chunk loads, so loading reads as one step.
   if (!vault) {
-    return <SkinManagerSkeleton onCancel={onBack} failed={failed} onRetry={retry} />
+    return <SkinManagerSkeleton onCancel={onBack} failed={failed} onRetry={reload} />
   }
 
   // What the screen shows is the account's current state with the player's choice on top.

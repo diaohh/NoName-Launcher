@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
 import { ipc } from '../../services/ipcClient'
 import { errorMessage } from '../../services/errors'
+import { useIpcResource } from '../../hooks/useIpcResource'
 import { useStatus } from '../../contexts/StatusContext'
 import type { LauncherSettings } from '../../../../shared/ipcContract'
 import JavaSection from './JavaSection'
@@ -34,25 +34,13 @@ function CloseButton({ onClick }: { onClick: () => void }) {
 
 export default function SettingsScreen({ onBack }: { onBack: () => void }) {
   const { showStatus } = useStatus()
-  const [settings, setSettings] = useState<LauncherSettings | null>(null)
-  const [failed, setFailed] = useState(false)
 
-  useEffect(() => {
-    let ignore = false
-
-    ipc.config.getSettings()
-      .then(loaded => { if (!ignore) setSettings(loaded) })
-      .catch(err => {
-        // Without this the screen sat on "Cargando..." forever, with nothing in the log and
-        // nothing on screen — on the very screen StatusContext was introduced for.
-        if (ignore) return
-        console.error('Failed to load settings:', err)
-        setFailed(true)
-        showStatus(errorMessage(err, 'No se han podido cargar los ajustes'), 'error')
-      })
-
-    return () => { ignore = true }
-  }, [showStatus])
+  const { data: settings, setData: setSettings, failed } = useIpcResource(ipc.config.getSettings, (err) => {
+    // Without this the screen sat on "Cargando..." forever, with nothing in the log and
+    // nothing on screen — on the very screen StatusContext was introduced for.
+    console.error('Failed to load settings:', err)
+    showStatus(errorMessage(err, 'No se han podido cargar los ajustes'), 'error')
+  })
 
   /** For values main has already stored and answered with (RAM, data directory, Java path). */
   const updateSetting: UpdateSetting = (key, value) => {
