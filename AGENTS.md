@@ -114,7 +114,7 @@ React Context API only (no Redux). Four providers wrap the app:
 
 - **AuthProvider** — Microsoft account, login/logout, token expiry monitoring, and `skinTexture` (the worn skin, read once per account through `skins:getActiveTexture` for the avatar; `updateSkinTexture` after a save)
 - **LaunchProvider** — Launch state machine (`idle` → `preparing` → `playing`), progress tracking, the game's `startup` (`game_startup`, the tracker's last step), game logs (last 500 lines)
-- **ServersProvider** — Modpack list from Firestore, server selection, module loading
+- **ServersProvider** — Modpack list from Firestore and the selection. The list is read on mount, on "Reintentar" and on the sidebar's refresh button (`refresh`: the list stays on screen, a failure is a toast, 30 s cooldown after a successful read, disabled while a launch is prepared), and at no other time — every read costs one Firestore read per modpack ([ADR-0016](docs/adr/0016-refresh-the-catalogue-on-demand.md)). Do not add a background or focus refresh without updating that ADR's read budget
 - **StatusProvider** — Transient messages. `useStatus().showStatus(message, type)` with `type` `error` (default), `success` or `info`, shown for `VISIBLE_MS` with a bar that runs out with the timer; `dismissStatus()` closes it early (the toast's own close button). A single `<StatusMessage />` host lives in `App.tsx` above every screen, so a message raised on the way out of one screen is still visible on the next. It is the **outermost** provider, so the others (AuthProvider tells the player why a session expired) can report through it
 
 **`useEffect` is for synchronizing with a system outside React, and nothing else** — see

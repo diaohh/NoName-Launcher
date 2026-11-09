@@ -59,6 +59,7 @@ made — but only the marked alternatives distinguish what was actually rejected
 | [0013](0013-the-game-outlives-the-launcher.md) | Let the game outlive the launcher | Accepted |
 | [0014](0014-skins-through-main-as-data-urls.md) | Change skins through the main process and hand textures over as data URLs | Accepted |
 | [0015](0015-incremental-typescript-migration.md) | Migrate to TypeScript incrementally, strict in every `.ts` file | Accepted |
+| [0016](0016-refresh-the-catalogue-on-demand.md) | Refresh the modpack catalogue on demand, without a server-state library | Accepted |
 
 ADRs 0001, 0007 and 0011 carry an addendum from the 2026-09-17 audit, and 0005 one from 2026-11-05.
 

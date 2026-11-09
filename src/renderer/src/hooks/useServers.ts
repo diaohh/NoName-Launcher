@@ -5,7 +5,14 @@ import { errorMessage } from '../services/errors'
 import { preloadImages } from '../services/imagePreload'
 import { isVisibleTo } from '../services/modpackVisibility'
 import { useStatus } from '../contexts/StatusContext'
+import { useLaunch } from '../contexts/LaunchContext'
 import type { Modpack } from '../../../shared/modpack'
+
+/**
+ * How long the refresh button rests after a successful read. Every read costs one Firestore
+ * read per modpack (ADR-0016), so repeated clicks must not multiply them.
+ */
+const REFRESH_COOLDOWN_MS = 30 * 1000
 
 const NETWORK_MESSAGE = 'No se ha podido conectar con el catalogo de modpacks. Comprueba tu conexion a internet.'
 const UNKNOWN_MESSAGE = 'No se ha podido cargar la lista de modpacks.'
@@ -46,11 +53,14 @@ function describeError(err: unknown): CatalogueError {
 
 export function useServers(accountUsername: string | null) {
   const { showStatus } = useStatus()
+  const { launchState } = useLaunch()
   const [servers, setServers] = useState<Modpack[]>([])
   const [selectedServer, setSelectedServer] = useState<Modpack | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<CatalogueError | null>(null)
   const [reloadToken, setReloadToken] = useState(0)
+  const [refreshing, setRefreshing] = useState(false)
+  const [coolingDown, setCoolingDown] = useState(false)
 
   useEffect(() => {
     // StrictMode invokes this twice, and a changed username or a retry re-runs it. Without
@@ -84,6 +94,44 @@ export function useServers(accountUsername: string | null) {
     setError(null)
     setReloadToken(token => token + 1)
   }, [])
+
+  /**
+   * The sidebar's refresh button. The catalogue is read once, so a modpack published while the
+   * launcher stays open only shows up when the player asks for it; what must be fresh to launch
+   * already is (`prepareLaunch`). Unlike `reload` it keeps the list on screen while it reads,
+   * and a failure is a toast rather than the error panel.
+   *
+   * No cancellation: the provider is unmounted on logout, so the account cannot change under
+   * a read in flight.
+   */
+  const refresh = async () => {
+    if (refreshing || coolingDown || launchState === 'preparing') return
+    setRefreshing(true)
+
+    try {
+      const modpacks = await getModpacks(accountUsername)
+      setServers(modpacks)
+      setError(null)
+      preloadImages(modpacks.flatMap(m => [m.banner, m.logo]))
+
+      // The fresh copy of the selection, or none once the catalogue stops listing it — but a
+      // running game keeps its modpack on screen, and `prepareLaunch` refuses it next time.
+      if (selectedServer) {
+        const fresh = modpacks.find(m => m.id === selectedServer.id)
+        if (fresh) setSelectedServer(fresh)
+        else if (launchState !== 'playing') setSelectedServer(null)
+      }
+
+      // Only after a read that went through: a failed one cost no reads and may be retried.
+      setCoolingDown(true)
+      setTimeout(() => setCoolingDown(false), REFRESH_COOLDOWN_MS)
+    } catch (err) {
+      console.error('Failed to refresh the modpack list:', err)
+      showStatus(describeError(err).message, 'error')
+    } finally {
+      setRefreshing(false)
+    }
+  }
 
   const selectServer = async (id: string) => {
     if (selectedServer?.id === id) {
@@ -134,7 +182,18 @@ export function useServers(accountUsername: string | null) {
     return { ok: true }
   }
 
-  return { servers, selectedServer, selectServer, prepareLaunch, loading, error, reload }
+  return {
+    servers,
+    selectedServer,
+    selectServer,
+    prepareLaunch,
+    loading,
+    error,
+    reload,
+    refresh,
+    refreshing,
+    canRefresh: !refreshing && !coolingDown && launchState !== 'preparing'
+  }
 }
 
 export type ServersState = ReturnType<typeof useServers>
