@@ -3,6 +3,7 @@ import { getModpacks, getModpack, FirestoreTimeoutError } from '../services/fire
 import { ipc } from '../services/ipcClient'
 import { errorMessage } from '../services/errors'
 import { preloadImages } from '../services/imagePreload'
+import { isVisibleTo } from '../services/modpackVisibility'
 import { useStatus } from '../contexts/StatusContext'
 import type { Modpack } from '../../../shared/modpack'
 
@@ -107,12 +108,15 @@ export function useServers(accountUsername: string | null) {
   /**
    * Re-reads the modpack right before launching and hands the fresh copy to the main
    * process. Reading it only when the list loads would let a player who kept the
-   * launcher open walk straight past a maintenance flag raised in the meantime.
+   * launcher open walk straight past a maintenance flag raised in the meantime, or launch
+   * a modpack the catalogue no longer lists for them.
    */
   const prepareLaunch = async (id: string): Promise<LaunchReadiness> => {
     const fresh = await getModpack(id)
 
-    if (!fresh) {
+    // Deleted, disabled, unpublished or no longer open to this player: the list is stale,
+    // and launching what it would not show anymore is what this check is for.
+    if (!fresh || !isVisibleTo(fresh, accountUsername)) {
       return { ok: false, message: 'El modpack ya no esta disponible.' }
     }
 

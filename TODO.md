@@ -6,7 +6,7 @@ Lo que espera una intervencion externa o una decision esta al final, en **En esp
 
 ## P1 — Bugs
 
-- [ ] **`prepareLaunch` solo comprueba `maintenance`** — el catalogo filtra por `isPublic`, `enabled` y `usersAllowed` (`firestoreService.getModpacks`), pero al pulsar JUGAR solo se relee `maintenance`, asi que un modpack desactivado, despublicado o retirado a un jugador mientras tiene el launcher abierto todavia se puede lanzar. Sacar la regla del catalogo a una funcion y aplicarla tambien en `prepareLaunch`, con un mensaje propio. `usersAllowed` sigue siendo solo UX ([ADR-0006](docs/adr/0006-usersallowed-is-ux-not-access-control.md)): esto evita la confusion, no es control de acceso
+Nada pendiente.
 
 ## P2 — Calidad de codigo
 

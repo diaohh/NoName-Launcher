@@ -179,7 +179,7 @@ Firestore data is fetched in the renderer, then sent to main via `distro:setServ
 
 The document is checked twice, by the same rules: `firestoreService.toModpack` turns it into a `Modpack` for the UI (an optional field of the wrong type is dropped, a missing `name` becomes the id), and `DistributionManager.parseServerData` checks main's own subset again, since nothing that crosses the IPC boundary is trusted.
 
-The renderer re-reads the modpack document in `useServers.prepareLaunch()` **when PLAY is pressed**, not when the list loads — otherwise a player who left the launcher open would never see a `maintenance` flag raised afterwards, nor a manifest published in the meantime. `LaunchManager` checks the flag again as defence in depth.
+The renderer re-reads the modpack document in `useServers.prepareLaunch()` **when PLAY is pressed**, not when the list loads — otherwise a player who left the launcher open would never see a `maintenance` flag raised afterwards, nor a manifest published in the meantime. The fresh copy must pass the catalogue's own rule, `services/modpackVisibility.isVisibleTo` (public, enabled, `usersAllowed`), which `getModpacks` applies too, so a modpack withdrawn in the meantime cannot launch from the stale list. `LaunchManager` checks `maintenance` again as defence in depth; visibility is not repeated there, since only the fresh copy can carry it as false and it never reaches main.
 
 ### Launch Flow (`LaunchManager.launchMinecraft`)
 
