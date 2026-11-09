@@ -17,10 +17,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
 
-    // Incremental migration: JavaScript is compiled alongside but not checked, and every
-    // .ts/.tsx file is strict from the day it is written.
-    "allowJs": true,
-    "checkJs": false,
+    // Every source is TypeScript (ADR-0015), and strict.
     "strict": true,
     "noFallthroughCasesInSwitch": true
   },
