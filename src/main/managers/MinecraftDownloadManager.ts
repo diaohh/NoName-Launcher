@@ -55,12 +55,9 @@ class MinecraftDownloadManager {
             // helios' own type leaves out `javaVersion`, which is what the launch reads from it.
             const versionJson = await mojangProcessor.getVersionJson() as unknown as VersionJson
 
-            const allDownloads = [
-                ...dlObjects.assets,
-                ...dlObjects.libraries,
-                ...dlObjects.client,
-                ...dlObjects.misc
-            ]
+            // Every group helios found invalid: assets, libraries, client and misc (the log
+            // config), in that order. Its type is a plain record, so it is not read key by key.
+            const allDownloads = Object.values(dlObjects).flat()
 
             const totalSize = getExpectedDownloadSize(allDownloads)
 

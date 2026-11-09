@@ -89,3 +89,31 @@ is written.**
   yet, and losing typed linting was the larger cost.
 - **Stay on JavaScript and rely on tests.** *(reconstructed)* Tests catch what someone thought
   to test; the four-layer IPC chain and the phase map fail precisely where nobody did.
+
+## Addendum (2026-11-08)
+
+The conversion is complete: every file under `src/` is TypeScript, `allowJs` is gone from both
+projects, and a `.js` file there no longer compiles. What ended up different from the decision
+above, or was decided along the way:
+
+- **Fases 4 and 5 went together** (contracts and the main process, one branch), and took a
+  fraction of the estimate. Typing was the small part; the time went into the guards on
+  external data and the typed handler map. The renderer followed in one more branch.
+- **IPC handlers are registered from one typed map** (`ipc/index.ts`, `InvokeHandlers`), so a
+  missing handler does not compile either — a fifth check on top of the four the decision lists.
+- **`LaunchManager` was converted without being split.** The split is a `TODO.md` P3 item, to be
+  done on its own with the tests green before and after.
+- **`noUncheckedIndexedAccess` is on**, measured once the renderer was converted: 16 sites in
+  main and 4 in tests, all fixed with a guard or a default and none with a non-null assertion.
+  It covers what the launcher does most with external data: regex groups, splits and lists.
+- **`exactOptionalPropertyTypes` is not.** Its 8 sites were all "a key set to `undefined`" versus
+  "a key left out", a distinction nothing here acts on, and it clashes with Electron's own types
+  (`HeadersReceivedResponse`, `OpenDialogOptions`). Revisit only if that distinction starts to
+  matter.
+- **The renderer's Firestore read is a guard too**: `firestoreService.toModpack` follows the rules
+  of main's `parseServerData` (an optional field of the wrong type is dropped, a missing name is
+  the id), so the UI never reads an unchecked document.
+- **`LaunchContext`'s switch is exhaustive** (`never` in its `default`), which closes the last
+  silent failure of ADR-0005: a progress `type` with no `case`.
+- **The fetch on mount became `useIpcResource`** in its own commit after the conversion, as the
+  P3 item asked, so the refactor was type-checked rather than converted at the same time.

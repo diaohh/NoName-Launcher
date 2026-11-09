@@ -22,7 +22,7 @@ export default defineConfig({
     __APP_VERSION__: JSON.stringify('0.0.0-test')
   },
   test: {
-    include: ['src/**/*.test.{js,jsx,ts,tsx}'],
+    include: ['src/**/*.test.{ts,tsx}'],
     environment: 'node',
     // The managers log every step through winston; only a failing test's output is worth reading.
     silent: 'passed-only'

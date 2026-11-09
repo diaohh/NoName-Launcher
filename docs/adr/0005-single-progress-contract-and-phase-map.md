@@ -92,3 +92,10 @@ loader libraries — so the second phase restarted the count.
   check the same thing was removed with it.
 - What the compiler cannot see yet is `LaunchContext`'s switch, which is still JavaScript; its
   exhaustiveness check (`never` in the `default`) comes with the renderer's conversion.
+
+## Addendum (2026-11-08)
+
+The renderer is TypeScript now, and `LaunchContext`'s switch assigns the event to `never` in its
+`default`: a `type` of the union with no `case` does not compile. Every way the bar could freeze
+on the previous message without an error (a phase with no slice, a phase with no `case`) is now
+a compile error.

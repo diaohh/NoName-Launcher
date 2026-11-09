@@ -301,6 +301,8 @@ class ConfigManager {
             }
 
             try {
+                // Only the object and its `secrets` were checked. The rest is the launcher's own
+                // file, and a `secrets` that is not a valid blob fails to decrypt: the catch below.
                 const { decrypted, shouldReEncrypt } = await this.decryptAccount(account as unknown as DiskAccount)
                 database[uuid] = decrypted
                 if (shouldReEncrypt) rewriteNeeded = true
@@ -490,6 +492,7 @@ class ConfigManager {
      * mismatch falls back to the default for that key alone, never for the whole file.
      */
     static validateConfig(config: Record<string, unknown>): LauncherConfig {
+        // Walked key by key next to what arrived; an interface has no index signature to do it with.
         const defaults = this.getDefaultConfig() as unknown as Record<string, unknown>
 
         const merge = (target: Record<string, unknown>, source: Record<string, unknown>, parentKey: string) => {
@@ -571,7 +574,7 @@ class ConfigManager {
         if (typeof value !== 'string') return null
 
         const match = value.trim().match(/^(\d+(?:\.\d+)?)\s*([GMK])?B?$/i)
-        if (!match) return null
+        if (!match || match[1] === undefined) return null
 
         const unit = (match[2] || 'M').toUpperCase()
         const multiplier = unit === 'G' ? 1024 : unit === 'K' ? 1 / 1024 : 1
@@ -691,7 +694,7 @@ class ConfigManager {
 
             if (this.config.selectedAccount === uuid) {
                 const accounts = Object.keys(this.config.authenticationDatabase)
-                this.config.selectedAccount = accounts.length > 0 ? accounts[0] : null
+                this.config.selectedAccount = accounts[0] ?? null
             }
         }
     }

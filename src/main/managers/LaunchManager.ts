@@ -107,7 +107,7 @@ class LaunchManager {
     static assertSupportedVersion(minecraftVersion: string): void {
         const [major, minor] = minecraftVersion.split('.').map(part => parseInt(part))
 
-        if (major === 1 && minor < MIN_SUPPORTED_MINOR) {
+        if (major === 1 && minor !== undefined && minor < MIN_SUPPORTED_MINOR) {
             throw new LauncherError(
                 ERROR_CODE.UNSUPPORTED_MC_VERSION,
                 `Minecraft ${minecraftVersion} no es compatible con este launcher. ` +
@@ -124,7 +124,7 @@ class LaunchManager {
         const declared = versionJson?.javaVersion?.majorVersion
         if (declared) return declared
 
-        const [, minor, patch] = minecraftVersion.split('.').map(part => parseInt(part) || 0)
+        const [, minor = 0, patch = 0] = minecraftVersion.split('.').map(part => parseInt(part) || 0)
         if (minor > 20 || (minor === 20 && patch >= 5)) return 21
         return 17
     }
@@ -448,7 +448,7 @@ class LaunchManager {
             }
 
             // Some repositories append the file name after the hash.
-            const sha1 = (await response.text()).trim().split(/\s+/)[0].toLowerCase()
+            const sha1 = ((await response.text()).trim().split(/\s+/)[0] ?? '').toLowerCase()
             return /^[0-9a-f]{40}$/.test(sha1) ? sha1 : null
         } catch (err) {
             logger.warn(`Could not fetch the published sha1 of ${name}`, err)

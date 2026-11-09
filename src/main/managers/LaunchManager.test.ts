@@ -88,7 +88,7 @@ describe('LaunchManager.buildLaunchCommand', () => {
     })
 
     const librariesDir = () => path.join(ConfigManager.getCommonDirectory(), 'libraries')
-    const classpathOf = (args: string[]) => args[args.indexOf('-cp') + 1].split(path.delimiter)
+    const classpathOf = (args: string[]) => (args[args.indexOf('-cp') + 1] ?? '').split(path.delimiter)
 
     it('drops a placeholder with no value together with its --flag', async () => {
         const args = await LaunchManager.buildLaunchCommand(account, FABRIC, null)

@@ -60,8 +60,11 @@ const MAX_DELAY_MS = 30 * 60 * 1000
 /** Floor, so a token already past its skew cannot spin the timer. */
 const MIN_DELAY_MS = 15 * 1000
 
+/** The backoff's last step, which every later retry keeps. */
+const MAX_RETRY_DELAY_MS = 10 * 60 * 1000
+
 /** Backoff for a failure that left the account alive: no network, a 5xx, a 429. */
-const RETRY_DELAYS_MS = [60 * 1000, 2 * 60 * 1000, 5 * 60 * 1000, 10 * 60 * 1000]
+const RETRY_DELAYS_MS = [60 * 1000, 2 * 60 * 1000, 5 * 60 * 1000, MAX_RETRY_DELAY_MS]
 
 const MESSAGES = {
     NO_ACCOUNT: 'No hay ninguna cuenta iniciada. Inicia sesion con Microsoft.',
@@ -504,7 +507,7 @@ class AuthManager {
         // The account is still on disk, so the failure was judged recoverable: a network
         // blip must not bounce the player back to the login screen.
         if (ConfigManager.getAccountByUUID(uuid)) {
-            const delay = RETRY_DELAYS_MS[Math.min(this.retryAttempt, RETRY_DELAYS_MS.length - 1)]
+            const delay = RETRY_DELAYS_MS[this.retryAttempt] ?? MAX_RETRY_DELAY_MS
             this.retryAttempt++
             logger.warn(`Token refresh deferred (${result.code}), retrying in ${delay / 1000}s`)
             this.scheduleTokenRefresh(delay)
