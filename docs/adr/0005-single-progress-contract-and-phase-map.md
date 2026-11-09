@@ -99,3 +99,13 @@ The renderer is TypeScript now, and `LaunchContext`'s switch assigns the event t
 `default`: a `type` of the union with no `case` does not compile. Every way the bar could freeze
 on the previous message without an error (a phase with no slice, a phase with no `case`) is now
 a compile error.
+
+## Addendum (2026-11-09)
+
+- `LaunchManager` was split (`TODO.md` P2). The rule "only `LaunchManager` adds `type`" now has
+  two stated exceptions, each the one module that knows its events: `JavaManager` sets Java's own
+  sub-phases (`java_discover`, `java_download`, `java_extract`; its callback is typed with just
+  those), and `GameProcess` sets the running game's events (`started`, `game_startup`,
+  `stdout`/`stderr`, `exit`), which are lifecycle, not phases. Every other manager still reports
+  `{ current, total, message }`; `LaunchCommand.downloadModLoaderLibraries` was brought back to
+  that shape, and `LaunchManager` adds `download_libraries` to it.

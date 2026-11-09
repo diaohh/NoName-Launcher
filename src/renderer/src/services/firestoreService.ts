@@ -8,7 +8,7 @@ import {
   where,
   orderBy,
 } from 'firebase/firestore/lite'
-import { isSha256Hex } from '../../../shared/guards'
+import { isPlainObject, isSha256Hex, nonEmptyText } from '../../../shared/guards'
 import { isVisibleTo } from './modpackVisibility'
 import type { Modpack } from '../../../shared/modpack'
 
@@ -49,14 +49,6 @@ const HEX_COLOR = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i
 const OPTIONAL_TEXT = ['description', 'minecraftVersion', 'icon', 'banner', 'logo', 'maintenanceMessage'] as const
 const OPTIONAL_FLAGS = ['isPublic', 'enabled'] as const
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function text(value: unknown): string | null {
-  return typeof value === 'string' && value.length > 0 ? value : null
-}
-
 /**
  * A modpack document as the UI consumes it. The document is untrusted input (ADR-0015), so
  * every field is checked here, once, instead of in every component that reads it: an optional
@@ -70,12 +62,12 @@ function toModpack(id: string, data: Record<string, unknown>): Modpack {
   const accent = typeof data.accentColor === 'string' ? data.accentColor.trim() : ''
   const modpack: Modpack = {
     id,
-    name: text(data.name) ?? id,
+    name: nonEmptyText(data.name) ?? id,
     accentColor: HEX_COLOR.test(accent) ? accent : null
   }
 
   for (const key of OPTIONAL_TEXT) {
-    const value = text(data[key])
+    const value = nonEmptyText(data[key])
     if (value != null) modpack[key] = value
   }
   for (const key of OPTIONAL_FLAGS) {
@@ -90,8 +82,8 @@ function toModpack(id: string, data: Record<string, unknown>): Modpack {
   }
 
   if (isPlainObject(data.java)) {
-    const minRam = text(data.java.minRam)
-    const maxRam = text(data.java.maxRam)
+    const minRam = nonEmptyText(data.java.minRam)
+    const maxRam = nonEmptyText(data.java.maxRam)
     modpack.java = {}
     if (minRam != null) modpack.java.minRam = minRam
     if (maxRam != null) modpack.java.maxRam = maxRam
@@ -100,7 +92,7 @@ function toModpack(id: string, data: Record<string, unknown>): Modpack {
   const manifest = data.manifest
   // Main's rule too (`parseServerData`): a hash that is not a sha256 means no manifest.
   if (isPlainObject(manifest) && typeof manifest.url === 'string' && isSha256Hex(manifest.hash)) {
-    const version = text(manifest.version)
+    const version = nonEmptyText(manifest.version)
     modpack.manifest = { url: manifest.url, hash: manifest.hash }
     if (version != null) modpack.manifest.version = version
   }

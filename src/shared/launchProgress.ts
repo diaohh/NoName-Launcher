@@ -26,7 +26,8 @@ export type PhaseType =
 
 /**
  * What every manager under `LaunchManager` reports: its own numbers, with no idea which launch
- * phase it is serving. `LaunchManager` is the one layer that adds `type`.
+ * phase it is serving. `LaunchManager` is the one layer that adds `type`, except for Java's own
+ * sub-phases (`JavaManager`) and the running game's events (`GameProcess`).
  */
 export interface StepProgress {
   current: number

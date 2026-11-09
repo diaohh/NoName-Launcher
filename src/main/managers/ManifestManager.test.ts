@@ -4,6 +4,7 @@ import ManifestManager from './ManifestManager'
 import DistributionManager from './DistributionManager'
 import { createTempLauncher, type TempLauncher } from '../testing/tempLauncher'
 import { ERROR_CODE } from '../../shared/errorCodes'
+import type { Sha256Hex } from '../../shared/guards'
 
 const MANIFEST_URL = 'https://cdn.example/pack/manifest.json'
 const SHA256 = 'a'.repeat(64)
@@ -26,7 +27,8 @@ describe('manifest hashes', () => {
     afterEach(() => launcher.cleanup())
 
     it('never turns a pointer hash that is not a sha256 into a path', async () => {
-        await expect(ManifestManager.fetch({ url: MANIFEST_URL, hash: '../config' }))
+        // The type already refuses it; the cast stands for whatever gets past the type.
+        await expect(ManifestManager.fetch({ url: MANIFEST_URL, hash: '../config' as Sha256Hex }))
             .rejects.toMatchObject({ code: ERROR_CODE.MANIFEST_INVALID })
         expect(fs.existsSync(launcher.configPath)).toBe(true)
     })

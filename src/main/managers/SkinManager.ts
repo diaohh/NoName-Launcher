@@ -11,6 +11,7 @@ import { writeFileAtomicSync } from '../utils/FileUtils'
 import { resolveInside } from '../utils/PathUtils'
 import { ERROR_CODE, type ErrorCode } from '../../shared/errorCodes'
 import { LauncherError, errorCodeOf } from '../../shared/LauncherError'
+import { isPlainObject, isSkinId, type SkinId } from '../../shared/guards'
 import {
     MAX_SKIN_NAME_LENGTH,
     isSkinVariant,
@@ -47,11 +48,16 @@ const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0
 const INDEX_FILE = 'index.json'
 const INDEX_VERSION = 1
 
-const SKIN_ID = /^[0-9a-f]{64}$/
 const SKIN_FILE = /^([0-9a-f]{64})\.png$/
+
+/** `SkinSaveChoice` once `skins.ipc.ts` has checked it: the skin, if any, is a vault id. */
+export interface CheckedSaveChoice extends Omit<SkinSaveChoice, 'skinId'> {
+    skinId: SkinId | null
+}
 
 /** A vault entry as `index.json` keeps it; the renderer only ever sees its `SkinEntry` part. */
 interface VaultEntry extends SkinEntry {
+    id: SkinId
     /** The Mojang texture URL this skin was last published under, once known. */
     textureUrl: string | null
     addedAt: number
@@ -79,10 +85,12 @@ interface Profile {
 
 const skinError = (code: ErrorCode, message: string, cause?: unknown) => new LauncherError(code, message, cause)
 
-const isPlainObject = (value: unknown): value is Record<string, unknown> =>
-    value != null && typeof value === 'object' && !Array.isArray(value)
-
-const sha256 = (bytes: Buffer) => crypto.createHash('sha256').update(bytes).digest('hex')
+/** A skin's vault id: the sha256 of its bytes, which `digest('hex')` always writes as one. */
+function skinIdOf(bytes: Buffer): SkinId {
+    const id = crypto.createHash('sha256').update(bytes).digest('hex')
+    if (!isSkinId(id)) throw skinError(ERROR_CODE.SKIN_VAULT_FAILED, 'No se ha podido identificar la skin.')
+    return id
+}
 
 const toDataUrl = (bytes: Buffer) => `data:image/png;base64,${bytes.toString('base64')}`
 
@@ -114,7 +122,7 @@ class SkinManager {
     static vaultQueue: Promise<unknown> = Promise.resolve()
 
     /** Vault id of the skin the account is wearing, as of the last profile read. */
-    static activeSkinId: string | null = null
+    static activeSkinId: SkinId | null = null
 
     // ---------------------------------------------------------------- public API
 
@@ -183,7 +191,7 @@ class SkinManager {
         }
 
         this.assertSkinImage(bytes)
-        const id = sha256(bytes)
+        const id = skinIdOf(bytes)
 
         return this.withVault(async (index) => {
             const existing = index.skins.find(entry => entry.id === id)
@@ -209,7 +217,7 @@ class SkinManager {
         })
     }
 
-    static async renameSkin(id: string, name: string): Promise<SkinEntry> {
+    static async renameSkin(id: SkinId, name: string): Promise<SkinEntry> {
         return this.withVault(async (index) => {
             const entry = this.findEntry(index, id)
             entry.name = name
@@ -222,7 +230,7 @@ class SkinManager {
      * Moves a skin to the system trash, as the file explorer would, so a slip can be undone
      * from there. A file put back is adopted again on the next read of the vault.
      */
-    static async deleteSkin(id: string): Promise<void> {
+    static async deleteSkin(id: SkinId): Promise<void> {
         if (id === this.activeSkinId) {
             throw skinError(ERROR_CODE.SKIN_IN_USE, 'No puedes borrar la skin que llevas puesta.')
         }
@@ -259,7 +267,7 @@ class SkinManager {
      * @param choice Already validated by the IPC handler. `skinId` null keeps the current skin.
      * @returns The texture now worn, for the avatar.
      */
-    static async save({ skinId, variant, capeId }: SkinSaveChoice): Promise<SkinSaveResult> {
+    static async save({ skinId, variant, capeId }: CheckedSaveChoice): Promise<SkinSaveResult> {
         const token = await this.sessionToken()
         let profile = await this.fetchProfile(token)
         let skinChanged = false
@@ -333,7 +341,7 @@ class SkinManager {
         return profile
     }
 
-    static async uploadSkin(token: string, id: string, variant: SkinVariant): Promise<Profile> {
+    static async uploadSkin(token: string, id: SkinId, variant: SkinVariant): Promise<Profile> {
         const bytes = await this.readSkinFile(id)
         // The file sits on disk where anything can replace it; checked again before it is sent.
         this.assertSkinImage(bytes)
@@ -501,7 +509,7 @@ class SkinManager {
      * the file that was sent. The entry is therefore matched by the texture URL it was last
      * published under first, and by the hash of the downloaded texture only after that.
      */
-    static async syncActiveSkin(profile: Profile): Promise<string | null> {
+    static async syncActiveSkin(profile: Profile): Promise<SkinId | null> {
         const wearing = profile.activeSkin
         if (!wearing) {
             this.activeSkinId = null
@@ -514,7 +522,7 @@ class SkinManager {
 
             if (!entry) {
                 const bytes = await this.downloadTexture(wearing.url, 'tu skin actual')
-                const textureId = sha256(bytes)
+                const textureId = skinIdOf(bytes)
                 entry = index.skins.find(candidate => candidate.id === textureId)
 
                 if (!entry) {
@@ -549,7 +557,7 @@ class SkinManager {
     }
 
     /** After an upload, the vault entry that was sent is the one published under the new URL. */
-    static async claimActiveTexture(id: string, profile: Profile): Promise<void> {
+    static async claimActiveTexture(id: SkinId, profile: Profile): Promise<void> {
         const wearing = profile.activeSkin
         if (!wearing) return
 
@@ -619,7 +627,7 @@ class SkinManager {
 
         for (const file of [...files].sort()) {
             const id = SKIN_FILE.exec(file)?.[1]
-            if (!id || seen.has(id)) continue
+            if (!isSkinId(id) || seen.has(id)) continue
             seen.add(id)
             skins.push({ id, name: 'Skin', variant: null, textureUrl: null, addedAt: Date.now() })
         }
@@ -628,7 +636,7 @@ class SkinManager {
     }
 
     static normalizeEntry(raw: unknown): VaultEntry | null {
-        if (!isPlainObject(raw) || typeof raw.id !== 'string' || !SKIN_ID.test(raw.id)) return null
+        if (!isPlainObject(raw) || !isSkinId(raw.id)) return null
         return {
             id: raw.id,
             name: cleanSkinName(raw.name) || 'Skin',
@@ -647,7 +655,7 @@ class SkinManager {
         }
     }
 
-    static writeSkinFile(id: string, bytes: Buffer): void {
+    static writeSkinFile(id: SkinId, bytes: Buffer): void {
         try {
             writeFileAtomicSync(this.skinPath(id), bytes)
         } catch (err) {
@@ -655,7 +663,7 @@ class SkinManager {
         }
     }
 
-    static async readSkinFile(id: string): Promise<Buffer> {
+    static async readSkinFile(id: SkinId): Promise<Buffer> {
         try {
             return await fsp.readFile(this.skinPath(id))
         } catch (err) {
@@ -663,13 +671,13 @@ class SkinManager {
         }
     }
 
-    static findEntry(index: VaultIndex, id: string): VaultEntry {
+    static findEntry(index: VaultIndex, id: SkinId): VaultEntry {
         const entry = index.skins.find(candidate => candidate.id === id)
         if (!entry) throw skinError(ERROR_CODE.SKIN_NOT_FOUND, 'Esa skin ya no esta en la carpeta de skins.')
         return entry
     }
 
-    static skinPath(id: string): string {
+    static skinPath(id: SkinId): string {
         return resolveInside(ConfigManager.getSkinsDirectory(), `${id}.png`)
     }
 

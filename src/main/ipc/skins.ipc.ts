@@ -3,10 +3,9 @@ import { Channels } from '../../shared/channels'
 import { ERROR_CODE } from '../../shared/errorCodes'
 import { LauncherError } from '../../shared/LauncherError'
 import type { InvokeHandlers } from './result'
-import { isSkinVariant, type SkinSaveChoice } from '../../shared/skins'
-import SkinManager, { cleanSkinName } from '../managers/SkinManager'
-
-const SKIN_ID = /^[0-9a-f]{64}$/
+import { isPlainObject, isSkinId, type SkinId } from '../../shared/guards'
+import { isSkinVariant } from '../../shared/skins'
+import SkinManager, { cleanSkinName, type CheckedSaveChoice } from '../managers/SkinManager'
 
 /**
  * Everything below arrives from the renderer. Ids are checked for shape here and for
@@ -17,15 +16,14 @@ function invalidValue(message: string): LauncherError {
   return new LauncherError(ERROR_CODE.SKIN_INVALID_VALUE, message)
 }
 
-function requireSkinId(value: unknown): string {
-  if (typeof value !== 'string' || !SKIN_ID.test(value)) throw invalidValue('Skin no valida.')
+function requireSkinId(value: unknown): SkinId {
+  if (!isSkinId(value)) throw invalidValue('Skin no valida.')
   return value
 }
 
-function requireSaveChoice(choice: unknown): SkinSaveChoice {
-  if (choice == null || typeof choice !== 'object') throw invalidValue('No hay nada que guardar.')
+function requireSaveChoice(raw: unknown): CheckedSaveChoice {
+  if (!isPlainObject(raw)) throw invalidValue('No hay nada que guardar.')
 
-  const raw = choice as Record<string, unknown>
   const skinId = raw.skinId === null ? null : requireSkinId(raw.skinId)
   const { variant, capeId } = raw
   if (!isSkinVariant(variant)) throw invalidValue('El modelo debe ser clasico o delgado.')

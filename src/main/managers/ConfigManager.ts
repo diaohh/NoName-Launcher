@@ -7,6 +7,7 @@ import { resolveInside } from '../utils/PathUtils'
 import { writeFileAtomicSync } from '../utils/FileUtils'
 import { ERROR_CODE } from '../../shared/errorCodes'
 import { LauncherError } from '../../shared/LauncherError'
+import { isPlainObject } from '../../shared/guards'
 import type { Account, DiskAccount, DiskConfig, LauncherConfig, MicrosoftTokens } from '../types/config'
 
 const logger = Logger.getLogger('ConfigManager')
@@ -21,14 +22,27 @@ const logger = Logger.getLogger('ConfigManager')
  */
 const CONFIG_VERSION = 2
 
-const isPlainObject = (value: unknown): value is Record<string, unknown> =>
-    value != null && typeof value === 'object' && !Array.isArray(value)
-
 /** Whether a stored value can stand in for its default. See `validateConfig`. */
 function hasExpectedType(actual: unknown, expected: unknown): boolean {
     if (expected === null) return actual === null || typeof actual === 'string'
     if (typeof expected === 'number') return typeof actual === 'number' && Number.isFinite(actual)
     return typeof actual === typeof expected
+}
+
+/**
+ * An encrypted account as `encryptAccount` writes it. Everything but `secrets` is plain text on
+ * the player's disk, so it is checked before `decryptAccount` trusts it as an account.
+ */
+function isDiskAccount(value: Record<string, unknown>): value is Record<string, unknown> & DiskAccount {
+    const { microsoft } = value
+    return value.type === 'microsoft'
+        && typeof value.secrets === 'string'
+        && typeof value.username === 'string'
+        && typeof value.uuid === 'string'
+        && typeof value.displayName === 'string'
+        && typeof value.expiresAt === 'number'
+        && isPlainObject(microsoft)
+        && typeof microsoft.expires_at === 'number'
 }
 
 /** What `decryptAccount` reads back out of the encrypted blob. */
@@ -95,7 +109,7 @@ class ConfigManager {
 
     /**
      * Records the game the launcher started, so a launcher opened while that game is still
-     * running (it outlives the launcher, see LaunchManager) does not start a second one on top.
+     * running (it outlives the launcher, see GameProcess) does not start a second one on top.
      * Next to the config for the same reason as the logs: it describes the launcher, not the
      * data, and a data directory change must not lose track of it.
      */
@@ -286,11 +300,15 @@ class ConfigManager {
         for (const [uuid, account] of Object.entries(database)) {
             // Only possible in a hand-edited file. Dropping the entry costs that account's
             // session and nothing else, which is the same deal as an undecryptable one.
-            if (!isPlainObject(account)) {
+            const drop = () => {
                 logger.warn(`Dropping a malformed account entry (${uuid})`)
                 delete database[uuid]
                 if (this.config.selectedAccount === uuid) this.config.selectedAccount = null
                 rewriteNeeded = true
+            }
+
+            if (!isPlainObject(account)) {
+                drop()
                 continue
             }
 
@@ -300,10 +318,14 @@ class ConfigManager {
                 continue
             }
 
+            if (!isDiskAccount(account)) {
+                drop()
+                continue
+            }
+
             try {
-                // Only the object and its `secrets` were checked. The rest is the launcher's own
-                // file, and a `secrets` that is not a valid blob fails to decrypt: the catch below.
-                const { decrypted, shouldReEncrypt } = await this.decryptAccount(account as unknown as DiskAccount)
+                // A `secrets` that is not a valid blob fails to decrypt: the catch below.
+                const { decrypted, shouldReEncrypt } = await this.decryptAccount(account)
                 database[uuid] = decrypted
                 if (shouldReEncrypt) rewriteNeeded = true
             } catch (err) {

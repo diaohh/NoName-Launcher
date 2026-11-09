@@ -59,7 +59,10 @@ Main Process (src/main/)          Preload (src/preload/)       Renderer (src/ren
 │   ├── AuthManager.ts                                          ├── services/
 │   ├── ConfigManager.ts                                        │   ├── ipcClient.ts
 │   ├── DistributionManager.ts                                  │   ├── launchPhases.ts
-│   ├── LaunchManager.ts                                        │   ├── errors.ts (what a catch reads)
+│   ├── LaunchManager.ts (the flow and its lock)                │   ├── errors.ts (what a catch reads)
+│   ├── JavaManager.ts (find or download Java)                  │
+│   ├── LaunchCommand.ts (version JSON, args)                   │
+│   ├── GameProcess.ts (the running game)                       │
 │   ├── ManifestManager.ts                                      │   ├── firebase.ts
 │   ├── ModLoaderManager.ts                                     │   └── firestoreService.ts (toModpack)
 │   ├── MinecraftDownloadManager.ts                             ├── hooks/
@@ -83,6 +86,7 @@ Shared (src/shared/, bundled into all three)
 ├── ipcContract.ts (what every channel carries)
 ├── launchProgress.ts (the launch:progress union)
 ├── PackPolicy.ts (manifest policies and ignore globs, also run by tools/pack-publish)
+├── guards.ts (shared checks and branded types: Sha256Hex, SkinId)
 └── modpack.ts · skins.ts
 ```
 
@@ -113,7 +117,7 @@ React Context API only (no Redux). Four providers wrap the app:
 
 - **AuthProvider** — Microsoft account, login/logout, token expiry monitoring, and `skinTexture` (the worn skin, read once per account through `skins:getActiveTexture` for the avatar; `updateSkinTexture` after a save)
 - **LaunchProvider** — Launch state machine (`idle` → `preparing` → `playing`), progress tracking, the game's `startup` (`game_startup`, the tracker's last step), game logs (last 500 lines)
-- **ServersProvider** — Modpack list from Firestore, server selection, module loading
+- **ServersProvider** — Modpack list from Firestore and the selection. The list is read on mount, on "Reintentar" and on the sidebar's refresh button (`refresh`: the list stays on screen, a failure is a toast, 30 s cooldown after a successful read, disabled while a launch is prepared), and at no other time — every read costs one Firestore read per modpack ([ADR-0016](docs/adr/0016-refresh-the-catalogue-on-demand.md)). Do not add a background or focus refresh without updating that ADR's read budget
 - **StatusProvider** — Transient messages. `useStatus().showStatus(message, type)` with `type` `error` (default), `success` or `info`, shown for `VISIBLE_MS` with a bar that runs out with the timer; `dismissStatus()` closes it early (the toast's own close button). A single `<StatusMessage />` host lives in `App.tsx` above every screen, so a message raised on the way out of one screen is still visible on the next. It is the **outermost** provider, so the others (AuthProvider tells the player why a session expired) can report through it
 
 **`useEffect` is for synchronizing with a system outside React, and nothing else** — see
@@ -158,7 +162,7 @@ Launcher directory layout: `common/` (shared assets, libraries, versions, java, 
 
 ### Authentication
 
-`AuthManager` runs the Microsoft → XBL → XSTS → Minecraft chain through `helios-core/microsoft`, split in two halves: `exchangeAuthCode` / `exchangeRefreshToken` obtain the Microsoft token set, and `resolveMinecraftSession(msAccessToken)` walks it down to a playable session. The three callers compose them — `addMicrosoftAccount` (both), `refreshMSToken` (both), `refreshMCToken` (only the second, since the MS token is still good). Accounts live in `config.json` under `authenticationDatabase[uuid]` with two independent expiries (`expiresAt` for the MC token, `microsoft.expires_at` for the MS token).
+`AuthManager` runs the Microsoft → XBL → XSTS → Minecraft chain, split in two halves: `exchangeAuthCode` / `exchangeRefreshToken` obtain the Microsoft token set through our own request to the token endpoint (`requestMicrosoftTokens`, since helios' `getAccessToken` cannot send a PKCE verifier), and `resolveMinecraftSession(msAccessToken)` walks it down to a playable session. The three callers compose them — `addMicrosoftAccount` (both), `refreshMSToken` (both), `refreshMCToken` (only the second, since the MS token is still good). Accounts live in `config.json` under `authenticationDatabase[uuid]` with two independent expiries (`expiresAt` for the MC token, `microsoft.expires_at` for the MS token).
 
 The three secrets — `accessToken`, `microsoft.access_token`, `microsoft.refresh_token` — are **not** on disk in the clear: `ConfigManager` folds them into one `secrets` blob encrypted with Electron's `safeStorage`, and the rest of the account stays readable. `safeStorage` needs `app.whenReady()`, which holds because `ConfigManager.load()` runs inside `createWindow()`. Only the **asynchronous** methods are used (`isAsyncEncryptionAvailable`, `encryptStringAsync`, `decryptStringAsync`; the synchronous ones were removed in Electron 46), so `load()` and `save()` return promises: **await them**. A blob `decryptStringAsync` flags with `shouldReEncrypt` is rewritten on load.
 
@@ -169,6 +173,7 @@ Rules when touching auth ([ADR-0007](docs/adr/0007-encrypt-account-secrets-with-
 - The refresh is **scheduled from `expiresAt`**, not polled: `AuthManager.startTokenRefreshScheduler` arms a `setTimeout` 5 min before expiry, bounded to `[15 s, 30 min]`, backs off `[1, 2, 5, 10 min]` on a recoverable failure and notifies the renderer only on a terminal one. Starting is idempotent, and `powerMonitor.on('resume')` re-checks after a suspend. Re-arm it with `scheduleTokenRefresh()` after anything that changes the selected account.
 - Never send the Minecraft `accessToken` to the renderer; the renderer only needs `username`/`uuid`/`displayName`.
 - The Microsoft sign-in window runs in its own **in-memory** partition (`msft-auth` in `windows/msftAuth.ts`), never in the default session, and the logout handler empties it. Microsoft's cookies are a live web session for the player's account: they must not reach the disk nor outlive a logout. `purgeLegacyAuthCookies` removes the ones older versions left in the default session.
+- The sign-in uses **PKCE and `state`** (RFC 8252). `windows/msftAuth.ts` makes a fresh `code_verifier` and `state` per window, refuses a redirect whose `state` is not its own, and keeps the verifier in main: the code goes to the renderer and back through `auth:login`, which redeems it only with `takeCodeVerifier(code)` — the last window's code, once. Never send the verifier to the renderer. The redirect URI and scope are `MICROSOFT_REDIRECT_URI` / `MICROSOFT_SCOPE` in `constants.ts`, shared by the window and the token request, which must match
 - `microsoft.expires_at` is the expiry of the MS **access** token (~1 h), not of the refresh token (~90 days). Never treat it as "the session is over".
 - A decryption failure costs the session only: `purgeSession` clears `authenticationDatabase` and `selectedAccount` and leaves every setting alone. If `safeStorage.isEncryptionAvailable()` is false, credentials are **not persisted at all** rather than written in plaintext.
 - `usersAllowed` filtering in `firestoreService` is UX only ([ADR-0006](docs/adr/0006-usersallowed-is-ux-not-access-control.md)), and cannot currently be enforced in Security Rules either — the launcher has no Firebase identity, so `request.auth` is always `null`. See the stand-by entry in `TODO.md`.
@@ -191,21 +196,21 @@ auth (validate/refresh MS token)
   → validation      (DistributionManager.planSync — sha256 per file, size+mtime fast path)
   → download_mods   (DistributionManager.applySync — orphan deletion + helios downloadQueue)
   → download        (MinecraftDownloadManager — helios MojangIndexProcessor, returns the version manifest)
-  → java            (LaunchManager.ensureJava — validate → discover → download)
+  → java            (JavaManager.ensureJava — validate → discover → download)
   → modloader       (ModLoaderManager.installModLoader — Forge installer / Fabric Meta profile)
-  → download_libraries (LaunchManager.downloadModLoaderLibraries — loader-specific libs)
-  → launch          (buildLaunchCommand + child_process.spawn, detached)
+  → download_libraries (LaunchCommand.downloadModLoaderLibraries — loader-specific libs)
+  → launch          (LaunchCommand.buildLaunchCommand + GameProcess.start — spawn, detached)
   → started → game_startup (tracker's last step) / stdout / stderr → exit
 ```
 
-`started` is emitted on the child's `spawn` event (`LaunchManager.waitForSpawn`), never right
+`started` is emitted on the child's `spawn` event (`GameProcess.waitForSpawn`), never right
 after calling `spawn()`: a missing `javaw` only surfaces afterwards, and it must fail the launch
 through the normal `catch` (`GAME_SPAWN_FAILED`) instead of showing "playing" first.
 
 **The game outlives the launcher** ([ADR-0013](docs/adr/0013-the-game-outlives-the-launcher.md)).
 It is spawned with `detached: true`: without it Windows puts the child in libuv's kill-on-close
 job object and closing the launcher killed the game unsaved (measured). On quit,
-`LaunchManager.releaseGame()` (`will-quit`) only destroys the pipes and `unref()`s the child.
+`GameProcess.releaseGame()` (`will-quit`) only destroys the pipes and `unref()`s the child.
 `running-game.json` next to `config.json` records `{ pid, gameDir }` from spawn to `close`;
 `findOrphanGame()` treats the record as live only if that PID's command line still contains the
 `gameDir`, and a launch (or a data directory change) over a live one is refused. Closing the
@@ -221,13 +226,13 @@ is heuristic and only calibrated against Fabric 1.20.x; the bar starts indetermi
 after a quiet period past the late milestones, and gives up after 3 minutes. The tracker latches
 once `done` and is reset together with `gameProcess = null`.
 
-Arguments and libraries are filtered by `LaunchManager.rulesAllow`, which follows Mojang's
+Arguments and libraries are filtered by `LaunchCommand.rulesAllow`, which follows Mojang's
 semantics — with rules an entry starts **disallowed** and the **last** matching rule wins;
 `os.name`, `os.arch` and `os.version` are all checked. A placeholder with no value in
 `argContext` is never passed literally: the argument is dropped, and a bare `${x}` takes the
 `--flag` in front of it along (this is how `--clientId`/`--xuid` disappear).
 
-`--width`/`--height` come from `LaunchManager.gameResolution()`: Ajustes' resolution when
+`--width`/`--height` come from `LaunchCommand.gameResolution()`: Ajustes' resolution when
 windowed, and the primary monitor's current mode in fullscreen (physical pixels; points on
 macOS). Minecraft creates its fullscreen window at that size and GLFW switches the monitor to
 the closest video mode, so any other size changes the player's screen mode and rearranges their
@@ -235,20 +240,20 @@ windows. Do not drop the flags in fullscreen either: the game would fall back to
 
 Invariants to preserve when touching this flow:
 
-- **Only one launch at a time.** `LaunchManager.launchInProgress` guards the preparation and `gameProcess != null` guards the rest; a second call is rejected with `LAUNCH_ALREADY_RUNNING` **before** the try, so it never emits `{type:'error'}` and tears down the UI of the launch that is actually running. `killGame()` does not clear `gameProcess` — the `close` handler is the only place that does. The renderer resynchronises after a reload through `launch:getStatus`
+- **Only one launch at a time.** `LaunchManager.launchInProgress` guards the preparation and `GameProcess.gameProcess != null` guards the rest; a second call is rejected with `LAUNCH_ALREADY_RUNNING` **before** the try, so it never emits `{type:'error'}` and tears down the UI of the launch that is actually running. `killGame()` does not clear `gameProcess` — the `close` handler is the only place that does. The renderer resynchronises after a reload through `launch:getStatus`
 
 - **Java must exist before any step that spawns a JVM.** The Forge installer needs one, which is why `ensureJava` runs before `installModLoader`.
 - The version string used for launching is `ModLoaderManager.getVersionString(manifest.loader, minecraftVersion)` (`1.20.1-forge-47.2.0`, `fabric-loader-x-y`, or the plain MC version); the *vanilla* version (`manifest.minecraft.version`) is what Mojang downloads and the client jar are keyed by. `loadVersionManifest` returns both — do not conflate them.
 - **The manifest is authoritative for launching.** `minecraftVersion` on the Firestore document is display-only — and currently displayed nowhere, since the caption under JUGAR shows only the name; never launch from it. Technical details (pack version, loader, mod list) are deliberately not shown to players: they are content creators, not modpack maintainers.
 - Never synthesize an empty `arguments` object when merging manifests: an empty array is truthy and silently disables the fallback branches.
 - Classpath entries are deduplicated by `group:artifact[:classifier]` and the loader's declaration wins over vanilla's.
-- Libraries come in two shapes — Mojang/Forge `downloads.artifact`, Fabric Maven `name` + `url`. Always go through `LaunchManager.resolveLibraryArtifact`, never read `downloads.artifact` directly.
+- Libraries come in two shapes — Mojang/Forge `downloads.artifact`, Fabric Maven `name` + `url`. Always go through `LaunchCommand.resolveLibraryArtifact`, never read `downloads.artifact` directly.
 
 **Supported range: Minecraft 1.17+** ([ADR-0003](docs/adr/0003-minecraft-1-17-minimum.md)). `assertSupportedVersion` rejects anything older with `UNSUPPORTED_MC_VERSION`. Do not add half-support: older versions need natives extraction and the `minecraftArguments` path together, or not at all.
 
 #### Progress event contract ([ADR-0005](docs/adr/0005-single-progress-contract-and-phase-map.md))
 
-Every callback in the chain takes **one object**, `{ current, total, message }`. The managers underneath do not know which launch phase they are serving, so they never set `type`; `LaunchManager` is the only layer that adds it. `MinecraftDownloadManager` also carries its own sub-phase as `phase`.
+Every callback in the chain takes **one object**, `{ current, total, message }`. The managers underneath do not know which launch phase they are serving, so they never set `type`; `LaunchManager` is the only layer that adds it. Two exceptions, each the one place that knows its events ([ADR-0005 addendum](docs/adr/0005-single-progress-contract-and-phase-map.md)): `JavaManager` sets its own sub-phases (`java_discover`, `java_download`, `java_extract`), and `GameProcess` the running game's (`started`, `game_startup`, `stdout`/`stderr`, `exit`). `MinecraftDownloadManager` also carries its own sub-phase as `phase`.
 
 `launch:progress` carries `LaunchProgress` (`src/shared/launchProgress.ts`), a **discriminated union** on `type`: one event shape per group below, and `LaunchManager`'s callback is typed against it. A preparation phase is a `PhaseType`, and `PHASE_RANGE` / `PHASE_LABEL` in `renderer/services/launchPhases.ts` are `Record<PhaseType, …>`, so a phase without a slice **does not compile**. Nor does a `type` without its `case` in `LaunchContext`'s switch, whose `default` assigns the event to `never` — without the case the step would run with the bar frozen on the previous message. Current set:
 
@@ -291,13 +296,13 @@ The required Java major comes from the Mojang manifest (`javaVersion.majorVersio
 - `settings.java.runtimes` caches what the launcher found or downloaded, keyed by major
   (`{ "17": …, "21": … }`). Order: manual → cached runtime → `discoverJava` → `downloadJava`
   (only if `autoDownload`). Discovery runs even with auto-download off.
-- Pass executables through `LaunchManager.javaRoot()`, not `ensureJavaDirIsRoot` directly: helios
+- Pass executables through `JavaManager.javaRoot()`, not `ensureJavaDirIsRoot` directly: helios
   only recognises the platform separator, so `C:/…/javaw.exe` never validated.
 
 ### Shared Utilities (`src/main/utils`)
 
 - `Logger` — one winston root logger; `getLogger(name)` returns a child labelled with the name. Console transport (coloured) plus, after `Logger.enableFileLogging(ConfigManager.getLogsDirectory())` in `main/index.ts`, a file transport at `<launcherDir>/logs/launcher.log` rotating at 5 MB × 5 files. An `Error` argument is rendered as stack + `code` + cause chain (never `util.inspect` at unlimited depth, which dumped got's request headers), other objects at depth 3, and the final line goes through a token redactor. The redactor is a safety net: **never log a token, nor an object that may carry one**. helios-core's own internal loggers still use its console-only `LoggerUtil`.
-- `FileUtils` — `hashFile` / `validateLocalFile`, streaming. Every downloaded artifact is validated with it; never re-implement hashing with `readFileSync`. `validateLocalFile` with no expected hash accepts **any file that exists**, and helios writes downloads straight to their final path. So never pass it a null hash if one can be obtained: loader libraries without `sha1` (Fabric's `fabric-loader` and `intermediary`) get theirs from the maven via `LaunchManager.fetchPublishedSha1`. `writeFileAtomicSync` (tmp + fsync + rename) is the one atomic writer, shared by `config.json` and the skin vault.
+- `FileUtils` — `hashFile` / `validateLocalFile`, streaming. Every downloaded artifact is validated with it; never re-implement hashing with `readFileSync`. `validateLocalFile` with no expected hash accepts **any file that exists**, and helios writes downloads straight to their final path. So never pass it a null hash if one can be obtained: loader libraries without `sha1` (Fabric's `fabric-loader` and `intermediary`) get theirs from the maven via `LaunchCommand.fetchPublishedSha1`. `writeFileAtomicSync` (tmp + fsync + rename) is the one atomic writer, shared by `config.json` and the skin vault.
 - `PathUtils` — `resolveInside` / `isSafeRelativePath`. Every path built from manifest, renderer or network data goes through `resolveInside`.
 - `HttpUtils` — `fetchWithTimeout` for small JSON/text requests. Never call bare `fetch` in main.
 - `MavenUtils` — `mavenToRelativePath` / `mavenToUrl` for Maven-coordinate libraries.
@@ -371,6 +376,8 @@ VITE_FIREBASE_PROJECT_ID=...
 - The avatar is drawn from the worn skin texture (`components/common/SkinHead.tsx`, CSS only); minotar.net is gone ([ADR-0014](docs/adr/0014-skins-through-main-as-data-urls.md))
 - `usersAllowed` in Firestore filters by Minecraft **username** (not UUID)
 - **Everything under `src/` is TypeScript** (`.ts`/`.tsx`), [ADR-0015](docs/adr/0015-incremental-typescript-migration.md): `strict` plus `noUncheckedIndexedAccess`, and no `allowJs`, so a `.js` file there does not even compile. An index that may be missing (a regex group, a split, a list from a manifest) gets a guard or a default, not a `!`; there is no `any`, `@ts-expect-error` or non-null assertion in the tree, and the few `as unknown as` say why next to them
+- **Untrusted values that end up in a path carry a brand** (`Brand<…>` in `src/shared/guards.ts`): `Sha256Hex` (manifest and file hashes), `SkinId` (vault ids) and `ModpackId` (`DistributionManager`). The guard (`isSha256Hex`, `isSkinId`, `parseModpackId`) is the only way to get one, so a function that takes it cannot receive a value nobody checked. Brands stay in main where the contract carries a `string`. Do not brand everything: paths and usernames stay `string`. The common checks (`isPlainObject`, `isOptional`, `nonEmptyText`) live in the same file — never copy them into a module again
+- **Closed unions get exhaustive switches**: a `default` that assigns to `never` (`LaunchContext`, `ModLoaderManager.unsupportedLoader`), so a new member does not compile until every switch handles it. The manifest's `loader.type` is `'fabric' | 'forge'`, refused otherwise by `assertShape` (`UNSUPPORTED_MODLOADER`)
 - In the renderer, a `catch` reads what it caught through `services/errors`: `errorMessage(err, fallback)` for the text and `isTerminalAuthError(err)` for "the session is gone", never `err.message` or `err.code` on an `unknown`
 - Indentation: 4 spaces in `src/main/{managers,utils,windows,testing,types}`, 2 spaces in the files at the root of `src/main` (`index`, `constants`, `env.d.ts`), `src/main/ipc`, `src/preload`, `src/shared` and the whole renderer. Match the file you are editing
 - Error codes are shared constants in `src/shared/errorCodes.ts`, never inline strings, and main throws them as `LauncherError`
@@ -412,8 +419,8 @@ The mechanisms for this exist and are the ones to reuse (branch `fix/p1-hardenin
 
 - **Paths**: `PathUtils.resolveInside(base, rel)` throws `PATH_OUTSIDE_BASE`, and
   `isSafeRelativePath` is the manifest-path rule. `ManifestManager.assertShape` rejects unsafe
-  paths with `MANIFEST_INVALID`, `DistributionManager.instanceDirFor(id)` validates modpack ids
-  (`MODPACK_INVALID`), and `ConfigManager.getVersionDirectory/getVersionJsonPath` is the only way
+  paths with `MANIFEST_INVALID`, `DistributionManager.parseModpackId(id)` validates modpack ids
+  (`MODPACK_INVALID`) and is the only source of the `ModpackId` that `instanceDirFor` takes, and `ConfigManager.getVersionDirectory/getVersionJsonPath` is the only way
   to build `versions/<id>`
 - **Network**: `HttpUtils.fetchWithTimeout(url, what, { timeoutMs })` for JSON/text requests
   (`NETWORK_TIMEOUT` / `NETWORK_ERROR`); files still go through `helios-core/dl`
@@ -443,11 +450,11 @@ The mechanisms for this exist and are the ones to reuse (branch `fix/p1-hardenin
   `skins.ipc.ts` checks vault ids (`/^[0-9a-f]{64}$/`), names (`cleanSkinName`, 32 chars) and the
   save choice. Profile bodies are parsed by `SkinManager.parseProfile`, and a texture URL is only
   followed on `textures.minecraft.net`, over https
-- **Process probing**: `LaunchManager.readCommandLine(pid)` interpolates the PID into a PowerShell
+- **Process probing**: `GameProcess.readCommandLine(pid)` interpolates the PID into a PowerShell
   command, so it is only ever called with a PID already checked to be a positive integer
 
-Still open from the 2026-09-17 audit, all in `TODO.md`: B16 (cache pruning) and S7 (PKCE), plus
-B1 (publishing), on hold because it changes the bucket.
+Still open from the 2026-09-17 audit, all in `TODO.md`: B16 (cache pruning, pending a decision on
+whether it pays off) and B1 (publishing), on hold because it changes the bucket.
 
 ## Gotchas
 

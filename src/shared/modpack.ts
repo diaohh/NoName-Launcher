@@ -1,3 +1,5 @@
+import type { Sha256Hex } from './guards'
+
 /**
  * A modpack document from Firestore (`modpacks/{id}`), as the renderer hands it to main through
  * `distro:setServerData`. The README's "Modpack document" table describes every field.
@@ -39,6 +41,6 @@ export interface ModpackRam {
  */
 export interface ManifestPointer {
   url: string
-  hash: string
+  hash: Sha256Hex
   version?: string
 }

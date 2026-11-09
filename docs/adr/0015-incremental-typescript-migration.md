@@ -117,3 +117,14 @@ above, or was decided along the way:
   silent failure of ADR-0005: a progress `type` with no `case`.
 - **The fetch on mount became `useIpcResource`** in its own commit after the conversion, as the
   P3 item asked, so the refactor was type-checked rather than converted at the same time.
+
+## Addendum (2026-11-09)
+
+- **`LaunchManager` is split**, as its own change with no behaviour change and the tests green
+  before and after: `JavaManager` (Java), `LaunchCommand` (version JSON, libraries, rules, the
+  command line; its tests moved with it to `LaunchCommand.test.ts`), `GameProcess` (the running
+  game) and `LaunchManager` (the flow and its `launchInProgress` lock). The IPC handlers call the
+  module that owns each job, with no facade.
+- The typing follow-up landed too: shared guards in `src/shared/guards.ts`, branded `Sha256Hex`,
+  `SkinId` and `ModpackId`, a closed loader union with exhaustive switches, and guards in place of
+  the `hydrateSecrets` and `readState` casts.

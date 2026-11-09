@@ -5,7 +5,7 @@ import path from 'path'
  * Stand-in for the `electron` module under Vitest, wired in by the alias in
  * `vitest.config.mjs`. The real package only resolves to the path of a binary when it is
  * imported from plain node, so anything that reaches `ConfigManager` (`safeStorage`) or
- * `LaunchManager` (`app`, `screen`) would not load at all.
+ * `LaunchCommand` (`app`, `screen`) would not load at all.
  *
  * Only what the code under test touches is here. A test that needs more adds it, rather
  * than this file growing an imitation of Electron.

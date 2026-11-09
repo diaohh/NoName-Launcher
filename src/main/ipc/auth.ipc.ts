@@ -5,7 +5,7 @@ import { LauncherError } from '../../shared/LauncherError'
 import { emit, type InvokeHandlers } from './result'
 import Logger from '../utils/Logger'
 import AuthManager from '../managers/AuthManager'
-import { createMsftAuthWindow, clearMsftAuthSession } from '../windows/msftAuth'
+import { createMsftAuthWindow, clearMsftAuthSession, takeCodeVerifier } from '../windows/msftAuth'
 
 const logger = Logger.getLogger('AuthIPC')
 
@@ -20,7 +20,13 @@ export function authHandlers() {
         throw new LauncherError(ERROR_CODE.OAUTH_FAILED, 'Microsoft no ha devuelto un codigo de autorizacion valido.')
       }
 
-      const authData = await AuthManager.addMicrosoftAccount(authCode)
+      // Only the code of the last sign-in window, and only once (PKCE, see msftAuth.ts).
+      const codeVerifier = takeCodeVerifier(authCode)
+      if (!codeVerifier) {
+        throw new LauncherError(ERROR_CODE.OAUTH_FAILED, 'El inicio de sesion ha caducado. Vuelve a intentarlo.')
+      }
+
+      const authData = await AuthManager.addMicrosoftAccount(authCode, codeVerifier)
       // A fresh account carries a fresh expiry, so the scheduler is re-armed against it.
       AuthManager.scheduleTokenRefresh()
       // The Minecraft access token never crosses into the renderer: it is read from

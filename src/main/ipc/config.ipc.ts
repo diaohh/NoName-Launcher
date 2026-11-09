@@ -5,10 +5,11 @@ import { dialog, shell, type BrowserWindow } from 'electron'
 import { Channels } from '../../shared/channels'
 import { ERROR_CODE } from '../../shared/errorCodes'
 import { LauncherError } from '../../shared/LauncherError'
+import { isPlainObject } from '../../shared/guards'
 import type { FileFilter, OpenFileOptions } from '../../shared/ipcContract'
 import type { InvokeHandlers } from './result'
 import ConfigManager from '../managers/ConfigManager'
-import LaunchManager from '../managers/LaunchManager'
+import GameProcess from '../managers/GameProcess'
 
 const RAM_STEP_MB = 512
 const RAM_MIN_MB = 1024
@@ -39,9 +40,6 @@ const GAME_HEIGHT: IntegerRange = { min: 480, max: 16384 }
 const MAX_DIALOG_TITLE = 120
 const MAX_DIALOG_FILTERS = 10
 const DIALOG_EXTENSION = /^(\*|[a-z0-9]{1,16})$/i
-
-const isPlainObject = (value: unknown): value is Record<string, unknown> =>
-  value != null && typeof value === 'object' && !Array.isArray(value)
 
 /**
  * Everything below arrives from the renderer and ends up in config.json and, from there, in
@@ -180,7 +178,7 @@ export function configHandlers(mainWindow: BrowserWindow) {
     [Channels.CONFIG_SET_DATA_DIRECTORY]: async (_event, directory) => {
       // Moving the root out from under a running game would leave it with open handles
       // into a directory the launcher no longer considers its own.
-      if (await LaunchManager.isGameRunning()) {
+      if (await GameProcess.isGameRunning()) {
         throw new LauncherError(ERROR_CODE.CONFIG_GAME_RUNNING, 'Cierra Minecraft antes de cambiar el directorio de datos.')
       }
 

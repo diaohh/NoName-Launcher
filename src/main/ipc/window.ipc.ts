@@ -45,7 +45,7 @@ export function watchWindow(mainWindow: BrowserWindow): void {
  * What happens when the player closes the launcher (ADR-0013).
  *
  * With a game running there is nothing to ask: it was spawned detached and outlives the
- * launcher (`LaunchManager.releaseGame` lets go of it on quit). While a launch is still being
+ * launcher (`GameProcess.releaseGame` lets go of it on quit). While a launch is still being
  * prepared, though, closing interrupts it — the download stops halfway and resumes next
  * time — so main holds the close and the renderer asks first. Every way of closing comes
  * through here: the title bar, Alt+F4, the taskbar, Cmd+Q.

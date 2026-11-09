@@ -2,6 +2,7 @@ import type { BrowserWindow } from 'electron'
 import { Channels } from '../../shared/channels'
 import { emit, type InvokeHandlers } from './result'
 import LaunchManager from '../managers/LaunchManager'
+import GameProcess from '../managers/GameProcess'
 
 export function launchHandlers(mainWindow: BrowserWindow) {
   return {
@@ -12,11 +13,11 @@ export function launchHandlers(mainWindow: BrowserWindow) {
     },
 
     [Channels.LAUNCH_KILL]: async () => {
-      return LaunchManager.killGame()
+      return GameProcess.killGame()
     },
 
     [Channels.LAUNCH_GET_STATUS]: async () => {
-      return LaunchManager.getStatus()
+      return GameProcess.getStatus()
     }
   } satisfies Partial<InvokeHandlers>
 }

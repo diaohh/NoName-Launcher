@@ -62,3 +62,10 @@ be aborted mid-file; see `TODO.md` P4).
 - **Hide to the tray instead of closing.** Keeps the handle and the logs, but a launcher that
   ignores its close button is a surprise of its own, and it needs a tray icon and menu that do not
   exist.
+
+## Addendum (2026-11-09)
+
+- The game's lifecycle moved out of `LaunchManager` into `GameProcess` when it was split:
+  `releaseGame()`, `killGame()`, `findOrphanGame()`, `running-game.json` and the spawn itself
+  (`GameProcess.start`). The decision stands as written; read `LaunchManager.releaseGame` above as
+  `GameProcess.releaseGame`.
