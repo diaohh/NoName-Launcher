@@ -127,7 +127,7 @@ Every effect that stays needs all four: **cleanup** for anything it subscribes t
 **cancellation** of async work (an `ignore` flag or `AbortController` — StrictMode
 double-invokes and a dependency change re-runs it), a **dependency array that matches what the
 body reads**, and an **error path** that reaches the user through `useStatus()` instead of
-leaving a screen stuck on "Cargando...". Known violations are listed in `TODO.md` P3.
+leaving a screen stuck on "Cargando...".
 
 **A read on mount goes through `hooks/useIpcResource`**, not a hand-written effect:
 `useIpcResource(load, onError)` returns `{ data, loading, failed, reload, setData }` and carries
@@ -429,7 +429,8 @@ The mechanisms for this exist and are the ones to reuse (branch `fix/p1-hardenin
 - **Process probing**: `LaunchManager.readCommandLine(pid)` interpolates the PID into a PowerShell
   command, so it is only ever called with a PID already checked to be a positive integer
 
-Nothing app-side is still open from the 2026-09-17 audit; B1 (publishing) is in `TODO.md` P1.
+Still open from the 2026-09-17 audit, all in `TODO.md`: B16 (cache pruning) and S7 (PKCE), plus
+B1 (publishing), on hold because it changes the bucket.
 
 ## Gotchas
 
