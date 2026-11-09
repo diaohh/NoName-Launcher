@@ -7,6 +7,7 @@ import { compileIgnore, resolvePolicy, strictRoots } from '../../shared/PackPoli
 import { isSafeRelativePath, resolveInside } from '../utils/PathUtils'
 import { ERROR_CODE } from '../../shared/errorCodes'
 import { LauncherError } from '../../shared/LauncherError'
+import { isSha256Hex } from '../../shared/guards'
 import type { StepProgress } from '../../shared/launchProgress'
 import type { ManifestPointer, ModpackRam } from '../../shared/modpack'
 import type { ManifestFile, PackManifest } from '../types/manifest'
@@ -108,7 +109,8 @@ class DistributionManager {
             name: text(data.name) ?? (id as string),
             maintenance: Boolean(data.maintenance),
             maintenanceMessage: text(data.maintenanceMessage),
-            manifest: isPlainObject(manifest) && typeof manifest.url === 'string' && typeof manifest.hash === 'string'
+            // The hash names the manifest's cache file: anything but a sha256 is dropped here.
+            manifest: isPlainObject(manifest) && typeof manifest.url === 'string' && isSha256Hex(manifest.hash)
                 ? { url: manifest.url, hash: manifest.hash, version: text(manifest.version) ?? undefined }
                 : null,
             java: { minRam: ram(java.minRam), maxRam: ram(java.maxRam) }

@@ -8,6 +8,7 @@ import {
   where,
   orderBy,
 } from 'firebase/firestore/lite'
+import { isSha256Hex } from '../../../shared/guards'
 import type { Modpack } from '../../../shared/modpack'
 
 const NETWORK_TIMEOUT_MS = 12000
@@ -96,7 +97,8 @@ function toModpack(id: string, data: Record<string, unknown>): Modpack {
   }
 
   const manifest = data.manifest
-  if (isPlainObject(manifest) && typeof manifest.url === 'string' && typeof manifest.hash === 'string') {
+  // Main's rule too (`parseServerData`): a hash that is not a sha256 means no manifest.
+  if (isPlainObject(manifest) && typeof manifest.url === 'string' && isSha256Hex(manifest.hash)) {
     const version = text(manifest.version)
     modpack.manifest = { url: manifest.url, hash: manifest.hash }
     if (version != null) modpack.manifest.version = version
