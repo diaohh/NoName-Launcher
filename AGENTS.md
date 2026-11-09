@@ -42,7 +42,7 @@ A change is done when `pnpm lint` and `pnpm typecheck` report 0 errors, `pnpm te
 
 **Tests** run on Vitest with their own `vitest.config.mjs` (electron-vite's config builds three targets and is not reused). They sit **next to the file they cover** (`X.test.ts` beside `X.ts`), with no `test/` folder and **no coverage target**: coverage is minimal on purpose, limited to what fails silently and what the migration rewrites. A test pins a rule of this file, not an implementation detail — and what the compiler already enforces (a phase without a slice, a channel missing from a layer) is not tested twice.
 
-- `electron` is aliased to `src/main/testing/electron.ts`, a stub with only what the code under test touches (`safeStorage`, `app`, `powerMonitor`). `safeStorageControl` switches it to no keyring, an undecryptable blob or a slow encryption; reset it in `afterEach`.
+- `electron` is aliased to `src/main/testing/electron.ts`, a stub with only what the code under test touches (`safeStorage`, `app`, `powerMonitor`, `screen` — a 1080p primary display at 125%). `safeStorageControl` switches it to no keyring, an undecryptable blob or a slow encryption; reset it in `afterEach`.
 - `src/main/testing/tempLauncher.ts` → `createTempLauncher()` points `ConfigManager` at a fresh temp directory on the default config, writes `config.json` and synthetic version manifests into `common/versions/**`, and `cleanup()` resets the static state. It is the one shared helper; add to it instead of starting another.
 - `__MICROSOFT_CLIENT_ID__` and `__APP_VERSION__` are defined by the Vitest config, not read from `.env`.
 
@@ -226,6 +226,12 @@ semantics — with rules an entry starts **disallowed** and the **last** matchin
 `os.name`, `os.arch` and `os.version` are all checked. A placeholder with no value in
 `argContext` is never passed literally: the argument is dropped, and a bare `${x}` takes the
 `--flag` in front of it along (this is how `--clientId`/`--xuid` disappear).
+
+`--width`/`--height` come from `LaunchManager.gameResolution()`: Ajustes' resolution when
+windowed, and the primary monitor's current mode in fullscreen (physical pixels; points on
+macOS). Minecraft creates its fullscreen window at that size and GLFW switches the monitor to
+the closest video mode, so any other size changes the player's screen mode and rearranges their
+windows. Do not drop the flags in fullscreen either: the game would fall back to 854×480.
 
 Invariants to preserve when touching this flow:
 

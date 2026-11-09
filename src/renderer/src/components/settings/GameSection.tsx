@@ -120,7 +120,7 @@ export default function GameSection({ settings, onSave }: { settings: LauncherSe
       <div className="flex items-center justify-between gap-4">
         <div>
           <p className="text-sm text-white">Pantalla completa</p>
-          <p className="text-xs text-white/40 mt-0.5">Iniciar Minecraft en pantalla completa</p>
+          <p className="text-xs text-white/40 mt-0.5">Iniciar Minecraft en pantalla completa, a la resolucion del monitor</p>
         </div>
         <ToggleSwitch checked={settings.fullscreen} onChange={handleFullscreenToggle} />
       </div>

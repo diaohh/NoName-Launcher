@@ -69,7 +69,11 @@ describe('LaunchManager.buildLaunchCommand', () => {
                     '--version', '${version_name}',
                     '--clientId', '${clientid}',
                     '--xuid', '${auth_xuid}',
-                    { rules: [{ action: 'allow', features: { is_demo_user: true } }], value: '--demo' }
+                    { rules: [{ action: 'allow', features: { is_demo_user: true } }], value: '--demo' },
+                    {
+                        rules: [{ action: 'allow', features: { has_custom_resolution: true } }],
+                        value: ['--width', '${resolution_width}', '--height', '${resolution_height}']
+                    }
                 ]
             }
         })
@@ -109,6 +113,33 @@ describe('LaunchManager.buildLaunchCommand', () => {
         expect(classpath.some(entry => entry.endsWith('brigadier-1.1.8.jar'))).toBe(true)
         // The client jar belongs to the vanilla version, not to the loader profile.
         expect(classpath.at(-1)).toBe(path.join(ConfigManager.getVersionDirectory(VANILLA), `${VANILLA}.jar`))
+    })
+
+    describe('resolution', () => {
+        const valueAfter = (args: string[], flag: string) => args[args.indexOf(flag) + 1]
+
+        it('opens a window at the size in Ajustes', async () => {
+            // Fullscreen is the default, so windowed has to be asked for.
+            ConfigManager.setFullscreen(false)
+
+            const args = await LaunchManager.buildLaunchCommand(account, FABRIC, null)
+
+            expect(valueAfter(args, '--width')).toBe(String(ConfigManager.getGameWidth()))
+            expect(valueAfter(args, '--height')).toBe(String(ConfigManager.getGameHeight()))
+            expect(args).not.toContain('--fullscreen')
+        })
+
+        it('asks for the monitor\'s own mode in fullscreen, so it never switches video mode', async () => {
+            ConfigManager.setFullscreen(true)
+
+            const args = await LaunchManager.buildLaunchCommand(account, FABRIC, null)
+
+            // Physical pixels, except on macOS, where GLFW counts in points.
+            const [width, height] = process.platform === 'darwin' ? ['1536', '864'] : ['1920', '1080']
+            expect(valueAfter(args, '--width')).toBe(width)
+            expect(valueAfter(args, '--height')).toBe(height)
+            expect(args).toContain('--fullscreen')
+        })
     })
 
     describe('RAM', () => {
