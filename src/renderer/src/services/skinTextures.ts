@@ -1,4 +1,6 @@
+import type { CSSProperties } from 'react'
 import { inferModelType, loadSkinToCanvas } from 'skinview-utils'
+import type { SkinVariant } from '../../../shared/skins'
 
 /**
  * Skin textures arrive from main as data URLs: the account's own from Mojang, the rest from
@@ -6,11 +8,22 @@ import { inferModelType, loadSkinToCanvas } from 'skinview-utils'
  * viewer is a single WebGL context, and one per thumbnail would exhaust Chromium's limit.
  */
 
-export async function loadImage(dataUrl) {
+export async function loadImage(dataUrl: string): Promise<HTMLImageElement> {
   const image = new Image()
   image.src = dataUrl
   await image.decode()
   return image
+}
+
+interface FrontFace {
+  sx: number
+  sy: number
+  /** Null means "the arm width": 4 for classic, 3 for slim. */
+  w: number | null
+  h: number
+  /** `'right'` is the player's right arm, drawn flush against the body. */
+  dx: number | 'right'
+  dy: number
 }
 
 /**
@@ -18,7 +31,7 @@ export async function loadImage(dataUrl) {
  * `w` null means "the arm width", 4 for classic and 3 for slim. Base layers first, then the
  * overlays (hat, jacket, sleeves, trousers) on top of them.
  */
-const FRONT_FACES = [
+const FRONT_FACES: readonly FrontFace[] = [
   // head, body, legs
   { sx: 8, sy: 8, w: 8, h: 8, dx: 4, dy: 0 },
   { sx: 20, sy: 20, w: 8, h: 12, dx: 4, dy: 8 },
@@ -36,12 +49,13 @@ const FRONT_FACES = [
   { sx: 52, sy: 52, w: null, h: 12, dx: 12, dy: 8 }
 ]
 
-function renderFront(skinCanvas, variant) {
+function renderFront(skinCanvas: HTMLCanvasElement, variant: SkinVariant): string {
   const armWidth = variant === 'slim' ? 3 : 4
   const canvas = document.createElement('canvas')
   canvas.width = 16
   canvas.height = 32
   const context = canvas.getContext('2d')
+  if (!context) throw new Error('No 2D canvas context')
   context.imageSmoothingEnabled = false
 
   for (const face of FRONT_FACES) {
@@ -53,15 +67,21 @@ function renderFront(skinCanvas, variant) {
   return canvas.toDataURL('image/png')
 }
 
+/** What the vault grid needs from a texture. */
+export interface SkinDescription {
+  /** The model the texture was drawn for: 3 px arms are slim. */
+  detected: SkinVariant
+  /** A front view per model, as data URLs. */
+  thumbs: Record<SkinVariant, string>
+}
+
 /**
  * Everything the vault grid needs from a texture: the model the texture was drawn for (3 px
  * arms are slim), and a front view for each model, so switching the radio buttons updates
  * the thumbnail without decoding the texture again. 64x32 skins are converted to the 64x64
  * layout first by skinview-utils.
- *
- * @returns {Promise<{ detected: 'classic'|'slim', thumbs: { classic: string, slim: string } }>}
  */
-export async function describeSkin(dataUrl) {
+export async function describeSkin(dataUrl: string): Promise<SkinDescription> {
   const image = await loadImage(dataUrl)
   const canvas = document.createElement('canvas')
   loadSkinToCanvas(canvas, image)
@@ -80,7 +100,7 @@ export async function describeSkin(dataUrl) {
  * texture — filling its box. Percentages, so it holds for any box with that 10:16 ratio and
  * for HD textures with the same layout.
  */
-export function capeFrontStyle(texture) {
+export function capeFrontStyle(texture: string): CSSProperties {
   return {
     backgroundImage: `url("${texture}")`,
     // The texture is 6.4 faces wide and 2 faces tall.

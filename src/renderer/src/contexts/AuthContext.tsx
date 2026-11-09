@@ -1,19 +1,31 @@
-import { createContext, useState, useEffect, useContext, useCallback } from 'react'
+import { createContext, useState, useEffect, useContext, useCallback, type ReactNode } from 'react'
 import { ipc } from '../services/ipcClient'
+import { errorMessage, isTerminalAuthError } from '../services/errors'
 import { useStatus } from './StatusContext'
-import { isTerminalAuthCode } from '../../../shared/errorCodes'
+import type { AccountSummary } from '../../../shared/ipcContract'
 
-const AuthContext = createContext()
+interface AuthContextValue {
+  /** Null on the login screen. Never carries a token (ADR-0007). */
+  account: AccountSummary | null
+  loading: boolean
+  login: () => Promise<AccountSummary>
+  logout: () => Promise<void>
+  /** The worn skin as a `data:` URL, for the avatar; null until it arrives, or without one. */
+  skinTexture: string | null
+  updateSkinTexture: (texture: string | null) => void
+}
+
+const AuthContext = createContext<AuthContextValue | null>(null)
 
 const EXPIRED_MESSAGE = 'Tu sesion ha caducado. Vuelve a iniciar sesion.'
 
-export function AuthProvider({ children }) {
+export function AuthProvider({ children }: { children: ReactNode }) {
   const { showStatus } = useStatus()
-  const [account, setAccount] = useState(null)
+  const [account, setAccount] = useState<AccountSummary | null>(null)
   const [loading, setLoading] = useState(true)
   // The texture of the skin the account is wearing, for the avatar. Stored with the uuid it
   // belongs to, so a different account never shows the previous one's face.
-  const [skin, setSkin] = useState(null)
+  const [skin, setSkin] = useState<{ uuid: string | undefined, texture: string | null } | null>(null)
 
   // Fetch on mount: the account the main process already has on disk. A failure lands on the
   // login screen, which is the one thing the launcher can still offer without an account —
@@ -28,7 +40,7 @@ export function AuthProvider({ children }) {
       .catch(err => {
         if (ignore) return
         console.error('Failed to read the stored account:', err)
-        showStatus(err.message || 'No se ha podido leer la sesion guardada', 'error')
+        showStatus(errorMessage(err, 'No se ha podido leer la sesion guardada'), 'error')
       })
       .finally(() => {
         if (!ignore) setLoading(false)
@@ -61,9 +73,9 @@ export function AuthProvider({ children }) {
       })
       .catch(err => {
         if (ignore) return
-        if (isTerminalAuthCode(err.code)) {
+        if (isTerminalAuthError(err)) {
           setAccount(null)
-          showStatus(err.message || EXPIRED_MESSAGE, 'error')
+          showStatus(errorMessage(err, EXPIRED_MESSAGE), 'error')
           return
         }
         console.warn('Could not read the current skin for the avatar:', err)
@@ -77,7 +89,7 @@ export function AuthProvider({ children }) {
   const skinTexture = skin && uuid && skin.uuid === uuid ? skin.texture : null
 
   /** Called by the skin manager after a save, with the texture now being worn. */
-  const updateSkinTexture = useCallback((texture) => {
+  const updateSkinTexture = useCallback((texture: string | null) => {
     setSkin({ uuid, texture })
   }, [uuid])
 
@@ -103,6 +115,8 @@ export function AuthProvider({ children }) {
   )
 }
 
-export function useAuth() {
-  return useContext(AuthContext)
+export function useAuth(): AuthContextValue {
+  const context = useContext(AuthContext)
+  if (!context) throw new Error('useAuth must be used inside an AuthProvider')
+  return context
 }
