@@ -6,7 +6,11 @@ Lo que espera una intervencion externa o una decision esta al final, en **En esp
 
 ## P1 — Bugs
 
-Nada pendiente.
+- [ ] **Pantalla completa arranca con la resolucion de Ajustes y cambia la del monitor** — con "Pantalla completa" activada, el juego se abre a pantalla completa pero a la resolucion configurada (por defecto 1280×720), aunque Ajustes desactiva esos campos. El monitor cambia de modo de video, las ventanas abiertas se recolocan y el arranque se retrasa mientras se ajusta
+  - Causa: `has_custom_resolution` esta fijo a `true` en `LAUNCH_FEATURES` (`LaunchManager.ts`), asi que `--width`/`--height` se pasan siempre con `resWidth`/`resHeight`, y `buildLaunchCommand` añade `--fullscreen` encima. Desactivar los campos en `GameSection` es solo visual
+  - Por que cambia el monitor (a comprobar): Minecraft crea la ventana con `glfwCreateWindow(width, height, monitor)` cuando arranca a pantalla completa, y GLFW pone el monitor en el modo de video mas cercano a ese tamaño. Por eso **quitar solo `--width`/`--height` seguramente no basta**: Minecraft caeria en su tamaño por defecto (854×480) y volveria a cambiar el modo
+  - Propuesta: con pantalla completa, pasar como `resolution_width`/`resolution_height` la resolucion nativa del monitor principal (`screen.getPrimaryDisplay()`: `size` × `scaleFactor`, en pixeles fisicos), que es el que usa Minecraft; sin ella, la de Ajustes como hasta ahora. `LAUNCH_FEATURES` deja de ser constante si hace falta decidir `has_custom_resolution` por lanzamiento
+  - Verificar a mano en Windows con un monitor cuya resolucion nativa no sea 1280×720, con y sin escalado (125 %/150 %), y que el `fullscreenResolution` de `options.txt`, si el jugador lo fijo dentro del juego, siga mandando
 
 ## P2 — Calidad de codigo
 
