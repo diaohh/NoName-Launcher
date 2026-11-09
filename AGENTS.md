@@ -333,6 +333,13 @@ The window opens at 1000×600 and cannot shrink below **900×560** (`minWidth`/`
 `main/index.ts`), which still fits a 720p screen — or 1080p at 150% scaling — with the taskbar.
 Lay screens out for that minimum, not for the default.
 
+Ajustes (`components/settings/SettingsScreen.tsx`) is **one category at a time**: a vertical
+tablist on the left (Juego, Java, Launcher, opening on Juego) and the open tab on the right. The
+window is wider than it is tall, so the tabs spend width instead of height, and no tab scrolls at
+the minimum size; the panel's `overflow-y-auto` is only a safety net. Only the open tab is
+mounted, which is safe because the typed values commit on blur. A new category is an entry in
+`TABS`, and one that would not fit 900×560 is split rather than scrolled.
+
 The home screen with a modpack selected is **one flex column**, all in the flow: the logo box
 (`flex-1 min-h-0`, so `ModpackLogo` scales down into whatever height is left), JUGAR, and a slot
 of fixed height for the launch tracker that stays reserved while empty, so pressing JUGAR does
