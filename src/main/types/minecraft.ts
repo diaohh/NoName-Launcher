@@ -5,7 +5,7 @@
  * every field below is still read defensively, since the format is Mojang's and moves with it.
  */
 
-/** Mojang's rule: with rules an entry starts disallowed and the last match wins (`LaunchManager.rulesAllow`). */
+/** Mojang's rule: with rules an entry starts disallowed and the last match wins (`LaunchCommand.rulesAllow`). */
 export interface Rule {
     action: 'allow' | 'disallow'
     os?: {
@@ -29,7 +29,7 @@ export interface Artifact {
 
 /**
  * A library in either of its two shapes: Mojang/Forge declare `downloads.artifact`, Fabric a
- * Maven `name` plus a repository `url`. Read through `LaunchManager.resolveLibraryArtifact`.
+ * Maven `name` plus a repository `url`. Read through `LaunchCommand.resolveLibraryArtifact`.
  */
 export interface Library {
     name?: string

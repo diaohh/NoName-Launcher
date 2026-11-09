@@ -10,7 +10,7 @@ Ninguno abierto.
 
 ## P2 — Calidad de codigo
 
-- [ ] **Partir `LaunchManager`** (~1.060 lineas) — junta cuatro trabajos que no se necesitan entre si: la gestion de Java (`checkJava` → `ensureJava`, ~170 lineas), las librerias y argumentos de version (`resolveLibraryArtifact`, `loadVersionManifest`, `rulesAllow`, `appendArguments`, `buildLaunchCommand`), el flujo de lanzamiento (`launchMinecraft`, `waitForSpawn`) y el ciclo de vida del juego (`killGame`, `releaseGame`, `running-game.json`, `findOrphanGame`). Hacerlo como cambio propio, sin tocar comportamiento, con `LaunchManager.test.ts` en verde antes y despues; los tests de `rulesAllow`/`buildLaunchCommand` se mueven con lo que prueban. Ojo con `launchInProgress`/`gameProcess`, que lee `window.ipc.ts` (cierre) y `config.ipc.ts` (`isGameRunning`)
+Ninguno abierto.
 
 ## P3 — Funcionalidades
 

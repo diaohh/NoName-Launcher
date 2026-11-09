@@ -6,7 +6,7 @@ import path from 'path'
 import icon from '../../resources/icon.png?asset&asarUnpack'
 import { registerAllIPC } from './ipc'
 import ConfigManager from './managers/ConfigManager'
-import LaunchManager from './managers/LaunchManager'
+import GameProcess from './managers/GameProcess'
 import Logger from './utils/Logger'
 import { purgeLegacyAuthCookies } from './windows/msftAuth'
 
@@ -190,7 +190,7 @@ function startLauncher(): void {
   // The game was spawned detached and keeps running; this only lets go of its pipes so the
   // launcher can exit (ADR-0013).
   app.on('will-quit', () => {
-    LaunchManager.releaseGame()
+    GameProcess.releaseGame()
   })
 
   app.on('window-all-closed', () => {

@@ -9,7 +9,7 @@ import { isPlainObject } from '../../shared/guards'
 import type { FileFilter, OpenFileOptions } from '../../shared/ipcContract'
 import type { InvokeHandlers } from './result'
 import ConfigManager from '../managers/ConfigManager'
-import LaunchManager from '../managers/LaunchManager'
+import GameProcess from '../managers/GameProcess'
 
 const RAM_STEP_MB = 512
 const RAM_MIN_MB = 1024
@@ -178,7 +178,7 @@ export function configHandlers(mainWindow: BrowserWindow) {
     [Channels.CONFIG_SET_DATA_DIRECTORY]: async (_event, directory) => {
       // Moving the root out from under a running game would leave it with open handles
       // into a directory the launcher no longer considers its own.
-      if (await LaunchManager.isGameRunning()) {
+      if (await GameProcess.isGameRunning()) {
         throw new LauncherError(ERROR_CODE.CONFIG_GAME_RUNNING, 'Cierra Minecraft antes de cambiar el directorio de datos.')
       }
 

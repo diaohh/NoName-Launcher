@@ -1,6 +1,6 @@
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import LaunchManager from './LaunchManager'
+import LaunchCommand from './LaunchCommand'
 import ConfigManager from './ConfigManager'
 import { createTempLauncher, type TempLauncher } from '../testing/tempLauncher'
 import type { ModpackRam } from '../../shared/modpack'
@@ -10,40 +10,40 @@ import DistributionManager, { type SelectedServer } from './DistributionManager'
 const CURRENT_OS = ({ win32: 'windows', darwin: 'osx', linux: 'linux' } as Partial<Record<string, string>>)[process.platform]
 const OTHER_OS = CURRENT_OS === 'windows' ? 'osx' : 'windows'
 
-describe('LaunchManager.rulesAllow', () => {
+describe('LaunchCommand.rulesAllow', () => {
     it('allows an entry with no rules', () => {
-        expect(LaunchManager.rulesAllow(undefined)).toBe(true)
-        expect(LaunchManager.rulesAllow([])).toBe(true)
+        expect(LaunchCommand.rulesAllow(undefined)).toBe(true)
+        expect(LaunchCommand.rulesAllow([])).toBe(true)
     })
 
     it('starts disallowed once there are rules', () => {
-        expect(LaunchManager.rulesAllow([{ action: 'allow', os: { name: OTHER_OS } }])).toBe(false)
+        expect(LaunchCommand.rulesAllow([{ action: 'allow', os: { name: OTHER_OS } }])).toBe(false)
     })
 
     it('lets the last matching rule win', () => {
         // lwjgl in 1.17-1.18: allow everywhere, then disallow one OS.
-        expect(LaunchManager.rulesAllow([
+        expect(LaunchCommand.rulesAllow([
             { action: 'allow' },
             { action: 'disallow', os: { name: CURRENT_OS } }
         ])).toBe(false)
 
-        expect(LaunchManager.rulesAllow([
+        expect(LaunchCommand.rulesAllow([
             { action: 'disallow', os: { name: CURRENT_OS } },
             { action: 'allow' }
         ])).toBe(true)
     })
 
     it('checks os.arch, not only os.name', () => {
-        expect(LaunchManager.rulesAllow([{ action: 'allow', os: { name: CURRENT_OS, arch: 'sparc' } }])).toBe(false)
+        expect(LaunchCommand.rulesAllow([{ action: 'allow', os: { name: CURRENT_OS, arch: 'sparc' } }])).toBe(false)
     })
 
     it('honours only the features the launcher has', () => {
-        expect(LaunchManager.rulesAllow([{ action: 'allow', features: { has_custom_resolution: true } }])).toBe(true)
-        expect(LaunchManager.rulesAllow([{ action: 'allow', features: { is_demo_user: true } }])).toBe(false)
+        expect(LaunchCommand.rulesAllow([{ action: 'allow', features: { has_custom_resolution: true } }])).toBe(true)
+        expect(LaunchCommand.rulesAllow([{ action: 'allow', features: { is_demo_user: true } }])).toBe(false)
     })
 })
 
-describe('LaunchManager.buildLaunchCommand', () => {
+describe('LaunchCommand.buildLaunchCommand', () => {
     const VANILLA = '1.20.1'
     const FABRIC = 'fabric-loader-0.16.0-1.20.1'
     const account = { displayName: 'Notch', uuid: '069a79f444e94726a5befca90e38aaf5', accessToken: 'mc-access-token' }
@@ -95,7 +95,7 @@ describe('LaunchManager.buildLaunchCommand', () => {
     const classpathOf = (args: string[]) => (args[args.indexOf('-cp') + 1] ?? '').split(path.delimiter)
 
     it('drops a placeholder with no value together with its --flag', async () => {
-        const args = await LaunchManager.buildLaunchCommand(account, FABRIC, null)
+        const args = await LaunchCommand.buildLaunchCommand(account, FABRIC, null)
 
         expect(args).toContain('--username')
         expect(args[args.indexOf('--username') + 1]).toBe('Notch')
@@ -106,7 +106,7 @@ describe('LaunchManager.buildLaunchCommand', () => {
     })
 
     it('keeps one copy of each library on the classpath, the loader\'s', async () => {
-        const classpath = classpathOf(await LaunchManager.buildLaunchCommand(account, FABRIC, null))
+        const classpath = classpathOf(await LaunchCommand.buildLaunchCommand(account, FABRIC, null))
 
         expect(classpath).toContain(path.join(librariesDir(), 'org', 'ow2', 'asm', 'asm', '9.6', 'asm-9.6.jar'))
         expect(classpath.some(entry => entry.endsWith('asm-9.3.jar'))).toBe(false)
@@ -122,7 +122,7 @@ describe('LaunchManager.buildLaunchCommand', () => {
             // Fullscreen is the default, so windowed has to be asked for.
             ConfigManager.setFullscreen(false)
 
-            const args = await LaunchManager.buildLaunchCommand(account, FABRIC, null)
+            const args = await LaunchCommand.buildLaunchCommand(account, FABRIC, null)
 
             expect(valueAfter(args, '--width')).toBe(String(ConfigManager.getGameWidth()))
             expect(valueAfter(args, '--height')).toBe(String(ConfigManager.getGameHeight()))
@@ -132,7 +132,7 @@ describe('LaunchManager.buildLaunchCommand', () => {
         it('asks for the monitor\'s own mode in fullscreen, so it never switches video mode', async () => {
             ConfigManager.setFullscreen(true)
 
-            const args = await LaunchManager.buildLaunchCommand(account, FABRIC, null)
+            const args = await LaunchCommand.buildLaunchCommand(account, FABRIC, null)
 
             // Physical pixels, except on macOS, where GLFW counts in points.
             const [width, height] = process.platform === 'darwin' ? ['1536', '864'] : ['1920', '1080']
@@ -148,7 +148,7 @@ describe('LaunchManager.buildLaunchCommand', () => {
         })
 
         it('uses the modpack\'s allocation by default', async () => {
-            const args = await LaunchManager.buildLaunchCommand(account, FABRIC, server({ maxRam: '6G', minRam: '3G' }))
+            const args = await LaunchCommand.buildLaunchCommand(account, FABRIC, server({ maxRam: '6G', minRam: '3G' }))
 
             expect(args.slice(0, 2)).toEqual(['-Xmx6G', '-Xms3G'])
         })
@@ -156,13 +156,13 @@ describe('LaunchManager.buildLaunchCommand', () => {
         it('uses the launcher\'s setting when the player turns the modpack\'s off', async () => {
             ConfigManager.setUseModpackRam(false)
 
-            const args = await LaunchManager.buildLaunchCommand(account, FABRIC, server({ maxRam: '6G', minRam: '3G' }))
+            const args = await LaunchCommand.buildLaunchCommand(account, FABRIC, server({ maxRam: '6G', minRam: '3G' }))
 
             expect(args.slice(0, 2)).toEqual(['-Xmx4G', '-Xms2G'])
         })
 
         it('never lets a modpack\'s floor rise above its ceiling', async () => {
-            const args = await LaunchManager.buildLaunchCommand(account, FABRIC, server({ maxRam: '2G', minRam: '3G' }))
+            const args = await LaunchCommand.buildLaunchCommand(account, FABRIC, server({ maxRam: '2G', minRam: '3G' }))
 
             expect(args.slice(0, 2)).toEqual(['-Xmx2G', '-Xms2G'])
         })
