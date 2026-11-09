@@ -1,5 +1,5 @@
 /** The Microsoft logo (four squares in the official colours) for the sign-in button. */
-export default function LoginIcon({ size = 20, className = "" }) {
+export default function LoginIcon({ size = 20, className = "" }: { size?: number, className?: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 21 21" aria-hidden="true" className={`shrink-0 ${className}`}>
       <rect x="0" y="0" width="10" height="10" fill="#f25022" />

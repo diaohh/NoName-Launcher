@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { useAuth } from "../../contexts/AuthContext"
 import { useStatus } from "../../contexts/StatusContext"
+import { errorMessage } from "../../services/errors"
 import AppLogo from "../common/AppLogo"
 import LoginIcon from "./LoginIcon"
 
@@ -15,7 +16,7 @@ export default function LoginSection() {
       await login()
     } catch (err) {
       console.error("Login error:", err)
-      showStatus(err.message || "Error al iniciar sesion", "error")
+      showStatus(errorMessage(err, "Error al iniciar sesion"), "error")
     } finally {
       setLoggingIn(false)
     }
