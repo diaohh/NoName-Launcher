@@ -21,10 +21,11 @@ local working material and are never committed (latest: `2026-09-17-auditoria.md
 findings are in `TODO.md`, marked 📋 and tagged `S`/`B`/`D` + number, which points back to the
 report's tables. If you have the report, read it before touching an area it flags.
 
-**TypeScript migration in progress.** [`TODO-Migracion.md`](TODO-Migracion.md) is a temporary
-checklist for it and for the steps that prepare it (Electron 45, Vitest), split into phases.
-Migration work lands on the `migration` integration branch through per-phase PRs, never on
-`main` directly. Read the checklist before starting migration work, mark items `[x]` with date and commit instead of
+**TypeScript migration, closing.** Every source is TypeScript since 2026-11-08; what is left is
+the release. [`TODO-Migracion.md`](TODO-Migracion.md) is the temporary checklist for it and for
+the steps that prepared it (Electron 45, Vitest), split into phases. Migration work lands on
+the `migration` integration branch through per-phase PRs, never on `main` directly. Read the
+checklist before starting migration work, mark items `[x]` with date and commit instead of
 deleting them, and update the docs each phase lists before calling the phase done. It is
 deleted when the migration closes.
 
@@ -47,7 +48,7 @@ Package manager is **pnpm** (not npm or yarn). `package.json` lists `pnpm.onlyBu
 
 A change is done when `pnpm lint` and `pnpm typecheck` report 0 errors, `pnpm test` is green and `pnpm build` compiles — checked **before committing**, not after every edit. `pnpm build` alone only proves the bundle compiles, and launching the game end-to-end needs a Microsoft account plus a Firestore modpack, so anything touching Electron or the launch is also tried by hand (`pnpm dev`, and `pnpm package` for what only shows up packaged).
 
-**Tests** run on Vitest with their own `vitest.config.mjs` (electron-vite's config builds three targets and is not reused). They sit **next to the file they cover** (`X.test.ts` beside `X.ts`; a `.js` file still being migrated keeps a `.test.js`, renamed together with it), with no `test/` folder and **no coverage target**: coverage is minimal on purpose, limited to what fails silently and what the migration rewrites. A test pins a rule of this file, not an implementation detail — and what the compiler already enforces (a phase without a slice, a channel missing from a layer) is not tested twice.
+**Tests** run on Vitest with their own `vitest.config.mjs` (electron-vite's config builds three targets and is not reused). They sit **next to the file they cover** (`X.test.ts` beside `X.ts`), with no `test/` folder and **no coverage target**: coverage is minimal on purpose, limited to what fails silently and what the migration rewrites. A test pins a rule of this file, not an implementation detail — and what the compiler already enforces (a phase without a slice, a channel missing from a layer) is not tested twice.
 
 - `electron` is aliased to `src/main/testing/electron.ts`, a stub with only what the code under test touches (`safeStorage`, `app`, `powerMonitor`). `safeStorageControl` switches it to no keyring, an undecryptable blob or a slow encryption; reset it in `afterEach`.
 - `src/main/testing/tempLauncher.ts` → `createTempLauncher()` points `ConfigManager` at a fresh temp directory on the default config, writes `config.json` and synthetic version manifests into `common/versions/**`, and `cleanup()` resets the static state. It is the one shared helper; add to it instead of starting another.
@@ -61,18 +62,18 @@ For something a test cannot reach — a real request to Mojang, Fabric Meta or M
 
 ```
 Main Process (src/main/)          Preload (src/preload/)       Renderer (src/renderer/src/)
-├── index.ts (BrowserWindow)      └── index.ts (contextBridge)  ├── App.jsx (providers)
-├── managers/                                                    ├── contexts/ (Auth, Launch, Servers, Status)
+├── index.ts (BrowserWindow)      └── index.ts (contextBridge)  ├── App.tsx (providers)
+├── managers/                                                   ├── contexts/ (Auth, Launch, Servers, Status)
 │   ├── AuthManager.ts                                          ├── services/
 │   ├── ConfigManager.ts                                        │   ├── ipcClient.ts
 │   ├── DistributionManager.ts                                  │   ├── launchPhases.ts
-│   ├── LaunchManager.ts                                        │   ├── firebase.js
-│   ├── ManifestManager.ts                                      │   └── firestoreService.js
-│   ├── ModLoaderManager.ts                                     ├── hooks/useServers.js
-│   ├── MinecraftDownloadManager.ts                             └── components/{feature}/
-│   └── SkinManager.ts (Mojang profile, skin vault)
-├── types/ (config.json, pack manifest, Mojang version JSON)
-├── windows/msftAuth.ts (Microsoft sign-in window)
+│   ├── LaunchManager.ts                                        │   ├── errors.ts (what a catch reads)
+│   ├── ManifestManager.ts                                      │   ├── firebase.ts
+│   ├── ModLoaderManager.ts                                     │   └── firestoreService.ts (toModpack)
+│   ├── MinecraftDownloadManager.ts                             ├── hooks/
+│   └── SkinManager.ts (Mojang profile, skin vault)             │   ├── useServers.ts
+├── types/ (config.json, pack manifest, Mojang version JSON)    │   └── useIpcResource.ts
+├── windows/msftAuth.ts (Microsoft sign-in window)              └── components/{feature}/
 ├── constants.ts (build-time MICROSOFT_CLIENT_ID)
 └── ipc/
     ├── index.ts (the handler map)
@@ -120,7 +121,7 @@ React Context API only (no Redux). Four providers wrap the app:
 - **AuthProvider** — Microsoft account, login/logout, token expiry monitoring, and `skinTexture` (the worn skin, read once per account through `skins:getActiveTexture` for the avatar; `updateSkinTexture` after a save)
 - **LaunchProvider** — Launch state machine (`idle` → `preparing` → `playing`), progress tracking, the game's `startup` (`game_startup`, the tracker's last step), game logs (last 500 lines)
 - **ServersProvider** — Modpack list from Firestore, server selection, module loading
-- **StatusProvider** — Transient messages. `useStatus().showStatus(message, type)` with `type` `error` (default), `success` or `info`, shown for `VISIBLE_MS` with a bar that runs out with the timer; `dismissStatus()` closes it early (the toast's own close button). A single `<StatusMessage />` host lives in `App.jsx` above every screen, so a message raised on the way out of one screen is still visible on the next. It is the **outermost** provider, so the others (AuthProvider tells the player why a session expired) can report through it
+- **StatusProvider** — Transient messages. `useStatus().showStatus(message, type)` with `type` `error` (default), `success` or `info`, shown for `VISIBLE_MS` with a bar that runs out with the timer; `dismissStatus()` closes it early (the toast's own close button). A single `<StatusMessage />` host lives in `App.tsx` above every screen, so a message raised on the way out of one screen is still visible on the next. It is the **outermost** provider, so the others (AuthProvider tells the player why a session expired) can report through it
 
 **`useEffect` is for synchronizing with a system outside React, and nothing else** — see
 [ADR-0008](docs/adr/0008-useeffect-only-for-external-systems.md). Before writing one, name the
@@ -134,6 +135,17 @@ Every effect that stays needs all four: **cleanup** for anything it subscribes t
 double-invokes and a dependency change re-runs it), a **dependency array that matches what the
 body reads**, and an **error path** that reaches the user through `useStatus()` instead of
 leaving a screen stuck on "Cargando...". Known violations are listed in `TODO.md` P3.
+
+**A read on mount goes through `hooks/useIpcResource`**, not a hand-written effect:
+`useIpcResource(load, onError)` returns `{ data, loading, failed, reload, setData }` and carries
+all four rules above. `load` is the effect's dependency, so pass a module-level function
+(`ipc.config.getSettings`) or a `useCallback`; it may post-process what it gets (the skin
+manager decodes its textures). `onError` is where the failure reaches the player, and is read
+when the load fails, so an inline arrow is fine. `setData` is for what the screen changes
+itself — an edit shown before main confirms it, or what main answered with. Used by
+`AuthContext` (the stored account), `SettingsScreen` and `SkinManagerScreen`. A read keyed by
+something else (the avatar's texture, per account) or that is not IPC (the Firestore
+catalogue in `useServers`) keeps its own effect, with the same four rules.
 
 ### Data Sources
 
@@ -171,6 +183,8 @@ Rules when touching auth ([ADR-0007](docs/adr/0007-encrypt-account-secrets-with-
 ### Firestore → Main Process Bridge
 
 Firestore data is fetched in the renderer, then sent to main via `distro:setServerData`. DistributionManager.setServerData() wraps it as `{ rawServer }`.
+
+The document is checked twice, by the same rules: `firestoreService.toModpack` turns it into a `Modpack` for the UI (an optional field of the wrong type is dropped, a missing `name` becomes the id), and `DistributionManager.parseServerData` checks main's own subset again, since nothing that crosses the IPC boundary is trusted.
 
 The renderer re-reads the modpack document in `useServers.prepareLaunch()` **when PLAY is pressed**, not when the list loads — otherwise a player who left the launcher open would never see a `maintenance` flag raised afterwards, nor a manifest published in the meantime. `LaunchManager` checks the flag again as defence in depth.
 
@@ -237,7 +251,7 @@ Invariants to preserve when touching this flow:
 
 Every callback in the chain takes **one object**, `{ current, total, message }`. The managers underneath do not know which launch phase they are serving, so they never set `type`; `LaunchManager` is the only layer that adds it. `MinecraftDownloadManager` also carries its own sub-phase as `phase`.
 
-`launch:progress` carries `LaunchProgress` (`src/shared/launchProgress.ts`), a **discriminated union** on `type`: one event shape per group below, and `LaunchManager`'s callback is typed against it. A preparation phase is a `PhaseType`, and `PHASE_RANGE` / `PHASE_LABEL` in `renderer/services/launchPhases.ts` are `Record<PhaseType, …>`, so a phase without a slice **does not compile**. It still needs a matching `case` in `LaunchContext`'s switch (checked by hand until the renderer is TypeScript), otherwise the step runs but the bar freezes on the previous message. Current set:
+`launch:progress` carries `LaunchProgress` (`src/shared/launchProgress.ts`), a **discriminated union** on `type`: one event shape per group below, and `LaunchManager`'s callback is typed against it. A preparation phase is a `PhaseType`, and `PHASE_RANGE` / `PHASE_LABEL` in `renderer/services/launchPhases.ts` are `Record<PhaseType, …>`, so a phase without a slice **does not compile**. Nor does a `type` without its `case` in `LaunchContext`'s switch, whose `default` assigns the event to `never` — without the case the step would run with the bar frozen on the previous message. Current set:
 
 | Group | Types |
 |-------|-------|
@@ -248,7 +262,7 @@ Every callback in the chain takes **one object**, `{ current, total, message }`.
 
 Adding a phase means touching `PhaseType`, `LaunchManager`, `LaunchContext` **and** `launchPhases.ts` in the same change. A `type` must appear **exactly once** in the flow — `PHASE_RANGE` maps it to a fixed slice, so a repeated type makes the bar run backwards ([ADR-0005](docs/adr/0005-single-progress-contract-and-phase-map.md)). `game_startup` is the one deliberate exception: it repeats, and it has **no** slice in `PHASE_RANGE` because it drives the last step on its own 0–100 scale after the preparation is at 100% (`STARTUP_LABEL` in `launchPhases.ts`).
 
-The player sees **one** bar, `components/launch/ProgressBar.jsx`, split into the four points of `LAUNCH_STEPS` (Verificar, Descargar, Preparar, Iniciar): the stretch of the step in progress fills 0–100 and the ones behind it are checked. The preparation steps are **cuts across `PHASE_RANGE`** (`until`, which must fall on a phase boundary), not weights of their own, and `launchStep(type, percent)` places a phase by the step its floor falls in — so a new phase with a slice joins a step without a third table. Phases a launch skips just never arrive; their step is checked when a later one starts. `progress.type` is what places an event on the tracker; `progress.phase` is only the header text.
+The player sees **one** bar, `components/launch/ProgressBar.tsx`, split into the four points of `LAUNCH_STEPS` (Verificar, Descargar, Preparar, Iniciar): the stretch of the step in progress fills 0–100 and the ones behind it are checked. The preparation steps are **cuts across `PHASE_RANGE`** (`until`, which must fall on a phase boundary), not weights of their own, and `launchStep(type, percent)` places a phase by the step its floor falls in — so a new phase with a slice joins a step without a third table. Phases a launch skips just never arrive; their step is checked when a later one starts. `progress.type` is what places an event on the tracker; `progress.phase` is only the header text.
 
 #### Mod loader installation
 
@@ -299,7 +313,7 @@ The data shapes main reads from disk and the network live in `src/main/types/` �
 Tailwind CSS v4 with `@theme` block in `App.css`. Key custom tokens:
 
 - Colors: `accent-green` (#4ade80), `accent-blue`, `accent-wine` (#7a1f3d, the kill button's hover), `accent-orange` (#d87943, the Microsoft sign-in button's hover and JUGAR's default), `bg-deep` (#050505), `panel-steel`, `sidebar-bg`, `sidebar-border`, `card-hover`
-- Fonts: `font-inter` only. **The theme key is `--font-inter`, not `--font-family-inter`** — Tailwind v4 namespaces families under `--font-*`, and a token in a namespace that does not exist generates no class and reports nothing. Inter is **self-hosted** through `@fontsource-variable/inter` (imported in `main.jsx`, family name `'Inter Variable'`); never reintroduce a CDN `@import`, `style-src` blocks it
+- Fonts: `font-inter` only. **The theme key is `--font-inter`, not `--font-family-inter`** — Tailwind v4 namespaces families under `--font-*`, and a token in a namespace that does not exist generates no class and reports nothing. Inter is **self-hosted** through `@fontsource-variable/inter` (imported in `main.tsx`, family name `'Inter Variable'`); never reintroduce a CDN `@import`, `style-src` blocks it
 - Animation: `animate-blink` (cursor blink), `animate-fade-in-up` (modpack logo and JUGAR on mount, pair it with `motion-reduce:animate-none`). The background crossfade is a plain opacity/scale transition in `DynamicBackground`, not a keyframe
 
 UI follows dark glassmorphism, in two flavours:
@@ -307,11 +321,11 @@ UI follows dark glassmorphism, in two flavours:
 - **Opaque surfaces** (dropdowns): `bg-[rgba(20,20,22,0.95)] backdrop-blur-[20px] border border-white/10`
 - **Status toasts are the one light surface**: a tinted card per type (`bg-red-100`/`green-100`/`blue-100` with the matching border), a round badge with the icon, dark text, a close button and a countdown bar whose duration comes from `StatusContext` (`toast-timer` keyframe in `App.css`), so bar and timer cannot drift apart
 - **Over the banner** (launch tracker, "Mostrar Logs"): `bg-black/35 backdrop-blur-md border border-white/10`, since they sit on artwork with no scrim behind them
-- **The modal** (`components/common/Modal.jsx`): panel at `bg-[rgba(18,18,20,0.55)] backdrop-blur-[28px] backdrop-saturate-150` over an overlay that is only `bg-black/25` with **no blur of its own**. `backdrop-filter` blurs everything painted behind the element, the overlay's background included, so putting a solid scrim on the overlay leaves the panel blurring a flat wash and the glass disappears. Extra header controls go in its `actions` prop (the log viewer's Copiar/Guardar)
+- **The modal** (`components/common/Modal.tsx`): panel at `bg-[rgba(18,18,20,0.55)] backdrop-blur-[28px] backdrop-saturate-150` over an overlay that is only `bg-black/25` with **no blur of its own**. `backdrop-filter` blurs everything painted behind the element, the overlay's background included, so putting a solid scrim on the overlay leaves the panel blurring a flat wash and the glass disappears. Extra header controls go in its `actions` prop (the log viewer's Copiar/Guardar)
 
-The window is **frameless** (`frame: false`): `components/common/TitleBar.jsx` is the title bar, a
+The window is **frameless** (`frame: false`): `components/common/TitleBar.tsx` is the title bar, a
 drag region (`[-webkit-app-region:drag]`, buttons opt out with `no-drag`) that sits at `z-[60]`,
-above the modal overlay, so the window stays movable and closable with a dialog open. `App.jsx`
+above the modal overlay, so the window stays movable and closable with a dialog open. `App.tsx`
 gives it the first row and the screens fill the rest — size screens with `h-full`/`w-full`,
 **never `h-screen`**, or they overflow the window by the bar's height. The Microsoft sign-in
 window keeps its native frame.
@@ -325,7 +339,7 @@ bar came to cover JUGAR and its kill button, and how the logo got pinned at 110p
 "Mostrar Logs" lives outside the column, in the bottom-left corner next to the sidebar.
 
 The brand logo (raccoon + "NONAME LAUNCHER", white on transparent) is
-`assets/imgs/nonamelauncher-logo.png`, rendered through `components/common/AppLogo.jsx` on the
+`assets/imgs/nonamelauncher-logo.png`, rendered through `components/common/AppLogo.tsx` on the
 loading and login screens and the home screen with no modpack selected; size it with a width. The window/app icon is still `resources/icon.png`.
 
 ## Environment Variables
@@ -344,10 +358,11 @@ VITE_FIREBASE_PROJECT_ID=...
 - All UI text is in **Spanish**; logs and code identifiers in English
 - Managers are static classes (no instantiation)
 - IPC channel names use colon notation: `category:action`
-- The avatar is drawn from the worn skin texture (`components/common/SkinHead.jsx`, CSS only); minotar.net is gone ([ADR-0014](docs/adr/0014-skins-through-main-as-data-urls.md))
+- The avatar is drawn from the worn skin texture (`components/common/SkinHead.tsx`, CSS only); minotar.net is gone ([ADR-0014](docs/adr/0014-skins-through-main-as-data-urls.md))
 - `usersAllowed` in Firestore filters by Minecraft **username** (not UUID)
-- **New files are TypeScript** (`.ts`/`.tsx`, `strict`), [ADR-0015](docs/adr/0015-incremental-typescript-migration.md). Existing `.js`/`.jsx` files are converted one at a time by the migration (`git mv` plus types, no refactor in the same commit); `allowJs` lets both live together, and JavaScript is not type-checked
-- Indentation: 4 spaces in `src/main/{managers,utils,windows,testing,types}`, 2 spaces in the files at the root of `src/main` (`index`, `constants`, `env.d.ts`), `src/main/ipc`, `src/preload`, `src/shared` and the whole renderer — for `.ts`/`.tsx` exactly as for `.js`/`.jsx`. Match the file you are editing
+- **Everything under `src/` is TypeScript** (`.ts`/`.tsx`), [ADR-0015](docs/adr/0015-incremental-typescript-migration.md): `strict` plus `noUncheckedIndexedAccess`, and no `allowJs`, so a `.js` file there does not even compile. An index that may be missing (a regex group, a split, a list from a manifest) gets a guard or a default, not a `!`; there is no `any`, `@ts-expect-error` or non-null assertion in the tree, and the few `as unknown as` say why next to them
+- In the renderer, a `catch` reads what it caught through `services/errors`: `errorMessage(err, fallback)` for the text and `isTerminalAuthError(err)` for "the session is gone", never `err.message` or `err.code` on an `unknown`
+- Indentation: 4 spaces in `src/main/{managers,utils,windows,testing,types}`, 2 spaces in the files at the root of `src/main` (`index`, `constants`, `env.d.ts`), `src/main/ipc`, `src/preload`, `src/shared` and the whole renderer. Match the file you are editing
 - Error codes are shared constants in `src/shared/errorCodes.ts`, never inline strings, and main throws them as `LauncherError`
 
 ## Implementation Principles
@@ -430,7 +445,6 @@ Nothing app-side is still open from the 2026-09-17 audit; B1 (publishing) is in 
 - `.env` is not bundled into the packaged app and nothing reads it at runtime. Anything the main process needs from it goes through a `define` in `electron.vite.config.mjs`, the way `__APP_VERSION__` and `__MICROSOFT_CLIENT_ID__` are done (declare the global in `eslint.config.mjs` and in the matching `env.d.ts` too).
 - Only packages the **main process** `require`s at runtime belong in `dependencies` (`fs-extra`, `helios-core`, `helios-distribution-types`, `winston`) — `externalizeDepsPlugin` leaves exactly those out of the bundle and electron-builder ships them. Build-only tooling goes in `devDependencies`. `pnpm audit --prod` should stay at 0.
 - The working tree is CRLF (`core.autocrlf=true`). Scripted edits must match `\r\n`, and a `\uXXXX` escape typed into a tool call can arrive as the literal character — check regexes like `/^\uFEFF/` after writing them.
-- The TypeScript migration (TODO P5) does **not** depend on the ESM migration: electron-vite still emits the sandboxed preload as CJS from a `.ts` source.
 - TypeScript is pinned to **6.0.x** (`~6.0.3`): `typescript-eslint` 8 supports `<6.1`, and TypeScript 7 (the native compiler, `latest` on npm) has no API it can use yet. Do not bump it on its own. TypeScript 6 also defaults `types` to `[]`, which is why both tsconfigs list theirs explicitly (`node` for main, `vite/client` for the renderer).
 - Build-time globals are declared twice on purpose: for ESLint in `eslint.config.mjs` and for the type checker in `src/main/env.d.ts` / `src/renderer/src/env.d.ts`. A new `define` in `electron.vite.config.mjs` goes in both, and in `vitest.config.mjs` if tested code reads it. `window.electronAPI` is typed in the renderer's `env.d.ts` as the contract's `ElectronAPI`.
 - The renderer's entry is `index.html` in its `root` (`src/renderer`), found by vite on its own. Do not add `build.rollupOptions.input` back: written as `./src/renderer/index.html` it resolved against that root, the dev dependency scan failed, and deps were pre-bundled on the fly with two copies of React ("Invalid hook call"). vite 8 bundles with Rolldown; `rollupOptions` is only an alias of `rolldownOptions` now.
@@ -438,7 +452,7 @@ Nothing app-side is still open from the 2026-09-17 audit; B1 (publishing) is in 
 - The sandboxed preload (Electron 45+) can only `require('electron')`, and has no `Buffer`, `setImmediate` or Node shims. Use Web APIs there.
 - `pnpm-lock.yaml` is the only lockfile; the stale `package-lock.json` has been removed.
 - The renderer reads Firestore through `firebase/firestore/lite` (REST, no realtime, no offline queue); the initial chunk is ~1.0 MB (Firebase 13's lite build carries Firestore's BSON and vector types, which tree-shaking cannot drop). Do not import from `firebase/firestore`: it pulls the full SDK back in (~320 KB more) for nothing, since only one-off `getDoc`/`getDocs` reads are made. Lite has no request deadline, so the timeout race in `firestoreService` stays ([ADR-0009](docs/adr/0009-no-offline-mode.md)).
-- The skin manager is a **lazy chunk** (`React.lazy` in `HomeScreen`, ~900 KB minified, almost all three.js via `skinview3d`). Anything the home screen imports must not reach `skinview3d` or `skinview-utils`, or the chunk folds back into the initial bundle — that is why `SkinHead` carries its own CSS instead of importing `services/skinTextures.js`. The same holds for `SkinManagerSkeleton` (the Suspense fallback **and** the screen's own loading state, so loading is one continuous skeleton), the `SkinManagerLayout` frame it shares with the screen, `SkinCard` and `common/Spinner`, which all end up in the initial bundle. `skinview3d` pins three.js `^0.156`; check its release before bumping three on its own.
+- The skin manager is a **lazy chunk** (`React.lazy` in `HomeScreen`, ~900 KB minified, almost all three.js via `skinview3d`). Anything the home screen imports must not reach `skinview3d` or `skinview-utils`, or the chunk folds back into the initial bundle — that is why `SkinHead` carries its own CSS instead of importing `services/skinTextures.ts`. The same holds for `SkinManagerSkeleton` (the Suspense fallback **and** the screen's own loading state, so loading is one continuous skeleton), the `SkinManagerLayout` frame it shares with the screen, `SkinCard` and `common/Spinner`, which all end up in the initial bundle. `skinview3d` pins three.js `^0.156`; check its release before bumping three on its own.
 
 ## Commits
 

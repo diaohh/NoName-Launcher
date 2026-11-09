@@ -35,6 +35,7 @@ A custom Minecraft launcher built with Electron, React, and Tailwind CSS. Featur
 |-------|-----------|
 | Framework | Electron 45 |
 | Frontend | React 19, Tailwind CSS v4 |
+| Language | TypeScript 6.0 (`strict`), checked by `pnpm typecheck` |
 | Build | electron-vite, electron-builder |
 | Backend | Firebase Firestore |
 | Game Engine | [helios-core](https://github.com/dscalzi/helios-core) 2.x — signatures changed in 2.x, check `node_modules/helios-core/dist/**/*.d.ts` |
@@ -190,10 +191,10 @@ Before opening a pull request, `pnpm lint` and `pnpm typecheck` must report 0 er
 `pnpm test` must pass and `pnpm build` must compile. electron-vite strips TypeScript types
 without checking them, so `pnpm typecheck` is the only thing that does.
 
-- **The code is moving to TypeScript** ([ADR-0015](docs/adr/0015-incremental-typescript-migration.md)).
-  New files are `.ts`/`.tsx` with `strict` on; existing JavaScript is converted file by file
-  and is not type-checked until then. The main process, the preload and `src/shared` are
-  already TypeScript; the renderer is next.
+- **Everything under `src/` is TypeScript** ([ADR-0015](docs/adr/0015-incremental-typescript-migration.md)),
+  with `strict` and `noUncheckedIndexedAccess` on and no JavaScript allowed. Data from outside
+  (IPC arguments, Firestore, the manifest, Mojang) arrives as `unknown` and is narrowed by a
+  runtime check, never by a bare cast.
 - **Tests sit next to the file they cover** (`ConfigManager.test.ts` beside `ConfigManager.ts`)
   and run on node through Vitest, with `electron` replaced by a stub
   (`src/main/testing/electron.ts`). Coverage is deliberately small: a test is worth adding when
@@ -264,7 +265,7 @@ Packaged output goes to `dist/`. The application icon is `resources/icon.png` (1
 ```
 src/
 ├── main/                   # Electron main process
-│   ├── index.js            # BrowserWindow setup
+│   ├── index.ts            # BrowserWindow setup
 │   ├── managers/           # Business logic (static classes)
 │   │   ├── AuthManager     # Microsoft OAuth + Minecraft auth
 │   │   ├── ConfigManager   # Local config persistence
@@ -273,19 +274,25 @@ src/
 │   │   ├── ModLoaderManager     # Forge / Fabric installation
 │   │   ├── MinecraftDownloadManager  # Vanilla assets via helios-core
 │   │   └── SkinManager     # Mojang profile (skin, capes) + local skin vault
-│   ├── utils/              # Logger, file hashing
-│   └── ipc/                # IPC channel handlers
+│   ├── utils/              # Logger, file hashing, paths, HTTP, Maven, pack policies
+│   ├── types/              # What main reads: config.json, the pack manifest, Mojang JSON
+│   ├── windows/            # The Microsoft sign-in window
+│   └── ipc/                # IPC handlers, one typed map
 ├── preload/                # Context bridge (main ↔ renderer)
-│   └── index.js
+│   └── index.ts
 ├── shared/                 # Bundled into more than one process — must stay dependency-free
-│   ├── channels.js         # IPC channel names, read by the handlers and the preload
-│   ├── errorCodes.js       # The only source of IPC error codes
-│   └── skins.js            # Skin name limit and models, checked on both sides
+│   ├── channels.ts         # IPC channel names, read by the handlers and the preload
+│   ├── ipcContract.ts      # What every channel carries; a layer missing one does not compile
+│   ├── errorCodes.ts       # The only source of IPC error codes
+│   ├── LauncherError.ts    # The error main throws, rebuilt in the renderer
+│   ├── launchProgress.ts   # The launch:progress union
+│   ├── modpack.ts          # The Firestore modpack document
+│   └── skins.ts            # Skin name limit and models, checked on both sides
 └── renderer/src/           # React application
-    ├── App.jsx             # Root component + providers
+    ├── App.tsx             # Root component + providers
     ├── contexts/           # Auth, Launch, Servers, Status
-    ├── services/           # ipcClient, Firebase, Firestore queries, launchPhases
-    ├── hooks/              # useServers
+    ├── services/           # ipcClient, Firebase, Firestore queries, launchPhases, errors
+    ├── hooks/              # useServers, useIpcResource
     └── components/
         ├── auth/           # Login screen
         ├── common/         # Modal (portal + Escape), status message
@@ -299,7 +306,7 @@ src/
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/my-feature`)
-3. Run `pnpm lint` — the repo stays at 0 errors
+3. Run `pnpm lint`, `pnpm typecheck`, `pnpm test` and `pnpm build` — see [Contributing](#contributing) under Development
 4. Commit your changes using [Conventional Commits](https://www.conventionalcommits.org/) in English, one logical change per commit
 5. Push to the branch (`git push origin feature/my-feature`)
 6. Open a Pull Request

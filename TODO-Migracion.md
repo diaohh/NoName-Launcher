@@ -398,40 +398,85 @@ el fuente).
 
 ## Fase 6 — Renderer
 
-- [ ] **services**: `firebase` · `firestoreService` · `imagePreload` · `skinTextures`
-  (`ipcClient` y `launchPhases` ya se hicieron en la Fase 4)
-- [ ] **contexts**: `StatusContext` · `ServersContext` · `AuthContext` · `LaunchContext`
+Rama `ts/f6-f7-renderer` (08/11/2026), junto con la Fase 7. Validada a mano y commiteada el
+08/11/2026; lint, typecheck, tests y build pasan en cada commit. Las conversiones van primero y
+el refactor de `useIpcResource` despues, sobre los archivos ya tipados. `services`, `contexts` y
+`useServers` van en un solo commit: el timeout de Firestore cambia de forma
+(`FIRESTORE_TIMEOUT` → `FirestoreTimeoutError`) y `useServers`, que lo lee, queda entre ellos y
+los contexts. La conversion no añadio ningun error con `noUncheckedIndexedAccess` ni con
+`exactOptionalPropertyTypes`.
+
+- [x] **services**: `firebase` · `firestoreService` · `imagePreload` · `skinTextures`
+  (`ipcClient` y `launchPhases` ya se hicieron en la Fase 4) — 08/11/2026, `fe90a75`. Nuevo
+  `services/errors.ts` (`errorMessage`, `isTerminalAuthError`): con TS el `catch` recibe
+  `unknown` y habia ~20 `err.message || …`. El `Error` con `.code` asignado del timeout de
+  Firestore pasa a `FirestoreTimeoutError`. `ImportMetaEnv` declara las tres `VITE_FIREBASE_*`
+- [x] **`toModpack` como guarda** (venia aplazado de la Fase 4) — 08/11/2026, `fe90a75`: mismas reglas que
+  `parseServerData` en main (opcional mal tipado se descarta, `name` ausente pasa a ser el id,
+  `maintenance` por veracidad). Arregla de paso un `usersAllowed` que no fuera array: un string
+  hacia `includes` por subcadena
+- [x] **contexts**: `StatusContext` · `ServersContext` · `AuthContext` · `LaunchContext`
   (el `switch` sobre la union de progreso con comprobacion exhaustiva: `never` en el `default`)
-- [ ] **hooks**: `useServers`
-- [ ] **P3 `useIpcResource<T>`** (con `reload` y loader arbitrario), en su propio commit,
-  migrando los tres llamantes: `AuthContext`, `SettingsScreen`, `SkinManagerScreen`
-- [ ] **components** por carpeta, cada una un commit: `common` · `auth` · `home` · `launch` ·
-  `settings` · `skins` (vigilar que nada del inicio importe `skinview3d`: el chunk perezoso)
-- [ ] `App.jsx` y `main.jsx`
-- [ ] Prueba de humo de la Fase 1
+  — 08/11/2026, `fe90a75`. Cada `use*` lanza si se usa fuera de su provider (antes devolvia `undefined`)
+- [x] **hooks**: `useServers` — 08/11/2026, `fe90a75` (`CatalogueError`, `LaunchReadiness`, `ServersState`)
+- [x] **P3 `useIpcResource<T>`** (con `reload` y loader arbitrario), en su propio commit,
+  migrando los tres llamantes: `AuthContext`, `SettingsScreen`, `SkinManagerScreen` —
+  08/11/2026, `5057b29`. Devuelve `{ data, loading, failed, reload, setData }`; `onError` va por
+  `useEffectEvent` (React 19.2+), asi que el llamante pasa una flecha inline. El re-leido tras
+  un guardado fallido del gestor de skins sigue a mano (`loadSkinState` + `setData`): ese no
+  avisa al jugador si falla
+- [x] **components** por carpeta, cada una un commit: `common` · `auth` · `home` · `launch` ·
+  `settings` · `skins` (vigilar que nada del inicio importe `skinview3d`: el chunk perezoso) —
+  08/11/2026: `2fa5d33` · `eee948d` · `b7ad7c3` · `c191a1c` · `c268581` · `42bef7f`. `SkinCard` importa de `SkinContextMenu` solo un tipo (`import type`, se borra al
+  compilar). Cambios de comportamiento minimos, forzados por los tipos: `PlayButton` devuelve
+  `null` sin modpack (`HomeScreen` ya no lo pinta en ese caso), y el slider de RAM muestra vacio
+  en vez de `null` cuando el valor guardado no se puede leer
+- [x] `App.jsx` y `main.jsx` — 08/11/2026, `8ecacca`, y `index.html` apunta a `main.tsx`
+- [x] Prueba de humo de la Fase 1 — 08/11/2026, validacion manual del usuario en dev
 
 **Documentacion**
-- [ ] `AGENTS.md`: rutas del renderer, "State Management" (`useIpcResource`), Gotchas del chunk
-  perezoso
-- [ ] `TODO.md`: cerrar el item de P3
+- [x] `AGENTS.md`: rutas del renderer, "State Management" (`useIpcResource`), Gotchas del chunk
+  perezoso — 08/11/2026. Tambien el contrato de progreso (el `case` que falta ya no compila),
+  `services/errors` en Key Conventions y el doble guarda del documento en el puente Firestore
+- [x] `TODO.md`: cerrar el item de P3 — 08/11/2026
+- [x] ADR-0005 y ADR-0008: addendum fechado — 08/11/2026 (el `switch` exhaustivo; el hook
+  existe y por que `useServers` no lo usa)
 
 ---
 
 ## Fase 7 — Cierre de la migracion
 
-- [ ] Ningun `.js`/`.jsx` en `src/` → quitar `allowJs`
-- [ ] Revisar los `any` y `@ts-expect-error` que hayan quedado, con un motivo escrito en cada uno
-- [ ] Endurecer `tsconfig` si compensa (`noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`)
-- [ ] `eslint.config.mjs` sin los bloques de JS que ya no apliquen
+- [x] Ningun `.js`/`.jsx` en `src/` → quitar `allowJs` — 08/11/2026, `7e2f623`, de los dos tsconfig (y
+  `checkJs`). `vitest.config.mjs` solo incluye `*.test.{ts,tsx}`
+- [x] Revisar los `any` y `@ts-expect-error` que hayan quedado, con un motivo escrito en cada uno
+  — 08/11/2026, `947c6d3`: no queda ninguno, ni `!`. Quedan 4 `as unknown as` en main; los dos de
+  `ConfigManager` que no lo tenian llevan ahora su motivo
+- [x] Endurecer `tsconfig` si compensa (`noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`)
+  — 08/11/2026, `947c6d3`, medido con el renderer ya convertido:
+  - **`noUncheckedIndexedAccess` si**: 16 sitios en main y 6 en tests, arreglados con guardas o
+    valores por defecto, sin `!`. Sin cambio de comportamiento salvo `MavenUtils`: una
+    coordenada sin sus tres partes lanzaba un `TypeError` de `path.join` (`UNKNOWN`) y ahora
+    un `LauncherError` `MODLOADER_FAILED` con el nombre. `MinecraftDownloadManager` lee los
+    grupos de helios con `Object.values(…).flat()` (mismo orden que el spread de antes)
+  - **`exactOptionalPropertyTypes` no**: 8 sitios, todos "clave a `undefined`" frente a "clave
+    ausente", que aqui nadie distingue, y choca con tipos de Electron. Motivo en ADR-0015
+- [x] `eslint.config.mjs` sin los bloques de JS que ya no apliquen — 08/11/2026, `7e2f623`: globs solo
+  `.ts`/`.tsx`, fuera `ecmaVersion`/`sourceType`/`ecmaFeatures` (los pone el parser de TS) y el
+  `no-unused-vars` del nucleo en los bloques por zona
 - [ ] Prueba de humo completa sobre el instalador
+- [ ] PR `ts/f6-f7-renderer → migration`
 - [ ] PR `migration → main`, subir la version en `package.json` y publicar la release
 
 **Documentacion**
-- [ ] `AGENTS.md`: barrido final de rutas, extensiones, comandos y Gotchas (la nota de "la
-  migracion a TS no depende de ESM" se va)
-- [ ] `README.md`: stack y contribucion
-- [ ] ADR-0015 → `Accepted` con un addendum de lo que cambio respecto al plan
-- [ ] `TODO.md`: cerrar "Migracion a TypeScript"
+- [x] `AGENTS.md`: barrido final de rutas, extensiones, comandos y Gotchas (la nota de "la
+  migracion a TS no depende de ESM" se va) — 08/11/2026. Tambien la nota de tests `.test.js`, y
+  el parrafo de la migracion dice que solo queda la release (se borra en la Fase 8)
+- [x] `README.md`: stack y contribucion — 08/11/2026. Tambien el arbol de "Project Structure",
+  que seguia en `.js` desde la Fase 5
+- [x] ~~ADR-0015 → `Accepted`~~ (nacio `Accepted` en la Fase 3) con un addendum de lo que cambio
+  respecto al plan — 08/11/2026
+- [ ] `TODO.md`: cerrar "Migracion a TypeScript" — con la release. Actualizado ya su estado, la
+  nota de ESM que decia que iba con ella y la ruta de `StartupTracker`, que seguia en `.js`
 
 ---
 
