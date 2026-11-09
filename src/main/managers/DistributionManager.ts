@@ -7,7 +7,7 @@ import { compileIgnore, resolvePolicy, strictRoots } from '../../shared/PackPoli
 import { isSafeRelativePath, resolveInside } from '../utils/PathUtils'
 import { ERROR_CODE } from '../../shared/errorCodes'
 import { LauncherError } from '../../shared/LauncherError'
-import { isSha256Hex } from '../../shared/guards'
+import { isPlainObject, isSha256Hex, nonEmptyText, type Brand, type Sha256Hex } from '../../shared/guards'
 import type { StepProgress } from '../../shared/launchProgress'
 import type { ManifestPointer, ModpackRam } from '../../shared/modpack'
 import type { ManifestFile, PackManifest } from '../types/manifest'
@@ -21,15 +21,15 @@ const toMB = (bytes: number) => (bytes / 1024 / 1024).toFixed(1)
 const STATE_FILE = '.nnl-state.json'
 const STATE_VERSION = 1
 
-const isPlainObject = (value: unknown): value is Record<string, unknown> =>
-    value != null && typeof value === 'object' && !Array.isArray(value)
+/** A modpack id checked to be one safe path segment: it names `instances/<id>`. */
+export type ModpackId = Brand<'ModpackId'>
 
 /**
  * The part of the modpack document main reads (`Modpack` in `shared/modpack` is the whole
  * of it), checked by `parseServerData`.
  */
 export interface ServerData {
-    id: string
+    id: ModpackId
     name: string
     maintenance: boolean
     maintenanceMessage: string | null
@@ -46,10 +46,16 @@ export interface SelectedServer {
 
 /** What the launcher wrote into an instance: per path, the hash it verified and the file's stat. */
 interface StateEntry {
-    hash: string
+    hash: Sha256Hex
     size: number
     mtimeMs: number
 }
+
+const isStateEntry = (value: unknown): value is StateEntry =>
+    isPlainObject(value)
+    && isSha256Hex(value.hash)
+    && typeof value.size === 'number'
+    && typeof value.mtimeMs === 'number'
 
 /** `seed` files the launcher never wrote are kept with a null entry until they are cleaned up. */
 type InstanceState = Record<string, StateEntry | null>
@@ -94,24 +100,22 @@ class DistributionManager {
      */
     static parseServerData(serverData: unknown): ServerData {
         const data = isPlainObject(serverData) ? serverData : {}
-        const id = data.id
         // The id becomes a directory name, so it is checked before anything is stored.
-        this.instanceDirFor(id)
+        const id = this.parseModpackId(data.id)
 
-        const text = (value: unknown) => (typeof value === 'string' && value.length > 0 ? value : null)
         const ram = (value: unknown) => (typeof value === 'string' && ConfigManager.parseRamToMB(value) != null ? value : undefined)
 
         const manifest = data.manifest
         const java = isPlainObject(data.java) ? data.java : {}
 
         return {
-            id: id as string,
-            name: text(data.name) ?? (id as string),
+            id,
+            name: nonEmptyText(data.name) ?? id,
             maintenance: Boolean(data.maintenance),
-            maintenanceMessage: text(data.maintenanceMessage),
+            maintenanceMessage: nonEmptyText(data.maintenanceMessage),
             // The hash names the manifest's cache file: anything but a sha256 is dropped here.
             manifest: isPlainObject(manifest) && typeof manifest.url === 'string' && isSha256Hex(manifest.hash)
-                ? { url: manifest.url, hash: manifest.hash, version: text(manifest.version) ?? undefined }
+                ? { url: manifest.url, hash: manifest.hash, version: nonEmptyText(manifest.version) ?? undefined }
                 : null,
             java: { minRam: ram(java.minRam), maxRam: ram(java.maxRam) }
         }
@@ -124,13 +128,24 @@ class DistributionManager {
     }
 
     /**
-     * `instances/<id>`. The id arrives from the renderer (it is the Firestore document id),
-     * so it must be exactly one safe path segment.
+     * The id arrives from the renderer (it is the Firestore document id) and names the
+     * instance directory, so it must be exactly one safe path segment.
+     *
+     * @throws {LauncherError} MODPACK_INVALID
      */
-    static instanceDirFor(id: unknown): string {
-        if (typeof id !== 'string' || id.includes('/') || !isSafeRelativePath(id)) {
+    static parseModpackId(id: unknown): ModpackId {
+        if (!this.isModpackId(id)) {
             throw new LauncherError(ERROR_CODE.MODPACK_INVALID, `El identificador del modpack no es valido: ${JSON.stringify(id)}`)
         }
+        return id
+    }
+
+    static isModpackId(id: unknown): id is ModpackId {
+        return isSafeRelativePath(id) && !id.includes('/')
+    }
+
+    /** `instances/<id>`. */
+    static instanceDirFor(id: ModpackId): string {
         return resolveInside(ConfigManager.getInstanceDirectory(), id)
     }
 
@@ -142,15 +157,21 @@ class DistributionManager {
      */
     static readState(instanceDir: string): InstanceState {
         const statePath = path.join(instanceDir, STATE_FILE)
+        let raw: unknown
         try {
-            const state = fs.readJsonSync(statePath)
-            if (state.version !== STATE_VERSION) return {}
-            // The launcher's own file. An entry that is not what it wrote can only fail the
-            // comparison in `planSync`, which costs a re-hash, never a wrong answer.
-            return (state.files || {}) as InstanceState
+            raw = fs.readJsonSync(statePath)
         } catch {
             return {}
         }
+        if (!isPlainObject(raw) || raw.version !== STATE_VERSION || !isPlainObject(raw.files)) return {}
+
+        // The launcher's own file, but on the player's disk. An entry that is not what it wrote
+        // is left out, which costs that file a re-hash in `planSync`, never a wrong answer.
+        const files: InstanceState = {}
+        for (const [relPath, entry] of Object.entries(raw.files)) {
+            if (entry === null || isStateEntry(entry)) files[relPath] = entry
+        }
+        return files
     }
 
     static writeState(instanceDir: string, files: InstanceState): void {
@@ -164,7 +185,7 @@ class DistributionManager {
         }
     }
 
-    static stateEntry(filePath: string, hash: string): StateEntry {
+    static stateEntry(filePath: string, hash: Sha256Hex): StateEntry {
         const stats = fs.statSync(filePath)
         return { hash, size: stats.size, mtimeMs: stats.mtimeMs }
     }

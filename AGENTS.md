@@ -83,6 +83,7 @@ Shared (src/shared/, bundled into all three)
 ├── ipcContract.ts (what every channel carries)
 ├── launchProgress.ts (the launch:progress union)
 ├── PackPolicy.ts (manifest policies and ignore globs, also run by tools/pack-publish)
+├── guards.ts (shared checks and branded types: Sha256Hex, SkinId)
 └── modpack.ts · skins.ts
 ```
 
@@ -371,6 +372,8 @@ VITE_FIREBASE_PROJECT_ID=...
 - The avatar is drawn from the worn skin texture (`components/common/SkinHead.tsx`, CSS only); minotar.net is gone ([ADR-0014](docs/adr/0014-skins-through-main-as-data-urls.md))
 - `usersAllowed` in Firestore filters by Minecraft **username** (not UUID)
 - **Everything under `src/` is TypeScript** (`.ts`/`.tsx`), [ADR-0015](docs/adr/0015-incremental-typescript-migration.md): `strict` plus `noUncheckedIndexedAccess`, and no `allowJs`, so a `.js` file there does not even compile. An index that may be missing (a regex group, a split, a list from a manifest) gets a guard or a default, not a `!`; there is no `any`, `@ts-expect-error` or non-null assertion in the tree, and the few `as unknown as` say why next to them
+- **Untrusted values that end up in a path carry a brand** (`Brand<…>` in `src/shared/guards.ts`): `Sha256Hex` (manifest and file hashes), `SkinId` (vault ids) and `ModpackId` (`DistributionManager`). The guard (`isSha256Hex`, `isSkinId`, `parseModpackId`) is the only way to get one, so a function that takes it cannot receive a value nobody checked. Brands stay in main where the contract carries a `string`. Do not brand everything: paths and usernames stay `string`. The common checks (`isPlainObject`, `isOptional`, `nonEmptyText`) live in the same file — never copy them into a module again
+- **Closed unions get exhaustive switches**: a `default` that assigns to `never` (`LaunchContext`, `ModLoaderManager.unsupportedLoader`), so a new member does not compile until every switch handles it. The manifest's `loader.type` is `'fabric' | 'forge'`, refused otherwise by `assertShape` (`UNSUPPORTED_MODLOADER`)
 - In the renderer, a `catch` reads what it caught through `services/errors`: `errorMessage(err, fallback)` for the text and `isTerminalAuthError(err)` for "the session is gone", never `err.message` or `err.code` on an `unknown`
 - Indentation: 4 spaces in `src/main/{managers,utils,windows,testing,types}`, 2 spaces in the files at the root of `src/main` (`index`, `constants`, `env.d.ts`), `src/main/ipc`, `src/preload`, `src/shared` and the whole renderer. Match the file you are editing
 - Error codes are shared constants in `src/shared/errorCodes.ts`, never inline strings, and main throws them as `LauncherError`
@@ -412,8 +415,8 @@ The mechanisms for this exist and are the ones to reuse (branch `fix/p1-hardenin
 
 - **Paths**: `PathUtils.resolveInside(base, rel)` throws `PATH_OUTSIDE_BASE`, and
   `isSafeRelativePath` is the manifest-path rule. `ManifestManager.assertShape` rejects unsafe
-  paths with `MANIFEST_INVALID`, `DistributionManager.instanceDirFor(id)` validates modpack ids
-  (`MODPACK_INVALID`), and `ConfigManager.getVersionDirectory/getVersionJsonPath` is the only way
+  paths with `MANIFEST_INVALID`, `DistributionManager.parseModpackId(id)` validates modpack ids
+  (`MODPACK_INVALID`) and is the only source of the `ModpackId` that `instanceDirFor` takes, and `ConfigManager.getVersionDirectory/getVersionJsonPath` is the only way
   to build `versions/<id>`
 - **Network**: `HttpUtils.fetchWithTimeout(url, what, { timeoutMs })` for JSON/text requests
   (`NETWORK_TIMEOUT` / `NETWORK_ERROR`); files still go through `helios-core/dl`

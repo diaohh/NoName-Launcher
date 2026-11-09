@@ -1,5 +1,6 @@
 import type { ManifestPointer } from '../../shared/modpack'
 import type { FilePolicy, PolicyRule } from '../../shared/PackPolicy'
+import type { Sha256Hex } from '../../shared/guards'
 
 /**
  * The pack manifest published to the CDN (docs/manifest.md), read by `ManifestManager` and
@@ -13,14 +14,16 @@ export interface ManifestFile {
     /** Relative to the instance, POSIX separators, checked by `isSafeRelativePath`. */
     path: string
     /** Lowercase hex sha256. Mandatory: a missing hash is an invalid manifest. */
-    hash: string
+    hash: Sha256Hex
     size: number
     policy?: FilePolicy
 }
 
+/** The loaders a manifest can declare; `ManifestManager.assertShape` refuses any other. */
+export type LoaderType = 'fabric' | 'forge'
+
 export interface ManifestLoader {
-    /** `fabric`, `forge`; anything else is refused when the loader is installed. */
-    type: string
+    type: LoaderType
     version?: string
     /** Forge's installer jar, published as an ordinary file of the pack. */
     installer?: { path: string }

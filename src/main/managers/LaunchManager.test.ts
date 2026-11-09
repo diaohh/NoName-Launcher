@@ -4,7 +4,7 @@ import LaunchManager from './LaunchManager'
 import ConfigManager from './ConfigManager'
 import { createTempLauncher, type TempLauncher } from '../testing/tempLauncher'
 import type { ModpackRam } from '../../shared/modpack'
-import type { SelectedServer } from './DistributionManager'
+import DistributionManager, { type SelectedServer } from './DistributionManager'
 
 /** Mojang's name for the platform the tests run on, and one that is never it. */
 const CURRENT_OS = ({ win32: 'windows', darwin: 'osx', linux: 'linux' } as Partial<Record<string, string>>)[process.platform]
@@ -144,7 +144,7 @@ describe('LaunchManager.buildLaunchCommand', () => {
 
     describe('RAM', () => {
         const server = (java: ModpackRam): SelectedServer => ({
-            rawServer: { id: 'my-pack', name: 'My pack', maintenance: false, maintenanceMessage: null, manifest: null, java }
+            rawServer: { id: DistributionManager.parseModpackId('my-pack'), name: 'My pack', maintenance: false, maintenanceMessage: null, manifest: null, java }
         })
 
         it('uses the modpack\'s allocation by default', async () => {

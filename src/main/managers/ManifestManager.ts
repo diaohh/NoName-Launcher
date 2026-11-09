@@ -8,17 +8,14 @@ import { isSafeRelativePath } from '../utils/PathUtils'
 import { fetchWithTimeout } from '../utils/HttpUtils'
 import { ERROR_CODE, type ErrorCode } from '../../shared/errorCodes'
 import { LauncherError } from '../../shared/LauncherError'
-import { isSha256Hex } from '../../shared/guards'
+import { isOptional, isPlainObject, isSha256Hex, type Sha256Hex } from '../../shared/guards'
 import type { ManifestPointer, PackManifest } from '../types/manifest'
 
 const logger = Logger.getLogger('ManifestManager')
 
 const SUPPORTED_FORMAT_VERSION = 1
 
-const isPlainObject = (value: unknown): value is Record<string, unknown> =>
-    value != null && typeof value === 'object' && !Array.isArray(value)
-
-const isOptional = (value: unknown, check: (value: unknown) => boolean) => value === undefined || check(value)
+const LOADER_TYPES: readonly unknown[] = ['fabric', 'forge']
 
 const isPolicy = (value: unknown) => (POLICIES as readonly unknown[]).includes(value)
 
@@ -54,11 +51,11 @@ class ManifestManager {
     }
 
     /**
-     * The hash comes from the Firestore document. It is checked here, where it becomes a path,
-     * and not only where it arrives: `fetch` deletes a cached file whose hash does not match,
-     * and `"../config"` would have named `config.json`.
+     * The hash comes from the Firestore document, and the type only takes one `isSha256Hex`
+     * passed. It is still checked here, where it becomes a path: `fetch` deletes a cached file
+     * whose hash does not match, and `"../config"` would have named `config.json`.
      */
-    static cachePath(hash: string): string {
+    static cachePath(hash: Sha256Hex): string {
         if (!isSha256Hex(hash)) {
             throw this.manifestError(ERROR_CODE.MANIFEST_INVALID, `El hash del manifest no es un sha256 valido: ${JSON.stringify(hash)}`)
         }
@@ -123,6 +120,13 @@ class ManifestManager {
                 && isOptional(loader.version, version => typeof version === 'string')
                 && isOptional(loader.installer, installer => isPlainObject(installer) && typeof installer.path === 'string')
             if (!valid) throw invalid('El manifest declara un "loader" invalido')
+            // Refused here rather than at install time, after every file had been downloaded.
+            if (!LOADER_TYPES.includes(loader.type)) {
+                throw this.manifestError(
+                    ERROR_CODE.UNSUPPORTED_MODLOADER,
+                    `El mod loader "${loader.type}" no esta soportado por este launcher`
+                )
+            }
             if (isPlainObject(loader.installer)) paths.push(loader.installer.path)
         }
 

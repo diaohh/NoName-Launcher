@@ -5,6 +5,7 @@ import { dialog, shell, type BrowserWindow } from 'electron'
 import { Channels } from '../../shared/channels'
 import { ERROR_CODE } from '../../shared/errorCodes'
 import { LauncherError } from '../../shared/LauncherError'
+import { isPlainObject } from '../../shared/guards'
 import type { FileFilter, OpenFileOptions } from '../../shared/ipcContract'
 import type { InvokeHandlers } from './result'
 import ConfigManager from '../managers/ConfigManager'
@@ -39,9 +40,6 @@ const GAME_HEIGHT: IntegerRange = { min: 480, max: 16384 }
 const MAX_DIALOG_TITLE = 120
 const MAX_DIALOG_FILTERS = 10
 const DIALOG_EXTENSION = /^(\*|[a-z0-9]{1,16})$/i
-
-const isPlainObject = (value: unknown): value is Record<string, unknown> =>
-  value != null && typeof value === 'object' && !Array.isArray(value)
 
 /**
  * Everything below arrives from the renderer and ends up in config.json and, from there, in

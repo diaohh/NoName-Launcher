@@ -8,8 +8,9 @@ import { resolveInside } from '../utils/PathUtils'
 import { fetchWithTimeout } from '../utils/HttpUtils'
 import { ERROR_CODE } from '../../shared/errorCodes'
 import { LauncherError } from '../../shared/LauncherError'
+import { isPlainObject } from '../../shared/guards'
 import type { StepProgress } from '../../shared/launchProgress'
-import type { ManifestLoader } from '../types/manifest'
+import type { LoaderType, ManifestLoader } from '../types/manifest'
 
 const logger = Logger.getLogger('ModLoaderManager')
 
@@ -17,8 +18,13 @@ const FABRIC_META_URL = 'https://meta.fabricmc.net'
 
 type ProgressCallback = (progress: StepProgress) => void
 
-const isPlainObject = (value: unknown): value is Record<string, unknown> =>
-    value != null && typeof value === 'object' && !Array.isArray(value)
+/** What a pack runs on: a loader the manifest declares, or none. */
+export type ModLoaderType = LoaderType | 'vanilla'
+
+/** The `default` of an exhaustive switch: a new loader does not compile until it has a case. */
+function unsupportedLoader(loaderType: never): never {
+    throw new LauncherError(ERROR_CODE.UNSUPPORTED_MODLOADER, `El mod loader "${String(loaderType)}" no esta soportado por este launcher`)
+}
 
 /**
  * Mod loader knowledge lives here and nowhere else.
@@ -28,15 +34,17 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
  */
 class ModLoaderManager {
 
-    static detectModLoader(loader: ManifestLoader | undefined): string {
-        return loader?.type || 'vanilla'
+    static detectModLoader(loader: ManifestLoader | undefined): ModLoaderType {
+        return loader?.type ?? 'vanilla'
     }
 
     static getVersionString(loader: ManifestLoader | undefined, minecraftVersion: string): string {
-        switch (this.detectModLoader(loader)) {
+        const loaderType = this.detectModLoader(loader)
+        switch (loaderType) {
             case 'fabric': return `fabric-loader-${loader?.version}-${minecraftVersion}`
             case 'forge': return `${minecraftVersion}-forge-${loader?.version}`
-            default: return minecraftVersion
+            case 'vanilla': return minecraftVersion
+            default: return unsupportedLoader(loaderType)
         }
     }
 
@@ -45,7 +53,7 @@ class ModLoaderManager {
     }
 
     static isModLoaderInstalled(loader: ManifestLoader | undefined, minecraftVersion: string): boolean {
-        if (!loader || this.detectModLoader(loader) === 'vanilla') return true
+        if (!loader) return true
         if (!loader.version) return false
         return fs.existsSync(this.versionJsonPath(this.getVersionString(loader, minecraftVersion)))
     }
@@ -58,16 +66,15 @@ class ModLoaderManager {
         instanceDir: string,
         progressCallback?: ProgressCallback
     ): Promise<true | null> {
-        const loaderType = this.detectModLoader(loader)
-        logger.info(`Installing mod loader: ${loaderType} ${loader?.version || ''}`)
+        logger.info(`Installing mod loader: ${this.detectModLoader(loader)} ${loader?.version || ''}`)
 
-        if (!loader || loaderType === 'vanilla') return null
+        if (!loader) return null
 
+        const loaderType = loader.type
         switch (loaderType) {
             case 'fabric': return await this.installFabric(loader, minecraftVersion, progressCallback)
             case 'forge': return await this.installForge(loader, minecraftVersion, javaPath, instanceDir, progressCallback)
-            default:
-                throw new LauncherError(ERROR_CODE.UNSUPPORTED_MODLOADER, `El mod loader "${loaderType}" no esta soportado por este launcher`)
+            default: return unsupportedLoader(loaderType)
         }
     }
 

@@ -73,6 +73,9 @@ Format notes:
   before touching a file. That covers `files[].path`, `policies[].path` and
   `loader.installer.path`, and every write or delete is also resolved inside the instance
   (`PathUtils.resolveInside`).
+- `loader.type` is `fabric` or `forge`. Any other value is refused when the manifest is read
+  (`UNSUPPORTED_MODLOADER`), before a single file is downloaded; a vanilla pack leaves
+  `loader` out.
 - The manifest hash is the sha256 of the **bytes** of `manifest.json`, written as UTF-8 with no
   BOM. The launcher currently hashes the decoded text, which gives the same result only for
   that encoding, so do not save the file with a BOM.

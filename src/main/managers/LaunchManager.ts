@@ -20,6 +20,7 @@ import { readLines } from '../utils/GameOutput'
 import { createStartupTracker, type StartupTracker } from '../utils/StartupTracker'
 import { ERROR_CODE } from '../../shared/errorCodes'
 import { LauncherError, errorCodeOf } from '../../shared/LauncherError'
+import { isPlainObject } from '../../shared/guards'
 import type { LaunchProgress } from '../../shared/launchProgress'
 import type { LaunchStarted, LaunchStatus } from '../../shared/ipcContract'
 import type { Account } from '../types/config'
@@ -28,9 +29,6 @@ import type { Argument, Library, Rule, VersionJson } from '../types/minecraft'
 const logger = Logger.getLogger('LaunchManager')
 
 const toMB = (bytes: number) => (bytes / 1024 / 1024).toFixed(1)
-
-const isPlainObject = (value: unknown): value is Record<string, unknown> =>
-    value != null && typeof value === 'object' && !Array.isArray(value)
 
 type ProgressCallback = (progress: LaunchProgress) => void
 
