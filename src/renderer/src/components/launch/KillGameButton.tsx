@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useLaunch } from '../../contexts/LaunchContext'
 import { useStatus } from '../../contexts/StatusContext'
 import { ipc } from '../../services/ipcClient'
+import { errorMessage } from '../../services/errors'
 import Modal from '../common/Modal'
 
 /**
@@ -25,7 +26,7 @@ export default function KillGameButton() {
       // here only takes the confirmation off the screen.
       setConfirming(false)
     } catch (err) {
-      showStatus(err.message || 'No se ha podido cerrar Minecraft', 'error')
+      showStatus(errorMessage(err, 'No se ha podido cerrar Minecraft'), 'error')
     } finally {
       setKilling(false)
     }

@@ -2,14 +2,17 @@ import { useLaunch } from '../../contexts/LaunchContext'
 import { useAuth } from '../../contexts/AuthContext'
 import { useServers } from '../../contexts/ServersContext'
 import { useStatus } from '../../contexts/StatusContext'
+import { errorMessage, isTerminalAuthError } from '../../services/errors'
 import KillGameButton from './KillGameButton'
-import { isTerminalAuthCode } from '../../../../shared/errorCodes'
 
 export default function PlayButton() {
   const { launchState, gameRunning, launch, resetState } = useLaunch()
   const { logout } = useAuth()
   const { selectedServer, prepareLaunch } = useServers()
   const { showStatus } = useStatus()
+
+  // HomeScreen only renders the button with a modpack selected.
+  if (!selectedServer) return null
 
   const isDisabled = launchState !== 'idle' && launchState !== 'error'
 
@@ -26,11 +29,11 @@ export default function PlayButton() {
       await launch()
     } catch (err) {
       console.error('Launch error:', err)
-      showStatus(err.message || 'Error al iniciar Minecraft', 'error')
+      showStatus(errorMessage(err, 'Error al iniciar Minecraft'), 'error')
 
       // Only a terminal auth code means the credentials are gone for good. A network
       // failure carries a code too, and must leave the player logged in.
-      if (isTerminalAuthCode(err.code)) {
+      if (isTerminalAuthError(err)) {
         await logout()
       }
 

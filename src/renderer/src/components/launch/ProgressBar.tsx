@@ -1,8 +1,10 @@
 import { useLaunch } from '../../contexts/LaunchContext'
-import { LAUNCH_STEPS, PHASE_LABEL, STARTUP_LABEL, launchStep } from '../../services/launchPhases'
+import { LAUNCH_STEPS, PHASE_LABEL, STARTUP_LABEL, isPhaseType, launchStep } from '../../services/launchPhases'
+
+type StepState = 'done' | 'active' | 'pending'
 
 /** The point closing a step: checked once the launch is past it. */
-function StepPoint({ state }) {
+function StepPoint({ state }: { state: StepState }) {
   if (state === 'done') {
     return (
       <span className="shrink-0 w-4 h-4 rounded-full bg-[var(--accent)] flex items-center justify-center">
@@ -22,7 +24,7 @@ function StepPoint({ state }) {
  * The stretch of bar leading to a point. A null `fill` is an indeterminate pulse: the honest
  * answer while nothing countable has arrived yet.
  */
-function Stretch({ fill }) {
+function Stretch({ fill }: { fill: number | null }) {
   return (
     <div className="flex-1 h-[5px] bg-white/10 rounded-full overflow-hidden">
       {fill != null ? (
@@ -47,19 +49,21 @@ export default function ProgressBar() {
 
   if (launchState === 'idle') return null
 
-  const starting = launchState === 'playing'
+  // The game's own startup, once the JVM is up; null while the launch is being prepared.
+  const starting = launchState === 'playing' ? startup : null
 
   // Playing with no startup to follow: it finished, or a reload found the game already up.
-  if (starting && (!startup || startup.done)) return null
+  if (launchState === 'playing' && (!starting || starting.done)) return null
 
   const step = starting
-    ? { index: LAUNCH_STEPS.length - 1, percent: startup.percent }
+    ? { index: LAUNCH_STEPS.length - 1, percent: starting.percent }
     : launchStep(progress.type, progress.percent)
 
+  // For `download` the phase is MinecraftDownloadManager's own sub-phase, already in Spanish.
   const label = starting
     ? STARTUP_LABEL
-    : PHASE_LABEL[progress.phase] ?? (progress.phase || 'Preparando...')
-  const message = starting ? startup.message : (progress.message || 'Iniciando...')
+    : (isPhaseType(progress.phase) ? PHASE_LABEL[progress.phase] : null) ?? (progress.phase || 'Preparando...')
+  const message = starting ? starting.message : (progress.message || 'Iniciando...')
 
   return (
     <div

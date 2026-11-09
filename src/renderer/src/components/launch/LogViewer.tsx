@@ -1,10 +1,11 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
-import { useLaunch } from '../../contexts/LaunchContext'
+import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react'
+import { useLaunch, type LogEntry, type LogType } from '../../contexts/LaunchContext'
 import { useStatus } from '../../contexts/StatusContext'
 import { ipc } from '../../services/ipcClient'
+import { errorMessage } from '../../services/errors'
 import Modal from '../common/Modal'
 
-const logColors = {
+const logColors: Record<LogType, string> = {
   info: 'text-accent-green/80',
   warn: 'text-yellow-400/80',
   error: 'text-red-400/80',
@@ -18,13 +19,19 @@ const AT_BOTTOM_SLACK = 24
  * The lines as plain text, with a header saying where they came from: an exported log
  * usually ends up in someone else's hands, and the launcher version is the first question.
  */
-function logsAsText(logs) {
+function logsAsText(logs: LogEntry[]): string {
   const header = `NoNameLauncher ${__APP_VERSION__} · ${new Date().toLocaleString()}`
   const lines = logs.map(log => `[${log.timestamp}] ${log.message}`)
   return [header, '', ...lines, ''].join('\n')
 }
 
-function HeaderButton({ onClick, disabled, children }) {
+interface HeaderButtonProps {
+  onClick: () => void
+  disabled: boolean
+  children: ReactNode
+}
+
+function HeaderButton({ onClick, disabled, children }: HeaderButtonProps) {
   return (
     <button
       onClick={onClick}
@@ -41,7 +48,7 @@ export default function LogViewer() {
   const { showStatus } = useStatus()
   const [visible, setVisible] = useState(false)
   const [saving, setSaving] = useState(false)
-  const scrollRef = useRef(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
   // Only follow the tail while the reader is already at the tail: forcing the bottom would
   // yank them away from the error they scrolled up to read, which is when logs get opened.
   const atBottomRef = useRef(true)
@@ -88,7 +95,7 @@ export default function LogViewer() {
       const savedTo = await ipc.logs.export(logsAsText(logs))
       if (savedTo) showStatus(`Logs guardados en ${savedTo}`, 'success')
     } catch (err) {
-      showStatus(err.message || 'No se han podido guardar los logs', 'error')
+      showStatus(errorMessage(err, 'No se han podido guardar los logs'), 'error')
     } finally {
       setSaving(false)
     }
