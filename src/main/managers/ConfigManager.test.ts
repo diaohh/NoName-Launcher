@@ -81,7 +81,7 @@ describe('ConfigManager', () => {
             expect(raw).not.toContain('mc-access-token')
             expect(raw).not.toContain('ms-access-token')
             expect(raw).not.toContain('ms-refresh-token')
-            expect(launcher.readConfig().authenticationDatabase[UUID].secrets).toEqual(expect.any(String))
+            expect(launcher.readConfig().authenticationDatabase[UUID]?.secrets).toEqual(expect.any(String))
 
             ConfigManager.config = ConfigManager.getDefaultConfig()
             await ConfigManager.load()

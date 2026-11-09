@@ -15,7 +15,7 @@ export const POLICIES: readonly FilePolicy[] = ['strict', 'seed', 'additive', 'i
 export function globToRegExp(pattern: string): RegExp {
     let re = ''
     for (let i = 0; i < pattern.length; i++) {
-        const c = pattern[i]
+        const c = pattern.charAt(i)
         if (c === '*') {
             if (pattern[i + 1] === '*') {
                 if (pattern[i + 2] === '/') {

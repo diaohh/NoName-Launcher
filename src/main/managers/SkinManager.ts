@@ -618,10 +618,10 @@ class SkinManager {
         }
 
         for (const file of [...files].sort()) {
-            const match = SKIN_FILE.exec(file)
-            if (!match || seen.has(match[1])) continue
-            seen.add(match[1])
-            skins.push({ id: match[1], name: 'Skin', variant: null, textureUrl: null, addedAt: Date.now() })
+            const id = SKIN_FILE.exec(file)?.[1]
+            if (!id || seen.has(id)) continue
+            seen.add(id)
+            skins.push({ id, name: 'Skin', variant: null, textureUrl: null, addedAt: Date.now() })
         }
 
         return { version: INDEX_VERSION, skins }

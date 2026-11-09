@@ -13,11 +13,12 @@ describe('launchPhases', () => {
   })
 
   it('covers 0-100 with contiguous slices, in launch order', () => {
-    expect(PHASE_RANGE[phases[0]][0]).toBe(0)
-    expect(PHASE_RANGE[phases[phases.length - 1]][1]).toBe(100)
+    const ranges = phases.map(type => PHASE_RANGE[type])
+    expect(ranges[0]?.[0]).toBe(0)
+    expect(ranges.at(-1)?.[1]).toBe(100)
 
-    for (let i = 1; i < phases.length; i++) {
-      expect(PHASE_RANGE[phases[i]][0], phases[i]).toBe(PHASE_RANGE[phases[i - 1]][1])
+    for (let i = 1; i < ranges.length; i++) {
+      expect(ranges[i]?.[0], phases[i]).toBe(ranges[i - 1]?.[1])
     }
   })
 

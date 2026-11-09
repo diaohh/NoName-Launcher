@@ -17,8 +17,10 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
 
-    // Every source is TypeScript (ADR-0015), and strict.
+    // Every source is TypeScript (ADR-0015), and strict. An index into an array or a record
+    // may be missing: a regex group, a split, a list read from a manifest.
     "strict": true,
+    "noUncheckedIndexedAccess": true,
     "noFallthroughCasesInSwitch": true
   },
   "include": ["src/renderer/src/**/*", "src/shared/**/*"]
