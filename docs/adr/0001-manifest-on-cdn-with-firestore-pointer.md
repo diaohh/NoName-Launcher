@@ -68,3 +68,18 @@ raised, and flipping the pointer back does not roll back, because the old files 
 decision itself stands; the fix is proposed in
 [ADR-0012](0012-content-addressed-pack-files.md), and `docs/manifest.md` ("Publishing and
 rollback") describes the current behaviour.
+
+## Addendum (2026-11-08)
+
+The consequence that kept `PackPolicy` **deliberately duplicated** no longer holds. Once the
+launcher was TypeScript, the module moved to `src/shared/PackPolicy.ts` and
+`tools/pack-publish/generate.mjs` imports that file directly through Node's native type
+stripping. The generator is still dependency-free and still needs no build step, which was
+the point of the duplication. The cost moved to two places:
+
+- **The generator needs Node 22.18+** (23.6+ on the odd line), where type stripping is on by
+  default. It checks `process.features.typescript` before importing and stops with a message.
+- **`PackPolicy.ts` has to stay loadable by plain node**: no runtime import (only
+  `import type`), erasable syntax only (`erasableSyntaxOnly` in `tsconfig.node.json`), no
+  build-time global. `src/shared/package.json` declares the folder ESM so Node does not warn
+  about the module type, and `PackPolicy.test.ts` loads the file on plain node.

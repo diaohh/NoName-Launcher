@@ -1,20 +1,13 @@
 import type { ManifestPointer } from '../../shared/modpack'
+import type { FilePolicy, PolicyRule } from '../../shared/PackPolicy'
 
 /**
  * The pack manifest published to the CDN (docs/manifest.md), read by `ManifestManager` and
  * checked by its `assertShape` before anything trusts these types.
  */
 
-export type { ManifestPointer }
-
-/** How a declared path behaves on the player's disk. See docs/manifest.md, "Policies". */
-export type FilePolicy = 'strict' | 'seed' | 'additive' | 'ignore'
-
-export interface PolicyRule {
-    /** Relative to the instance, POSIX separators. */
-    path: string
-    policy: FilePolicy
-}
+// The policy types live with the matching rules, which tools/pack-publish imports too.
+export type { FilePolicy, ManifestPointer, PolicyRule }
 
 export interface ManifestFile {
     /** Relative to the instance, POSIX separators, checked by `isSafeRelativePath`. */
