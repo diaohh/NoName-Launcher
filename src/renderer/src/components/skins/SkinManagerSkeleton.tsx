@@ -7,8 +7,15 @@ const PLACEHOLDER_CAPES = 2
 
 const MODEL_LABELS = ['Clasico', 'Delgado']
 
+interface SkinManagerSkeletonProps {
+  onCancel: () => void
+  failed?: boolean
+  /** Required when `failed`. */
+  onRetry?: () => void
+}
+
 /** A grey block where data will be; it pulses while loading and stays still once it failed. */
-function Placeholder({ pulse, className }) {
+function Placeholder({ pulse, className }: { pulse: boolean, className: string }) {
   return <span className={`block rounded bg-white/[0.07] ${pulse ? 'animate-pulse motion-reduce:animate-none' : ''} ${className}`} />
 }
 
@@ -20,12 +27,8 @@ function Placeholder({ pulse, className }) {
  * It is both HomeScreen's Suspense fallback, while the lazy chunk is read, and the screen's
  * own loading state, while main reads the profile — one continuous skeleton, not two. When the
  * load fails the blocks stop pulsing and the dialog offers to retry instead.
- *
- * @param {() => void} onCancel
- * @param {boolean} [failed]
- * @param {() => void} [onRetry] Required when `failed`.
  */
-export default function SkinManagerSkeleton({ onCancel, failed = false, onRetry }) {
+export default function SkinManagerSkeleton({ onCancel, failed = false, onRetry }: SkinManagerSkeletonProps) {
   const pulse = !failed
 
   return (

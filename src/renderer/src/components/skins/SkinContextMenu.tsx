@@ -5,23 +5,35 @@ const MENU_WIDTH = 190
 const MENU_HEIGHT = 84
 const EDGE = 8
 
+/** Where the right click happened, in viewport px. */
+export interface MenuPosition {
+  x: number
+  y: number
+}
+
+interface SkinContextMenuProps {
+  position: MenuPosition
+  canDelete: boolean
+  onRename: () => void
+  onDelete: () => void
+  onClose: () => void
+}
+
 /**
  * Right-click menu of a skin in the vault, on the same glass as the profile dropdown. Drawn
  * by the launcher rather than as a native menu, which would need a round trip through main
  * for two items.
- *
- * @param {{ x: number, y: number }} position Where the click happened, in viewport px.
  */
-export default function SkinContextMenu({ position, canDelete, onRename, onDelete, onClose }) {
-  const menuRef = useRef(null)
+export default function SkinContextMenu({ position, canDelete, onRename, onDelete, onClose }: SkinContextMenuProps) {
+  const menuRef = useRef<HTMLDivElement>(null)
 
   // The rest of the window is outside the React tree: a click anywhere else, Escape, or the
   // window losing focus closes the menu, the way a native one would.
   useEffect(() => {
-    const handlePointer = (e) => {
-      if (!menuRef.current?.contains(e.target)) onClose()
+    const handlePointer = (e: MouseEvent) => {
+      if (!menuRef.current?.contains(e.target as Node)) onClose()
     }
-    const handleKey = (e) => {
+    const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
     }
 

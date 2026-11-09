@@ -1,3 +1,5 @@
+import type { HTMLAttributes, ReactNode } from 'react'
+
 /**
  * The frame of "Gestor de Skins", shared by the screen and its loading skeleton so the two
  * cannot drift apart: the skeleton is this same frame with placeholders in the slots.
@@ -21,21 +23,31 @@ function TitleSeparator() {
   return <span aria-hidden="true" className="text-white/20">|</span>
 }
 
-/**
- * @param {React.ReactNode} viewer        The 3D player (or its placeholder).
- * @param {React.ReactNode} model         The model radio buttons.
- * @param {boolean} modelDisabled
- * @param {React.ReactNode} importControl Next to the "Skin" title.
- * @param {object} vaultProps             Spread on the vault box (role, keyboard handler).
- * @param {React.ReactNode} vault         The skin grid.
- * @param {React.ReactNode} elytraControl Next to the "Capa" title.
- * @param {React.ReactNode} capes         The cape row.
- * @param {React.ReactNode} footer        Cancelar and Guardar.
- * @param {React.ReactNode} children      Overlays on top of the whole screen.
- */
+interface SkinManagerLayoutProps {
+  /** The 3D player (or its placeholder). */
+  viewer: ReactNode
+  /** The model radio buttons. */
+  model: ReactNode
+  modelDisabled: boolean
+  /** Next to the "Skin" title. */
+  importControl: ReactNode
+  /** Spread on the vault box (role, keyboard handler). */
+  vaultProps: HTMLAttributes<HTMLDivElement>
+  /** The skin grid. */
+  vault: ReactNode
+  /** Next to the "Capa" title. */
+  elytraControl: ReactNode
+  /** The cape row. */
+  capes: ReactNode
+  /** Cancelar and Guardar. */
+  footer: ReactNode
+  /** Overlays on top of the whole screen. */
+  children?: ReactNode
+}
+
 export default function SkinManagerLayout({
   viewer, model, modelDisabled, importControl, vaultProps, vault, elytraControl, capes, footer, children
-}) {
+}: SkinManagerLayoutProps) {
   return (
     <div className="relative w-full h-full flex flex-col overflow-hidden bg-[#1a1a1e] font-inter text-white">
       {/* The margins grow with the window, so a maximised launcher does not leave everything

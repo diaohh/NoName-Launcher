@@ -1,5 +1,6 @@
-import { useRef } from 'react'
-import { MAX_SKIN_NAME_LENGTH } from '../../../../shared/skins'
+import { useRef, type ReactNode } from 'react'
+import { MAX_SKIN_NAME_LENGTH, type SkinEntry } from '../../../../shared/skins'
+import type { MenuPosition } from './SkinContextMenu'
 
 export const CARD = 'relative shrink-0 flex flex-col items-center gap-1.5 rounded-lg border p-2 transition-colors duration-200 cursor-pointer'
 export const IDLE = 'border-white/10 bg-white/[0.03] hover:bg-white/[0.07] hover:border-white/20'
@@ -19,7 +20,13 @@ function InUseBadge() {
  * and so does leaving it empty. Committing happens in `onBlur` only, so Enter (which blurs)
  * and the click elsewhere cannot both save it.
  */
-function NameInput({ initial, onCommit, onCancel }) {
+interface NameInputProps {
+  initial: string
+  onCommit: (name: string) => void
+  onCancel: () => void
+}
+
+function NameInput({ initial, onCommit, onCancel }: NameInputProps) {
   const cancelled = useRef(false)
 
   return (
@@ -53,7 +60,20 @@ function NameInput({ initial, onCommit, onCancel }) {
  * One skin of the vault: its front view and its name. Left click picks it, right click opens
  * the menu with rename and delete.
  */
-export function SkinCard({ skin, thumb, selected, inUse, renaming, onSelect, onContextMenu, onRename, onRenameCancel }) {
+interface SkinCardProps {
+  skin: SkinEntry
+  /** The front view as a data URL; undefined while there is none to show. */
+  thumb: string | undefined
+  selected: boolean
+  inUse: boolean
+  renaming: boolean
+  onSelect: () => void
+  onContextMenu: (position: MenuPosition) => void
+  onRename: (name: string) => void
+  onRenameCancel: () => void
+}
+
+export function SkinCard({ skin, thumb, selected, inUse, renaming, onSelect, onContextMenu, onRename, onRenameCancel }: SkinCardProps) {
   return (
     <div
       role="option"
@@ -91,7 +111,15 @@ export function SkinCard({ skin, thumb, selected, inUse, renaming, onSelect, onC
  * One option of the cape row. `preview` is the box drawn above the name: the cape's outside,
  * or the empty grey one of "Sin capa".
  */
-export function CapeCard({ name, preview, selected, inUse, onSelect }) {
+interface CapeCardProps {
+  name: string
+  preview: ReactNode
+  selected: boolean
+  inUse: boolean
+  onSelect: () => void
+}
+
+export function CapeCard({ name, preview, selected, inUse, onSelect }: CapeCardProps) {
   return (
     <button
       type="button"

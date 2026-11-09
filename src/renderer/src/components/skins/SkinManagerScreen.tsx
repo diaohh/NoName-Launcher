@@ -1,27 +1,41 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type KeyboardEvent } from 'react'
 import { ipc } from '../../services/ipcClient'
+import { errorMessage, isTerminalAuthError } from '../../services/errors'
 import { capeFrontStyle, describeSkin } from '../../services/skinTextures'
 import { useAuth } from '../../contexts/AuthContext'
 import { useStatus } from '../../contexts/StatusContext'
-import { isTerminalAuthCode } from '../../../../shared/errorCodes'
+import type { SkinState, SkinVariant, SkinWithTexture } from '../../../../shared/skins'
 import SkinViewer from './SkinViewer'
-import SkinContextMenu from './SkinContextMenu'
+import SkinContextMenu, { type MenuPosition } from './SkinContextMenu'
 import { CapeCard, SkinCard } from './SkinCard'
 import SkinManagerLayout, { CANCEL_BUTTON, SAVE_BUTTON, SECONDARY_BUTTON, VAULT_GRID } from './SkinManagerLayout'
 import SkinManagerSkeleton from './SkinManagerSkeleton'
 import Spinner from '../common/Spinner'
 
-const MODELS = [
+const MODELS: readonly { value: SkinVariant, label: string }[] = [
   { value: 'classic', label: 'Clasico' },
   { value: 'slim', label: 'Delgado' }
 ]
+
+/** A skin of the vault with what the grid adds to it. */
+interface PreparedSkin extends SkinWithTexture {
+  /** The model its arms were drawn for. */
+  detected: SkinVariant
+  /** A front view per model; null when the browser could not decode the texture. */
+  thumbs: Record<SkinVariant, string> | null
+}
+
+/** The profile and the vault as main sent them, with the skins prepared for the grid. */
+interface SkinVault extends Omit<SkinState, 'skins'> {
+  skins: PreparedSkin[]
+}
 
 /**
  * Adds what the grid needs to a skin sent by main: its front views and the model its arms
  * were drawn for. A texture the browser cannot decode keeps its place in the vault, without
  * a preview, rather than taking the whole screen down.
  */
-async function prepareSkin(skin) {
+async function prepareSkin(skin: SkinWithTexture): Promise<PreparedSkin> {
   try {
     return { ...skin, ...(await describeSkin(skin.texture)) }
   } catch (err) {
@@ -30,12 +44,12 @@ async function prepareSkin(skin) {
   }
 }
 
-async function loadSkinState() {
+async function loadSkinState(): Promise<SkinVault> {
   const state = await ipc.skins.getState()
   return { ...state, skins: await Promise.all(state.skins.map(prepareSkin)) }
 }
 
-function activeTexture(vault) {
+function activeTexture(vault: SkinVault): string | null {
   return vault.skins.find(skin => skin.id === vault.activeSkinId)?.texture ?? null
 }
 
@@ -45,31 +59,32 @@ function activeTexture(vault) {
  * explorer, and "Cancelar" does not undo them. The skin, its model and the cape are only a
  * choice until "Guardar" sends them to Mojang.
  */
-export default function SkinManagerScreen({ onBack }) {
+export default function SkinManagerScreen({ onBack }: { onBack: () => void }) {
   const { logout, updateSkinTexture } = useAuth()
   const { showStatus } = useStatus()
 
-  const [vault, setVault] = useState(null)
+  const [vault, setVault] = useState<SkinVault | null>(null)
   const [failed, setFailed] = useState(false)
   // The player's pending choice; `undefined` means "what the account is wearing now". Kept as
-  // overrides on top of the loaded state, so a reload after a failed save keeps it.
-  const [chosenSkinId, setChosenSkinId] = useState(undefined)
-  const [chosenCapeId, setChosenCapeId] = useState(undefined)
-  const [variants, setVariants] = useState({})
+  // overrides on top of the loaded state, so a reload after a failed save keeps it. A cape id
+  // of null is a choice too: no cape.
+  const [chosenSkinId, setChosenSkinId] = useState<string | undefined>(undefined)
+  const [chosenCapeId, setChosenCapeId] = useState<string | null | undefined>(undefined)
+  const [variants, setVariants] = useState<Record<string, SkinVariant>>({})
   const [elytra, setElytra] = useState(false)
   const [showBack, setShowBack] = useState(false)
   const [saving, setSaving] = useState(false)
   const [importing, setImporting] = useState(false)
-  const [renamingId, setRenamingId] = useState(null)
-  const [menu, setMenu] = useState(null)
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [menu, setMenu] = useState<{ id: string, position: MenuPosition } | null>(null)
 
   /** Says what failed, and leaves when the session is gone for good, as JUGAR does. */
-  const reportFailure = useCallback(async (err, fallback) => {
-    showStatus(err.message || fallback, 'error')
-    if (isTerminalAuthCode(err.code)) await logout()
+  const reportFailure = useCallback(async (err: unknown, fallback: string) => {
+    showStatus(errorMessage(err, fallback), 'error')
+    if (isTerminalAuthError(err)) await logout()
   }, [showStatus, logout])
 
-  const reportViewerError = useCallback((err) => {
+  const reportViewerError = useCallback((err: unknown) => {
     console.error('The skin viewer could not load a texture:', err)
     showStatus('No se ha podido mostrar esa textura.', 'error')
   }, [showStatus])
@@ -113,23 +128,23 @@ export default function SkinManagerScreen({ onBack }) {
   const skin = vault.skins.find(s => s.id === chosenSkinId)
     ?? vault.skins.find(s => s.id === vault.activeSkinId)
     ?? null
-  const variantOf = (s) => variants[s.id] ?? s.variant ?? s.detected
+  const variantOf = (s: PreparedSkin) => variants[s.id] ?? s.variant ?? s.detected
   const variant = skin ? variantOf(skin) : vault.activeVariant
   const capeId = chosenCapeId !== undefined ? chosenCapeId : vault.activeCapeId
   const cape = vault.capes.find(c => c.id === capeId) ?? null
   const dirty = (skin != null && (skin.id !== vault.activeSkinId || variant !== vault.activeVariant))
     || capeId !== vault.activeCapeId
 
-  const setSkinName = (id, name) => {
-    setVault(v => ({ ...v, skins: v.skins.map(s => (s.id === id ? { ...s, name } : s)) }))
+  const setSkinName = (id: string, name: string) => {
+    setVault(v => v && { ...v, skins: v.skins.map(s => (s.id === id ? { ...s, name } : s)) })
   }
 
-  const selectSkin = (id) => {
+  const selectSkin = (id: string) => {
     setChosenSkinId(id)
     setShowBack(false)
   }
 
-  const selectCape = (id) => {
+  const selectCape = (id: string | null) => {
     setChosenCapeId(id)
     setShowBack(true)
   }
@@ -141,17 +156,17 @@ export default function SkinManagerScreen({ onBack }) {
       if (!result) return
 
       const prepared = await prepareSkin(result.skin)
-      setVault(v => (v.skins.some(s => s.id === prepared.id) ? v : { ...v, skins: [...v.skins, prepared] }))
+      setVault(v => v && (v.skins.some(s => s.id === prepared.id) ? v : { ...v, skins: [...v.skins, prepared] }))
       selectSkin(prepared.id)
       if (result.duplicate) showStatus('Esa skin ya estaba guardada.', 'info')
     } catch (err) {
-      showStatus(err.message || 'No se ha podido importar la skin', 'error')
+      showStatus(errorMessage(err, 'No se ha podido importar la skin'), 'error')
     } finally {
       setImporting(false)
     }
   }
 
-  const renameSkin = async (id, name) => {
+  const renameSkin = async (id: string, name: string) => {
     setRenamingId(null)
     const previous = vault.skins.find(s => s.id === id)?.name
     setSkinName(id, name)
@@ -160,26 +175,26 @@ export default function SkinManagerScreen({ onBack }) {
       const saved = await ipc.skins.rename(id, name)
       setSkinName(id, saved.name)
     } catch (err) {
-      setSkinName(id, previous)
-      showStatus(err.message || 'No se ha podido renombrar la skin', 'error')
+      if (previous !== undefined) setSkinName(id, previous)
+      showStatus(errorMessage(err, 'No se ha podido renombrar la skin'), 'error')
     }
   }
 
-  const deleteSkin = async (id) => {
+  const deleteSkin = async (id: string) => {
     try {
       await ipc.skins.delete(id)
       // A chosen skin that is gone falls back to the one being worn on its own: `skin` above
       // only honours a choice that is still in the vault.
-      setVault(v => ({ ...v, skins: v.skins.filter(s => s.id !== id) }))
+      setVault(v => v && { ...v, skins: v.skins.filter(s => s.id !== id) })
       showStatus('Skin enviada a la papelera.', 'info')
     } catch (err) {
-      showStatus(err.message || 'No se ha podido borrar la skin', 'error')
+      showStatus(errorMessage(err, 'No se ha podido borrar la skin'), 'error')
     }
   }
 
   // F2 and Supr act on the selected skin, as in a file explorer. The name input stops its own
   // keys, so typing in it never reaches here.
-  const handleVaultKeys = (e) => {
+  const handleVaultKeys = (e: KeyboardEvent<HTMLDivElement>) => {
     if (!skin) return
     if (e.key === 'F2') {
       e.preventDefault()
@@ -205,7 +220,7 @@ export default function SkinManagerScreen({ onBack }) {
     } catch (err) {
       setSaving(false)
       await reportFailure(err, 'No se han podido guardar los cambios')
-      if (isTerminalAuthCode(err.code)) return
+      if (isTerminalAuthError(err)) return
 
       // Part of it may have stuck — the skin, before the cape was refused. Reading the
       // profile again shows what did; the player's choice stays on top of it.
@@ -241,7 +256,7 @@ export default function SkinManagerScreen({ onBack }) {
             name="skin-model"
             value={model.value}
             checked={variant === model.value}
-            onChange={() => setVariants(v => ({ ...v, [skin.id]: model.value }))}
+            onChange={() => { if (skin) setVariants(v => ({ ...v, [skin.id]: model.value })) }}
             className="w-4 h-4 accent-accent-orange cursor-pointer"
           />
           {model.label}
@@ -332,7 +347,7 @@ export default function SkinManagerScreen({ onBack }) {
         </>
       }
     >
-      {menuSkin && (
+      {menu && menuSkin && (
         <SkinContextMenu
           position={menu.position}
           canDelete={menuSkin.id !== vault.activeSkinId}

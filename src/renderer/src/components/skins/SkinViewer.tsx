@@ -1,6 +1,20 @@
 import { useEffect, useRef } from 'react'
 import { IdleAnimation, SkinViewer as Viewer } from 'skinview3d'
 import { loadImage } from '../../services/skinTextures'
+import type { SkinVariant } from '../../../../shared/skins'
+
+interface SkinViewerProps {
+  /** Skin texture as a data URL. */
+  skin: string | null
+  variant: SkinVariant
+  /** Cape texture as a data URL; null shows no cape. */
+  cape: string | null
+  /** Show the cape texture as an elytra instead. */
+  elytra: boolean
+  /** Turn the player around, so a cape is seen. */
+  showBack: boolean
+  onError?: (err: unknown) => void
+}
 
 /**
  * The 3D player, through skinview3d: drag to turn it, wheel to zoom.
@@ -9,17 +23,10 @@ import { loadImage } from '../../services/skinTextures'
  * one follows the size of the box, and one per texture loads it. Textures are decoded here
  * and handed over synchronously, guarded by `ignore`, so a quick change of selection can
  * never leave an older texture painted over the newer one.
- *
- * @param {string|null} skin    Skin texture as a data URL.
- * @param {'classic'|'slim'} variant
- * @param {string|null} cape    Cape texture as a data URL; null shows no cape.
- * @param {boolean} elytra      Show the cape texture as an elytra instead.
- * @param {boolean} showBack    Turn the player around, so a cape is seen.
- * @param {(err: Error) => void} onError
  */
-export default function SkinViewer({ skin, variant, cape, elytra, showBack, onError }) {
-  const boxRef = useRef(null)
-  const viewerRef = useRef(null)
+export default function SkinViewer({ skin, variant, cape, elytra, showBack, onError }: SkinViewerProps) {
+  const boxRef = useRef<HTMLDivElement>(null)
+  const viewerRef = useRef<Viewer | null>(null)
 
   // Each viewer gets a canvas of its own, created here and removed on cleanup, and its WebGL
   // context is released on the spot: skinview3d's dispose() leaves it alive, and opening the
@@ -27,6 +34,7 @@ export default function SkinViewer({ skin, variant, cape, elytra, showBack, onEr
   // until Chromium starts dropping the oldest.
   useEffect(() => {
     const box = boxRef.current
+    if (!box) return
     const viewer = new Viewer({
       width: box.clientWidth,
       height: box.clientHeight
@@ -41,6 +49,7 @@ export default function SkinViewer({ skin, variant, cape, elytra, showBack, onEr
     viewerRef.current = viewer
 
     const observer = new ResizeObserver(([entry]) => {
+      if (!entry) return
       const { width, height } = entry.contentRect
       if (width > 0 && height > 0) viewer.setSize(width, height)
     })
